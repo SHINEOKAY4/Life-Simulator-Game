@@ -78,7 +78,7 @@ function PlotSelector.Init()
 	SetPlayerMovement(false)
 	MoveCamera()
 	MainFrame.Visible = true
-
+	--#TODO: Throttle or debounce input to prevent multiple rapid inputs
 	table.insert(
 		Connections,
 		PlotSelectorContext.MoveNextAction.Pressed:Connect(function()

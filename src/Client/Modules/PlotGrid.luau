@@ -16,51 +16,12 @@ local accumulatedTime = 0
 
 PlotGrid.Visible = false
 
-local function IsWithinPlotArea(player: Player): boolean
-	local character = player.Character
-	if not character then
-		return false
-	end
-
-	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart
-	if not humanoidRootPart then
-		return false
-	end
-
-	local plotIndex = player:GetAttribute("OwnedPlotIndex") :: number
-	local plotModel = PlotFinder.FindPlot(plotIndex)
-
-	if not plotModel then
-		return false
-	end
-
-	local surface = plotModel:FindFirstChild("Surface") :: BasePart
-	if not surface then
-		return false
-	end
-
-	local verticalTolerance = 4 -- studs around the top face
-
-	local localPoint: Vector3 = surface.CFrame:PointToObjectSpace(humanoidRootPart.Position)
-	local halfSize: Vector3 = surface.Size * 0.5
-
-	-- Optionally add offset to go beyond the surface edges
-	local offset = 0
-	local withinX = math.abs(localPoint.X) <= halfSize.X + offset
-	local withinZ = math.abs(localPoint.Z) <= halfSize.Z + offset
-
-	local topY = halfSize.Y
-	local withinVertical = math.abs(localPoint.Y - topY) <= verticalTolerance
-
-	return withinX and withinZ and withinVertical
-end
-
 local function OnHeartbeat(deltaTime)
 	accumulatedTime += deltaTime
 
 	if accumulatedTime >= 0.5 then
 		accumulatedTime = 0
-		if PlotGrid.Visible and not IsWithinPlotArea(Player) then
+		if PlotGrid.Visible and not PlotFinder.IsWithinBounds(Player) then
 			PlotGrid.Visible = false
 			PlotGrid.Hide()
 		end
@@ -72,7 +33,7 @@ function PlotGrid.Init()
 	PlotContext.ToggleGridAction.Pressed:Connect(function()
 		print("PlotContext button pressed.")
 
-		if IsWithinPlotArea(Player) then
+		if PlotFinder.IsWithinBounds(Player) then
 			PlotGrid.Visible = not PlotGrid.Visible
 
 			if PlotGrid.Visible then
@@ -80,11 +41,6 @@ function PlotGrid.Init()
 				Connection = Runservice.Heartbeat:Connect(OnHeartbeat)
 			else
 				PlotGrid.Hide()
-
-				if Connection then
-					Connection:Disconnect()
-					Connection = nil
-				end
 			end
 		end
 	end)
@@ -108,6 +64,12 @@ end
 
 function PlotGrid.Hide()
 	print("Hiding plot grid.")
+
+	if Connection then
+		Connection:Disconnect()
+		Connection = nil
+	end
+
 	local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
 	local surface = plotModel and plotModel:FindFirstChild("Surface") :: BasePart
