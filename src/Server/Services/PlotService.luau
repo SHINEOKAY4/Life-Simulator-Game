@@ -30,7 +30,13 @@ function PlotService.Init()
 
 	--#TODO: implement client side logic for unlocking chunks
 	Packets.UnlockChunkRequest.OnServerInvoke = function(player, chunkX, chunkZ)
-		return PlotService.UnlockArea(player, chunkX, chunkZ)
+		local success, message = PlotService.UnlockArea(player, chunkX, chunkZ)
+		if success then
+			local runtimeState = PlayerRuntime[player.UserId]
+			local index = runtimeState:ChunkIndex(chunkX, chunkZ)
+			Packets.PlotStateUnlockDelta:FireClient(player, { index })
+		end
+		return success, message
 	end
 end
 
@@ -69,14 +75,24 @@ function PlotService.Load(player: Player, plotModel: Model)
 
 	-- If brand new: create default starter area once (persist + runtime)
 	if #data.UnlockedChunks == 0 then
-		data.UnlockedChunks[1] = { cx = 1, cz = 1 } -- starter once
+		data.UnlockedChunks[1] = { cx = 1, cz = 3 }
 	end
 
-	local chunkSizeInCells = 8
+	local chunkSizeInCells = 5
 	local runtimeState = PlotState.new(grid, chunkSizeInCells, data)
 	runtimeState:HydrateFromSave()
 
 	PlayerRuntime[userId] = runtimeState
+
+	-- Possibly add a revision to discard stale client state in future (if problematic)
+
+	local chunkInfo = {
+		ChunkSizeInCells = chunkSizeInCells,
+		ChunkColumns = runtimeState.ChunkColumns,
+		ChunkRows = runtimeState.ChunkRows,
+	}
+	print(runtimeState.ChunkUnlocked)
+	Packets.PlotStateSync:FireClient(player, chunkInfo, runtimeState.ChunkUnlocked, data.PlacedObjects)
 end
 
 function PlotService.Unclaim(player: Player)
@@ -108,9 +124,10 @@ function PlotService.UnlockArea(player: Player, chunkX: number, chunkZ: number):
 	end
 
 	if runtimeState:IsChunkUnlocked(chunkX, chunkZ) then
-		return true, "Already unlocked"
+		return false, "Already unlocked"
 	end
 
+	-- Potentially move adjacent validation inside the plotstate class
 	local isAdjacentToUnlocked = false
 	local neighborOffsets = {
 		{ dx = 1, dz = 0 },

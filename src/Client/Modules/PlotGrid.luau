@@ -96,15 +96,14 @@ function PlotGrid.Show()
 	local plotModel = PlotFinder.FindPlot(plotIndex)
 	local surface = plotModel and plotModel:FindFirstChild("Surface") :: BasePart
 
-	local gridVisual = surface and surface:FindFirstChild("GridVisual") :: SurfaceGui
-	local LinesFrame = gridVisual and gridVisual:FindFirstChild("LinesFrame") :: Frame
+	local gridVisual = surface and surface:FindFirstChild("GridVisual") :: Texture
 
 	if not gridVisual then
 		warn("GridVisual not found.")
 		return
 	end
 
-	LinesFrame.Visible = true
+	gridVisual.Transparency = 0
 end
 
 function PlotGrid.Hide()
@@ -113,15 +112,14 @@ function PlotGrid.Hide()
 	local plotModel = PlotFinder.FindPlot(plotIndex)
 	local surface = plotModel and plotModel:FindFirstChild("Surface") :: BasePart
 
-	local gridVisual = surface and surface:FindFirstChild("GridVisual") :: SurfaceGui
-	local LinesFrame = gridVisual and gridVisual:FindFirstChild("LinesFrame") :: Frame
+	local gridVisual = surface and surface:FindFirstChild("GridVisual") :: Texture
 
 	if not gridVisual then
 		warn("GridVisual not found.")
 		return
 	end
 
-	LinesFrame.Visible = false
+	gridVisual.Transparency = 1
 end
 
 return PlotGrid

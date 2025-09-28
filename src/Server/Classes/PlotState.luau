@@ -13,7 +13,6 @@ function PlotState.new(grid, chunkSizeInCells, save)
 	self.ChunkSizeInCells = chunkSizeInCells
 	self.ChunkColumns = chunkColumns
 	self.ChunkRows = chunkRows
-
 	-- runtime state (does not persist) simply for faster lookups to avoid table scans
 	self.ChunkUnlocked = table.create(chunkColumns * chunkRows, false)
 	self.CellFree = table.create(grid:CellCount(), true)
