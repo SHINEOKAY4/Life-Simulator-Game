@@ -1,5 +1,5 @@
 --!strict
--- ReplicatedStorage/Shared/Utilities/PlotFinder.luau
+-- ReplicatedStorage/Shared/Utilities/PlotFinder.lua
 -- Finds and manages plot models tagged with "Plot".
 
 local CollectionService = game:GetService("CollectionService")

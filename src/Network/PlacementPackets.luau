@@ -1,5 +1,5 @@
 --!strict
--- ReplicatedStorage/Network/PlacementPackets.luau
+-- ReplicatedStorage/Network/PlacementPackets.lua
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Packet = require(ReplicatedStorage.Packages.Packet)
 

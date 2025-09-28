@@ -1,5 +1,5 @@
 --!strict
--- ServerScriptService/Services/PlotService.luau
+-- ServerScriptService/Services/PlotService.lua
 
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,13 +7,32 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
-local GridClass = require(ReplicatedStorage.Shared.Utilities.Grid)
+local GridClass = require(ServerScriptService.Server.Classes.Grid)
 local PlotState = require(ServerScriptService.Server.Classes.PlotState)
 
 local PlotService = {}
 local PlotModels: { [number]: Model } = PlotFinder.GetOrderedPlots()
 local PlotGrids = {} -- [plotIndex] = Grid
 local PlayerRuntime = {} -- [userId] = PlotState
+
+local function InitializePlayerPlot(player: Player, plotModel: Model)
+	local coversFolder = plotModel:FindFirstChild("Covers") :: Folder
+	local runtimeState = PlayerRuntime[player.UserId] -- PlotState
+	if not runtimeState then
+		return
+	end
+
+	for _, cover in ipairs(coversFolder:GetChildren()) do
+		if cover:IsA("BasePart") then
+			local cx = cover:GetAttribute("ChunkX") :: number?
+			local cz = cover:GetAttribute("ChunkZ") :: number?
+			if cx and cz and runtimeState:IsChunkUnlocked(cx, cz) then
+				cover.Transparency = 1
+				cover.CanQuery = false
+			end
+		end
+	end
+end
 
 function PlotService.Init()
 	print("PlotService initialized")
@@ -30,13 +49,7 @@ function PlotService.Init()
 
 	--#TODO: implement client side logic for unlocking chunks
 	Packets.UnlockChunkRequest.OnServerInvoke = function(player, chunkX, chunkZ)
-		local success, message = PlotService.UnlockArea(player, chunkX, chunkZ)
-		if success then
-			local runtimeState = PlayerRuntime[player.UserId]
-			local index = runtimeState:ChunkIndex(chunkX, chunkZ)
-			Packets.PlotStateUnlockDelta:FireClient(player, { index })
-		end
-		return success, message
+		return PlotService.UnlockArea(player, chunkX, chunkZ)
 	end
 end
 
@@ -59,8 +72,8 @@ function PlotService.Claim(player: Player, plotIndex: number)
 	plotModel:SetAttribute("Claimed", true)
 	plotModel:SetAttribute("Owner", player.UserId)
 
-	PlotService.Load(player, plotModel)
-
+	PlotService.Load(player, plotModel) -- Order matters: must load before initializing plot
+	InitializePlayerPlot(player, plotModel)
 	return true, "Plot claimed successfully"
 end
 
@@ -91,7 +104,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 		ChunkColumns = runtimeState.ChunkColumns,
 		ChunkRows = runtimeState.ChunkRows,
 	}
-	print(runtimeState.ChunkUnlocked)
+
 	Packets.PlotStateSync:FireClient(player, chunkInfo, runtimeState.ChunkUnlocked, data.PlacedObjects)
 end
 
@@ -127,30 +140,10 @@ function PlotService.UnlockArea(player: Player, chunkX: number, chunkZ: number):
 		return false, "Already unlocked"
 	end
 
-	-- Potentially move adjacent validation inside the plotstate class
-	local isAdjacentToUnlocked = false
-	local neighborOffsets = {
-		{ dx = 1, dz = 0 },
-		{ dx = -1, dz = 0 },
-		{ dx = 0, dz = 1 },
-		{ dx = 0, dz = -1 },
-	}
-
-	for i = 1, #neighborOffsets do
-		local neighborChunkX = chunkX + neighborOffsets[i].dx
-		local neighborChunkZ = chunkZ + neighborOffsets[i].dz
-		if
-			runtimeState:IsChunkInBounds(neighborChunkX, neighborChunkZ)
-			and runtimeState:IsChunkUnlocked(neighborChunkX, neighborChunkZ)
-		then
-			isAdjacentToUnlocked = true
-			break
-		end
-	end
-
-	if not isAdjacentToUnlocked then
+	if not runtimeState:HasAdjacentUnlocked(chunkX, chunkZ) then
 		return false, "Chunk not adjacent to unlocked area"
 	end
+
 	--#TODO: integrate cost check (currency / cash module)
 
 	local success = runtimeState:UnlockChunk(chunkX, chunkZ)
@@ -158,6 +151,7 @@ function PlotService.UnlockArea(player: Player, chunkX: number, chunkZ: number):
 		return false, "Already unlocked"
 	end
 
+	Packets.PlotStateUnlockDelta:FireClient(player, { runtimeState:ChunkIndex(chunkX, chunkZ) })
 	return true, "Chunk unlocked"
 end
 

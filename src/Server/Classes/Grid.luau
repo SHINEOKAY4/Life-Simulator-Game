@@ -1,5 +1,5 @@
 --!strict
--- ReplicatedStorage/Shared/Utilities/Grid.luau
+-- ServerScriptService/Server/Classes/Grid.lua
 -- Grid and chunk math aligned to a rectangular Plot (BasePart).
 -- 1-based indices. Rotation-safe via CFrame transforms.
 

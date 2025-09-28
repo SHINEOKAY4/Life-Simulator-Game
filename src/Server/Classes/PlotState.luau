@@ -1,5 +1,5 @@
 --!strict
--- ServerScriptService/Server/Classes/PlotState.luau
+-- ServerScriptService/Server/Classes/PlotState.lua
 
 local PlotState = {}
 PlotState.__index = PlotState
@@ -27,6 +27,10 @@ end
 
 function PlotState:IsChunkUnlocked(chunkX: number, chunkZ: number): boolean
 	return self.ChunkUnlocked[self:ChunkIndex(chunkX, chunkZ)] == true
+end
+
+function PlotState:IsChunkInBounds(chunkX: number, chunkZ: number): boolean
+	return chunkX >= 1 and chunkX <= self.ChunkColumns and chunkZ >= 1 and chunkZ <= self.ChunkRows
 end
 
 function PlotState:UnlockChunk(chunkX: number, chunkZ: number) -- Idempotent write-through (used during gameplay)
@@ -59,14 +63,11 @@ function PlotState:HydrateFromSave()
 	end
 end
 
-function PlotState:IsChunkInBounds(chunkX: number, chunkZ: number): boolean
-	return chunkX >= 1 and chunkX <= self.ChunkColumns and chunkZ >= 1 and chunkZ <= self.ChunkRows
-end
-
 function PlotState:IsCellBuildable(cellX: number, cellZ: number): boolean
 	if not self.Grid:IsCellInBounds(cellX, cellZ) then
 		return false
 	end
+
 	local chunkX, chunkZ = self.Grid:CellToChunk(cellX, cellZ, self.ChunkSizeInCells)
 
 	if not self:IsChunkUnlocked(chunkX, chunkZ) then
@@ -74,6 +75,22 @@ function PlotState:IsCellBuildable(cellX: number, cellZ: number): boolean
 	end
 
 	return self.CellFree[self.Grid:CellToIndex(cellX, cellZ)] == true
+end
+
+function PlotState:HasAdjacentUnlocked(chunkX: number, chunkZ: number): boolean
+	if chunkX > 1 and self:IsChunkUnlocked(chunkX - 1, chunkZ) then
+		return true
+	end
+	if chunkX < self.ChunkColumns and self:IsChunkUnlocked(chunkX + 1, chunkZ) then
+		return true
+	end
+	if chunkZ > 1 and self:IsChunkUnlocked(chunkX, chunkZ - 1) then
+		return true
+	end
+	if chunkZ < self.ChunkRows and self:IsChunkUnlocked(chunkX, chunkZ + 1) then
+		return true
+	end
+	return false
 end
 
 function PlotState:CanPlace(

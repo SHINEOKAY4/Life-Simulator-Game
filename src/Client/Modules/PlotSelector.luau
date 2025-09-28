@@ -1,5 +1,5 @@
 --!strict
--- StarterPlayer/StarterPlayerScripts/Client/Modules/PlotSelector.luau
+-- StarterPlayer/StarterPlayerScripts/Client/Modules/PlotSelector.lua
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")

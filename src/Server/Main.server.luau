@@ -1,5 +1,5 @@
 --!strict
--- ServerScriptService/Server/Main.server.luau
+-- ServerScriptService/Server/Main.server.lua
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 

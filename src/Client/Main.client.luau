@@ -1,5 +1,5 @@
 --!strict
--- StarterPlayer/StarterPlayerScripts/Client/Main.client.luau
+-- StarterPlayer/StarterPlayerScripts/Client/Main.client.lua
 local ModulesFolder = script.Parent.Modules
 
 local PlotSelector = require(ModulesFolder.PlotSelector)

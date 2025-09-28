@@ -1,5 +1,5 @@
 --!strict
--- StarterPlayer/StarterPlayerScripts/Client/Modules/PlotGrid.luau
+-- StarterPlayer/StarterPlayerScripts/Client/Modules/PlotGrid.lua
 local Runservice = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
