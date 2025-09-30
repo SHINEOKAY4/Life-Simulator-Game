@@ -5,6 +5,7 @@ local Packet = require(ReplicatedStorage.Packages.Packet)
 
 local PlacementPackets = {}
 
+-- [[ Plot Packets ]]
 PlacementPackets.ClaimRequest = Packet("ClaimRequest", Packet.NumberU8):Response(Packet.Boolean8, Packet.StringLong)
 
 PlacementPackets.UnlockChunkRequest =
@@ -27,4 +28,22 @@ PlacementPackets.PlotStateSync = Packet("PlotStateSync", {
 	},
 })
 
+-- [[ Build Packets ]]
+
+PlacementPackets.PlaceRequest = Packet("PlaceRequest", {
+	ItemId = Packet.String,
+	CellX = Packet.NumberU8,
+	CellZ = Packet.NumberU8,
+	Facing = Packet.String,
+}):Response(Packet.Boolean8, Packet.StringLong)
+
+PlacementPackets.PlacementDelta = Packet("PlacementDelta", {
+	Action = Packet.String,
+	Item = {
+		ItemId = Packet.String,
+		CellX = Packet.NumberU8,
+		CellZ = Packet.NumberU8,
+		Facing = Packet.String,
+	},
+})
 return PlacementPackets

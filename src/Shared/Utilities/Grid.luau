@@ -1,5 +1,5 @@
 --!strict
--- ServerScriptService/Server/Classes/Grid.lua
+-- ReplicatedStorage/Shared/Utilities/Grid.lua
 -- Grid and chunk math aligned to a rectangular Plot (BasePart).
 -- 1-based indices. Rotation-safe via CFrame transforms.
 
@@ -412,4 +412,27 @@ function Grid:FootprintChunkRange(
 	local maxChunkX, maxChunkZ = self:CellToChunk(maxCellX, maxCellZ, chunkSizeInCells)
 	return minChunkX, minChunkZ, maxChunkX, maxChunkZ
 end
+
+function Grid:CellToWorldEdgeCenterCFrame(cellX: number, cellZ: number, facing: Facing, heightOffset: number?): CFrame
+	self = self :: GridInstance
+	local half = self.CellSize * 0.5
+	local y = heightOffset or 0
+	local offsetX = (cellX - 0.5) * self.CellSize
+	local offsetZ = (cellZ - 0.5) * self.CellSize
+
+	if facing == "North" then
+		-- top edge of the cell
+		return self.OriginTopCFrame * CFrame.new(offsetX, y, offsetZ - half)
+	elseif facing == "South" then
+		-- bottom edge
+		return self.OriginTopCFrame * CFrame.new(offsetX, y, offsetZ + half) * CFrame.Angles(0, math.rad(180), 0)
+	elseif facing == "West" then
+		-- left edge
+		return self.OriginTopCFrame * CFrame.new(offsetX - half, y, offsetZ) * CFrame.Angles(0, math.rad(270), 0)
+	else -- "East"
+		-- right edge
+		return self.OriginTopCFrame * CFrame.new(offsetX + half, y, offsetZ) * CFrame.Angles(0, math.rad(90), 0)
+	end
+end
+
 return Grid

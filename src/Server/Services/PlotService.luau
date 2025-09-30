@@ -7,17 +7,20 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
-local GridClass = require(ServerScriptService.Server.Classes.Grid)
+local GridClass = require(ReplicatedStorage.Shared.Utilities.Grid)
 local PlotState = require(ServerScriptService.Server.Classes.PlotState)
+local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
+
+type PlotRuntimeState = PlotState.PlotState
 
 local PlotService = {}
 local PlotModels: { [number]: Model } = PlotFinder.GetOrderedPlots()
-local PlotGrids = {} -- [plotIndex] = Grid
-local PlayerRuntime = {} -- [userId] = PlotState
+local PlotGrids: { [number]: any } = {} -- [plotIndex] = Grid
+local PlayerRuntime: { [number]: PlotRuntimeState } = {}
 
 local function InitializePlayerPlot(player: Player, plotModel: Model)
 	local coversFolder = plotModel:FindFirstChild("Covers") :: Folder
-	local runtimeState = PlayerRuntime[player.UserId] -- PlotState
+	local runtimeState = PlayerRuntime[player.UserId]
 	if not runtimeState then
 		return
 	end
@@ -49,7 +52,19 @@ function PlotService.Init()
 
 	--#TODO: implement client side logic for unlocking chunks
 	Packets.UnlockChunkRequest.OnServerInvoke = function(player, chunkX, chunkZ)
-		return PlotService.UnlockArea(player, chunkX, chunkZ)
+		local plotIndex = player:GetAttribute("OwnedPlotIndex") :: number
+		local plotModel = PlotFinder.FindPlot(plotIndex)
+		local coversFolder = plotModel and plotModel:FindFirstChild("Covers") :: Folder
+		local success, message = PlotService.UnlockArea(player, chunkX, chunkZ)
+		if success then
+			local coverPart = coversFolder
+				and coversFolder:FindFirstChild("Cover_" .. chunkX .. "_" .. chunkZ) :: BasePart?
+			if coverPart then
+				coverPart.Transparency = 1
+				coverPart.CanQuery = false
+			end
+		end
+		return success, message
 	end
 end
 
@@ -96,6 +111,15 @@ function PlotService.Load(player: Player, plotModel: Model)
 	runtimeState:HydrateFromSave()
 
 	PlayerRuntime[userId] = runtimeState
+
+	for i = 1, #data.PlacedObjects do -- Added
+		local obj = data.PlacedObjects[i] -- Added
+		-- Prefer catalog PlacementType if available; otherwise trust save's `type` -- Added
+		local facing = obj.facing
+
+		-- Floors are 1x1 (we saved width/depth with data, but we standardize spawning to the cell) -- Added
+		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing) -- Added
+	end
 
 	-- Possibly add a revision to discard stale client state in future (if problematic)
 
@@ -155,7 +179,7 @@ function PlotService.UnlockArea(player: Player, chunkX: number, chunkZ: number):
 	return true, "Chunk unlocked"
 end
 
-function PlotService.GetState(player: Player)
+function PlotService.GetState(player: Player): PlotRuntimeState?
 	return PlayerRuntime[player.UserId]
 end
 

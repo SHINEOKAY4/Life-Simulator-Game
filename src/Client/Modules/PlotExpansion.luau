@@ -74,8 +74,7 @@ function PlotExpansion.Init()
 			local chunkZ = hitCover:GetAttribute("ChunkZ") :: number
 			local success, message = PlotStateStore.RequestPurchase(chunkX, chunkZ)
 			if success then
-				hitCover.Transparency = 1
-				hitCover.CanQuery = false
+				print("Toast notification UI implementation needed")
 			end
 			--#TODO: Toast notification for success/failure
 			print("Purchase result:", success, message)
@@ -92,7 +91,7 @@ function PlotExpansion.Show()
 	local container = plotModel and plotModel:FindFirstChild("Container") :: Folder
 	local priceTag = container and container:FindFirstChild("PriceTag") :: BillboardGui
 	local priceLabel = priceTag and priceTag:FindFirstChild("Label") :: TextLabel
-	local highlight = container and container:FindFirstChild("Highlight") :: Highlight
+	local highlight = container and container:FindFirstChild("ChunkHighlight") :: Highlight
 	local accumulatedTime = 0
 
 	local params = BuildParams(coversFolder)
@@ -151,7 +150,7 @@ function PlotExpansion.Hide()
 	local coversFolder = plotModel and plotModel:FindFirstChild("Covers") :: Folder
 	local container = plotModel and plotModel:FindFirstChild("Container") :: Folder
 	local priceTag = container and container:FindFirstChild("PriceTag") :: BillboardGui
-	local highlight = container and container:FindFirstChild("Highlight") :: Highlight
+	local highlight = container and container:FindFirstChild("ChunkHighlight") :: Highlight
 	ClearEffects(priceTag, highlight, coversFolder)
 end
 

@@ -7,8 +7,10 @@ local ServerFolder = ServerScriptService.Server
 local ServicesFolder = ServerFolder.Services
 
 local PlotService = require(ServicesFolder.PlotService)
+local BuildService = require(ServicesFolder.BuildService)
 
 PlotService.Init()
+BuildService.Init()
 
 local function OnPlayerAdded(player: Player)
 	print("Player added: " .. player.Name)

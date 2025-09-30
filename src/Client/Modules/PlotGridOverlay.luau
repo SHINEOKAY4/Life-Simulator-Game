@@ -1,5 +1,5 @@
 --!strict
--- StarterPlayer/StarterPlayerScripts/Client/Modules/PlotGrid.lua
+-- StarterPlayer/StarterPlayerScripts/Client/Modules/PlotGridOverlay.lua
 local Runservice = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -10,43 +10,43 @@ local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 local PlotContext = PlayerGui:WaitForChild("PlotContext")
 
-local PlotGrid = {}
+local PlotGridOverlay = {}
 local Connection: RBXScriptConnection? = nil
 local accumulatedTime = 0
 
-PlotGrid.Visible = false
+PlotGridOverlay.Visible = false
 
 local function OnHeartbeat(deltaTime)
 	accumulatedTime += deltaTime
 
 	if accumulatedTime >= 0.5 then
 		accumulatedTime = 0
-		if PlotGrid.Visible and not PlotFinder.IsWithinBounds(Player) then
-			PlotGrid.Visible = false
-			PlotGrid.Hide()
+		if PlotGridOverlay.Visible and not PlotFinder.IsWithinBounds(Player) then
+			PlotGridOverlay.Visible = false
+			PlotGridOverlay.Hide()
 		end
 	end
 end
 
-function PlotGrid.Init()
-	print("PlotGrid module initialized.")
+function PlotGridOverlay.Init()
+	print("PlotGridOverlay module initialized.")
 	PlotContext.ToggleGridAction.Pressed:Connect(function()
 		print("PlotContext button pressed.")
 
 		if PlotFinder.IsWithinBounds(Player) then
-			PlotGrid.Visible = not PlotGrid.Visible
+			PlotGridOverlay.Visible = not PlotGridOverlay.Visible
 
-			if PlotGrid.Visible then
-				PlotGrid.Show()
+			if PlotGridOverlay.Visible then
+				PlotGridOverlay.Show()
 				Connection = Runservice.Heartbeat:Connect(OnHeartbeat)
 			else
-				PlotGrid.Hide()
+				PlotGridOverlay.Hide()
 			end
 		end
 	end)
 end
 
-function PlotGrid.Show()
+function PlotGridOverlay.Show()
 	print("Showing plot grid.")
 	local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
@@ -62,7 +62,7 @@ function PlotGrid.Show()
 	gridVisual.Transparency = 0
 end
 
-function PlotGrid.Hide()
+function PlotGridOverlay.Hide()
 	print("Hiding plot grid.")
 
 	if Connection then
@@ -84,4 +84,4 @@ function PlotGrid.Hide()
 	gridVisual.Transparency = 1
 end
 
-return PlotGrid
+return PlotGridOverlay
