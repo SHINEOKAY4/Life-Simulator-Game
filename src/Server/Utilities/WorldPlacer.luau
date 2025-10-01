@@ -43,6 +43,8 @@ function WorldPlacer.Spawn(player: Player, grid: any, itemId: string, cellX: num
 	end
 
 	local placementType = spec.PlacementType or "CellObject"
+	local footprintWidth = spec.WidthCells or spec.Width or 1
+	local footprintDepth = spec.DepthCells or spec.Depth or 1
 
 	local model = template:Clone()
 	model.Name = itemId
@@ -51,8 +53,8 @@ function WorldPlacer.Spawn(player: Player, grid: any, itemId: string, cellX: num
 	if placementType == "Wall" then
 		base = grid:CellToWorldEdgeCenterCFrame(cellX, cellZ, facing)
 	elseif placementType == "Floor" or placementType == "CellObject" then
-		-- Floors are 1x1; apply facing yaw only for visual texture direction
-		base = grid:CellToWorldCenterCFrame(cellX, cellZ) * CFrame.Angles(0, yawFromFacing(facing), 0)
+		local center = grid:FootprintCenterCFrame(cellX, cellZ, footprintWidth, footprintDepth, facing)
+		base = center * CFrame.Angles(0, yawFromFacing(facing), 0)
 	end
 
 	if placementType == "Floor" then

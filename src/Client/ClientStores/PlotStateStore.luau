@@ -70,7 +70,11 @@ function PlotStateStore.Init()
 			return
 		end
 
-		local itemId = delta.Item.Id
+		local itemId = delta.Item.ItemId or delta.Item.Id or delta.Item.id
+		if not itemId then
+			return
+		end
+
 		local spec = ItemFinder.FindItemById(itemId)
 
 		-- Derive width/depth for snapshot consistency with PlotStateSync payload
@@ -86,14 +90,16 @@ function PlotStateStore.Init()
 		end
 
 		-- Append a normalized item entry, matching PlotStateSync schema
-		table.insert(StateSnapshot.PlacedItems, {
+		local entry = {
 			id = itemId,
 			cellX = delta.Item.CellX,
 			cellZ = delta.Item.CellZ,
 			width = width,
 			depth = depth,
-			facing = delta.Item.Facing,
-		})
+			facing = delta.Item.Facing or "North",
+		}
+
+		StateSnapshot.PlacedItems[#StateSnapshot.PlacedItems + 1] = entry
 	end)
 end
 

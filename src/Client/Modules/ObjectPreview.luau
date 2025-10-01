@@ -40,6 +40,104 @@ local LastCellX: number? = nil
 local LastCellZ: number? = nil
 local LastFacing: string? = nil
 
+-- Added: lightweight pool of thin Parts used to highlight the footprint cells the preview will occupy.
+-- Each marker is a small anchored part sized to 1 cell (CellSize x 0.05 x CellSize), parented under the plot's Container.
+local CellMarkers: { BasePart } = {} -- pool of reusable marker parts
+local ActiveMarkerCount = 0 -- how many markers are currently in-use this frame
+local MARKER_Y = 0.03 -- vertical lift so the quad sits above the surface and avoids z-fighting
+
+-- Function: BuildMarker
+-- Purpose: Construct a thin, neon, non-collidable part to represent 1 highlighted cell.
+local function BuildMarker(cellSize: number, parent: Instance): BasePart
+	local p = Instance.new("Part")
+	p.Name = "CellPreviewMarker"
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanTouch = false
+	p.CanQuery = false
+	p.Material = Enum.Material.Pavement
+	p.Size = Vector3.new(cellSize, 0.05, cellSize)
+	p.Transparency = 0.8
+	p.Color = Color3.fromRGB(159, 234, 159) -- default "can place" color; updated per-frame below
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Parent = parent
+	return p
+end
+
+-- Added: Acquire a marker from the pool or create a new one if needed.
+-- Function: AcquireMarker
+-- Purpose: Ensures we reuse instances (no churn) and only create when pool is exhausted.
+local function AcquireMarker(cellSize: number, parent: Instance): BasePart
+	ActiveMarkerCount += 1
+	if ActiveMarkerCount <= #CellMarkers then
+		local marker = CellMarkers[ActiveMarkerCount]
+		-- Resize if CellSize changed (different plots or settings)
+		if math.abs(marker.Size.X - cellSize) > 1e-3 then
+			marker.Size = Vector3.new(cellSize, 0.05, cellSize)
+		end
+		if marker.Parent ~= parent then
+			marker.Parent = parent
+		end
+		marker.Transparency = 0.4
+		return marker
+	end
+	local marker = BuildMarker(cellSize, parent)
+	table.insert(CellMarkers, marker)
+	return marker
+end
+
+-- Added: Hide any extra, unused markers each frame.
+-- Function: HideUnusedMarkers
+-- Purpose: Keeps the pool around, but invisible when not needed to avoid memory churn.
+local function HideUnusedMarkers()
+	for i = ActiveMarkerCount + 1, #CellMarkers do
+		local m = CellMarkers[i]
+		if m.Transparency ~= 1 then
+			m.Transparency = 1
+		end
+	end
+end
+
+-- Added: Batch update all markers for the current footprint.
+-- Function: RenderFootprintMarkers
+-- Purpose: Given a list of cell indices, positions markers at each cell center and colors them.
+-- Notes:
+--   - Colors all cells green if placeable, red if not (YAGNI: per-cell validity would require deeper checks).
+local function RenderFootprintMarkers(grid, surface: BasePart, cells: { number }, canPlace: boolean)
+	-- Parent markers next to the previewed model (plot’s Container keeps things tidy)
+	local plotModel = surface.Parent :: Model
+	local container = plotModel:FindFirstChild("Container") :: Folder
+	if not container then
+		return
+	end
+
+	local cellSize = grid.CellSize
+	local colorGood = Color3.fromRGB(159, 234, 159)
+	local colorBad = Color3.fromRGB(219, 136, 136)
+	local tint = canPlace and colorGood or colorBad
+
+	for i = 1, #cells do
+		local cx, cz = grid:IndexToCell(cells[i]) -- convert 1D index -> 2D cell coords
+		-- Acquire or create a pooled marker
+		local marker = AcquireMarker(cellSize, container)
+
+		-- Position at the cell center, aligned to plot surface, with a tiny Y lift to avoid z-fighting.
+		local center = grid:CellToWorldCenterCFrame(cx, cz)
+		local aligned =
+			CFrame.lookAt(center.Position, center.Position + surface.CFrame.LookVector, surface.CFrame.UpVector)
+		marker.CFrame = aligned * CFrame.new(0, MARKER_Y, 0)
+
+		-- Color based on overall validity for this footprint (simple & readable)
+		marker.Color = tint
+		marker.Transparency = 0.4
+		marker.Material = Enum.Material.Neon
+	end
+
+	-- Hide any unused markers this frame
+	HideUnusedMarkers()
+end
+
 local function YawFromFacing(f: Facing)
 	if f == "East" then
 		return math.rad(90)
@@ -109,13 +207,14 @@ local function isCellOccupiedForPreview(
 
 	-- CellObject: blocked by other CellObjects’ occupied cells (floors don’t block here)
 	if kind == "CellObject" then
-		local myCells = grid:FootprintCells(cellX, cellZ, baseW, baseD, facing)
+		local myCells = grid:ClippedFootprintCells(cellX, cellZ, baseW, baseD, facing)
 		for i = 1, #placed do
 			local p = placed[i]
 			local spec = ItemFinder.FindItemById(p.id or p.Id or p.ItemId) -- Added
 			local pType = (spec and (spec.PlacementType or spec.Type)) or "CellObject" -- Added
 			if pType == "CellObject" then
-				local other = grid:FootprintCells(p.cellX, p.cellZ, p.width or 1, p.depth or 1, p.facing or "North") -- Changed: normalize missing width/depth/facing
+				local other =
+					grid:ClippedFootprintCells(p.cellX, p.cellZ, p.width or 1, p.depth or 1, p.facing or "North") -- Changed: normalize missing width/depth/facing
 				if AnyCellOverlap(myCells, other) then
 					return true
 				end
@@ -184,6 +283,10 @@ local function PreviewFloor(model: Model, grid, surface: BasePart, cellX: number
 	model:PivotTo(alignedCFrame)
 end
 
+--Preview a CellObject (WxD) at the correct world pose for the current anchor cell and facing.
+-- Function: PreviewCellObject
+-- Purpose: Mirror server placement logic by pivoting the preview at the anchor cell center,
+--          ensuring the preview mesh lines up exactly with the highlighted footprint cells.
 local function PreviewCellObject(
 	model: Model,
 	grid: any,
@@ -191,46 +294,39 @@ local function PreviewCellObject(
 	cellX: number,
 	cellZ: number,
 	facing: Facing,
+	widthCells: number,
+	depthCells: number,
 	lift: number
 )
-	local base = AlignToSurface(grid:CellToWorldCenterCFrame(cellX, cellZ), surface)
-	base = base * CFrame.Angles(0, YawFromFacing(facing), 0)
-	model:PivotTo(base * CFrame.new(0, lift, 0))
+	-- Anchor the preview at the geometric center of the rotated footprint so meshes cover all highlighted cells.
+	local center = grid:FootprintCenterCFrame(cellX, cellZ, widthCells, depthCells, facing)
+	local aligned = AlignToSurface(center, surface)
+	local yaw = CFrame.Angles(0, YawFromFacing(facing), 0)
+
+	model:PivotTo(aligned * yaw * CFrame.new(0, lift, 0))
 end
 
 function ObjectPreview.Init()
 	-- Initialize the object preview
+
+	local order: { Facing } = { "North", "East", "South", "West" } -- Added: canonical rotation order
+	local indexOf: { [Facing]: number } = { North = 1, East = 2, South = 3, West = 4 } -- Added: O(1) lookup
+
 	PreviewContext.RotateLeft.Pressed:Connect(function()
-		if CurrentFacing == "North" then
-			CurrentFacing = "East"
-			return
-		end
-		if CurrentFacing == "East" then
-			CurrentFacing = "South"
-			return
-		end
-		if CurrentFacing == "South" then
-			CurrentFacing = "West"
-		end
-		CurrentFacing = "North"
-		LastFacing = nil
+		-- Changed: Fix logic to cycle forward (clockwise) deterministically.
+		-- Old code had fall-through that snapped from West -> North prematurely.
+		local i = indexOf[CurrentFacing] or 1
+		i = i % 4 + 1 -- 1->2->3->4->1
+		CurrentFacing = order[i]
+		LastFacing = nil -- Added: force pose recompute for new facing
 	end)
 
 	PreviewContext.RotateRight.Pressed:Connect(function()
-		if CurrentFacing == "North" then
-			CurrentFacing = "West"
-			return
-		end
-		if CurrentFacing == "West" then
-			CurrentFacing = "South"
-			return
-		end
-		if CurrentFacing == "South" then
-			CurrentFacing = "East"
-			return
-		end
-		CurrentFacing = "North"
-		LastFacing = nil
+		-- Changed: Fix logic to cycle backward (counter-clockwise) deterministically.
+		local i = indexOf[CurrentFacing] or 1
+		i = (i - 2) % 4 + 1 -- 1->4->3->2->1
+		CurrentFacing = order[i]
+		LastFacing = nil -- Added: force pose recompute for new facing
 	end)
 end
 
@@ -335,12 +431,26 @@ function ObjectPreview.RenderPreview(itemId: string)
 		elseif previewKind == "Floor" then
 			PreviewFloor(model, grid, surface, cellX, cellZ)
 		else
-			PreviewCellObject(model, grid, surface, cellX, cellZ, CurrentFacing, lift)
+			PreviewCellObject(model, grid, surface, cellX, cellZ, CurrentFacing, baseW, baseD, lift)
 		end
 
 		local canPlace = isUnlocked and not blocked -- Added
 		highlight.FillColor = canPlace and Color3.fromRGB(159, 234, 159) or Color3.fromRGB(219, 136, 136) -- Changed
 		highlight.OutlineColor = canPlace and Color3.fromRGB(137, 255, 119) or Color3.fromRGB(255, 85, 85) -- Changed
+
+		ActiveMarkerCount = 0 -- reset pool usage for this frame
+
+		local cells: { number }
+		if previewKind == "Floor" or previewKind == "Wall" then
+			-- Floors/Walls occupy a 1x1 anchor cell for the purposes of cell highlighting.
+			-- Use clipped footprint so markers never go OOB.
+			cells = grid:ClippedFootprintCells(cellX, cellZ, 1, 1, "North")
+		else
+			-- CellObject uses its (possibly rotated) footprint.
+			cells = grid:ClippedFootprintCells(cellX, cellZ, baseW, baseD, CurrentFacing)
+		end
+
+		RenderFootprintMarkers(grid, surface, cells, canPlace)
 	end)
 end
 
@@ -348,6 +458,10 @@ function ObjectPreview.ClearPreview()
 	-- Clear the current preview
 	PreviewContext.RotateLeft.Enabled = false
 	PreviewContext.RotateRight.Enabled = false
+
+	-- Added: hide all footprint markers when leaving preview to avoid lingering visuals
+	ActiveMarkerCount = 0
+	HideUnusedMarkers()
 
 	if SelectedItem then
 		local containerFolder = SelectedItem.Parent

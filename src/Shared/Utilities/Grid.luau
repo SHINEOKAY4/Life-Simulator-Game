@@ -413,6 +413,44 @@ function Grid:FootprintChunkRange(
 	return minChunkX, minChunkZ, maxChunkX, maxChunkZ
 end
 
+--[=[
+	Returns the local offset from the anchor cell center to the center of a rotated footprint.
+	Useful for placing models whose pivots sit at their geometric center instead of the anchor cell.
+
+	@param widthInCells number The unrotated footprint width in cells.
+	@param depthInCells number The unrotated footprint depth in cells.
+	@param facing Facing The facing to account for when computing the rotated footprint.
+	@return Vector3 The offset vector in grid-space axes (X = columns, Z = rows).
+]=]
+function Grid:FootprintCenterOffset(widthInCells: number, depthInCells: number, facing: Facing): Vector3
+	local rotatedWidth, rotatedDepth = RotateFootprint(widthInCells, depthInCells, facing)
+	local offsetX = (rotatedWidth - 1) * 0.5 * self.CellSize
+	local offsetZ = (rotatedDepth - 1) * 0.5 * self.CellSize
+	return Vector3.new(offsetX, 0, offsetZ)
+end
+
+--[=[
+	Returns the CFrame positioned at the center of the rotated footprint for an anchor cell.
+
+	@param anchorCellX number The X-coordinate of the anchor cell (minimum column involved).
+	@param anchorCellZ number The Z-coordinate of the anchor cell (minimum row involved).
+	@param widthInCells number The unrotated footprint width in cells.
+	@param depthInCells number The unrotated footprint depth in cells.
+	@param facing Facing The facing to account for when computing the rotated footprint.
+	@return CFrame The world-space CFrame of the footprint center, aligned to the plot surface orientation.
+]=]
+function Grid:FootprintCenterCFrame(
+	anchorCellX: number,
+	anchorCellZ: number,
+	widthInCells: number,
+	depthInCells: number,
+	facing: Facing
+): CFrame
+	local base: CFrame = self:CellToWorldCenterCFrame(anchorCellX, anchorCellZ)
+	local offset = self:FootprintCenterOffset(widthInCells, depthInCells, facing)
+	return base * CFrame.new(offset)
+end
+
 function Grid:CellToWorldEdgeCenterCFrame(cellX: number, cellZ: number, facing: Facing, heightOffset: number?): CFrame
 	self = self :: GridInstance
 	local half = self.CellSize * 0.5
