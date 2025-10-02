@@ -44,4 +44,11 @@ PlacementPackets.PlacementDelta = Packet("PlacementDelta", {
 		Facing = Packet.String,
 	},
 })
+
+PlacementPackets.DestroyRequest = Packet("DestroyRequest", {
+	ItemId = Packet.String,
+	CellX = Packet.NumberU8,
+	CellZ = Packet.NumberU8,
+	Facing = Packet.String,
+}):Response(Packet.Boolean8, Packet.StringLong)
 return PlacementPackets

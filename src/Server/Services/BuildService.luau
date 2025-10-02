@@ -41,6 +41,13 @@ function BuildService.Init()
 	end
 
 	-- Packets for Destroy and Rotate can be added here
+
+	Packets.DestroyRequest.OnServerInvoke = function( -- ADDED
+		player: Player,
+		payload: { ItemId: string, CellX: number, CellZ: number, Facing: string }
+	): (boolean, string)
+		return BuildService.Destroy(player, payload)
+	end
 end
 
 function BuildService.Build(
@@ -189,7 +196,65 @@ function BuildService.Build(
 	end
 end
 
-function BuildService.Destroy() end
+function BuildService.Destroy(
+	player: Player,
+	payload: { ItemId: string, CellX: number, CellZ: number, Facing: string }
+): (boolean, string)
+	local state = PlotService.GetState(player)
+	if not state then
+		return false, "No plot runtime state"
+	end
+
+	local spec = ItemFinder.FindItemById(payload.ItemId)
+	if not spec then
+		return false, "Invalid item ID"
+	end
+	local placementType = spec.PlacementType or spec.Type or "CellObject"
+
+	-- find the saved entry to learn width/depth (authoritative)
+	local target
+	for i = #state.Save.PlacedObjects, 1, -1 do
+		local o = state.Save.PlacedObjects[i]
+		if
+			o.id == payload.ItemId
+			and o.cellX == payload.CellX
+			and o.cellZ == payload.CellZ
+			and o.facing == payload.Facing
+		then
+			target = o
+			break
+		end
+	end
+	if not target then
+		return false, "Item not found at location"
+	end
+
+	local w = spec.WidthCells or 1
+	local d = spec.DepthCells or 1
+	local savedFacing: Facing? = target.facing
+	local payloadFacing: Facing? = coerceFacing(payload.Facing)
+	local f: Facing = savedFacing or payloadFacing or "North"
+
+	-- switch by type
+	if placementType == "Floor" then
+		state:RemoveFloor(payload.CellX, payload.CellZ)
+	elseif placementType == "Wall" then
+		state:RemoveWall(payload.CellX, payload.CellZ, f)
+	elseif placementType == "Roof" then
+		state:RemoveRoof(payload.CellX, payload.CellZ, w, d, f)
+	else -- CellObject
+		state:RemoveCellObject(payload.CellX, payload.CellZ, w, d, f)
+	end
+
+	-- world + client delta
+	WorldPlacer.Despawn(player, payload.ItemId, payload.CellX, payload.CellZ, f)
+	Packets.PlacementDelta:FireClient(player, {
+		Action = "Removed",
+		Item = { ItemId = payload.ItemId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = f },
+	})
+
+	return true, "Removed"
+end
 
 function BuildService.Rotate() end
 

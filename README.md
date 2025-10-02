@@ -4,12 +4,6 @@ A life-simulation game that blends **BitLife-style choices** with **The Sims-sty
 The player does not directly control NPCs moment-to-moment. Instead, they **manage a plot of land** and place items (bed, stove, fridge, books, etc.).  
 These items shape how NPCs live, what jobs they can get, and ultimately their life outcomes.  
 
-The **house shell** is the main progression system:  
-
-- Starts as a shack.  
-- Expands with upgrades.  
-- Provides more buildable space as it grows.  
-
 The player’s core loop is:  
 **Place items → NPCs survive → NPC stats grow → NPCs get jobs → Earn coins → Upgrade house → Unlock more items → Repeat.**
 
@@ -21,10 +15,10 @@ Players can also **intervene directly** using the **Direct Action System** — s
 
 ### Starting State
 
-- Empty plot with a small shack shell (Tier 0).  
+- Empty plot with a small unlocked chunk
 - 1 NPC (“First Life”) with basic stats.  
 - Starter items: sleeping bag, cooler.  
-- ~500 coins.  
+- ~0 coins.  
 
 ### Player Goals
 
@@ -47,7 +41,6 @@ Players can also **intervene directly** using the **Direct Action System** — s
 
 ### Mid Game Progression
 
-- Upgrade house shell to Tier 1 → Tier 2 (small house → family home).  
 - Unlock more buildable grid space.  
 - Add more NPCs (family, roommates, new lives).  
 - NPCs qualify for better jobs (clerk, tech, nurse).  

@@ -6,19 +6,26 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
-local PlotGridOverlay = require(script.Parent.PlotGridOverlay)
 local ObjectPreview = require(script.Parent.ObjectPreview)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
+local PlotBuilderGui = PlayerGui:WaitForChild("PlotBuilderGui")
 local BuildContext = PlayerGui:WaitForChild("BuildContext")
+local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
+local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
+local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
 
 local PlotBuilder = {}
 local Connection: RBXScriptConnection? = nil
-local IsActive = false
 
 function PlotBuilder.Init()
+	PlotExpansionEnabled.Changed:Connect(function()
+		if PlotExpansionEnabled.Value and PlotBuilderEnabled.Value then
+			PlotBuilder.Hide()
+		end
+	end)
 	BuildContext.ToggleBuildMode.Pressed:Connect(function()
 		local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 		if not plotIndex then
@@ -26,7 +33,7 @@ function PlotBuilder.Init()
 			return
 		end
 		if PlotFinder.IsWithinBounds(Player) then
-			if IsActive then
+			if PlotBuilderEnabled.Value then
 				PlotBuilder.Hide()
 			else
 				PlotBuilder.Show()
@@ -40,10 +47,9 @@ function PlotBuilder.Init()
 end
 
 function PlotBuilder.Show()
-	IsActive = true
-	--#TODO: SHOW BUILD UI
-	PlotGridOverlay.Show()
-	PlotBuilder.PreviewSelected("WoodenChair") -- Demo
+	PlotBuilderEnabled.Value = true
+	PlotBuilderGui.Main.Visible = PlotBuilderEnabled.Value
+
 	Connection = RunService.Heartbeat:Connect(function()
 		if not PlotFinder.IsWithinBounds(Player) then
 			PlotBuilder.Hide()
@@ -52,9 +58,9 @@ function PlotBuilder.Show()
 end
 
 function PlotBuilder.Hide()
-	IsActive = false
-	--#TODO: HIDE BUILD UI
-	PlotGridOverlay.Hide()
+	PlotBuilderEnabled.Value = false
+	PlotBuilderGui.Main.Visible = PlotBuilderEnabled.Value
+
 	PlotBuilder.RemovePreview()
 	if Connection then
 		Connection:Disconnect()

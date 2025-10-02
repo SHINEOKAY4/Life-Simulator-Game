@@ -9,6 +9,9 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 local PlotContext = PlayerGui:WaitForChild("PlotContext")
+local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
+local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
+local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
 
 local PlotGridOverlay = {}
 local Connection: RBXScriptConnection? = nil
@@ -30,6 +33,20 @@ end
 
 function PlotGridOverlay.Init()
 	print("PlotGridOverlay module initialized.")
+
+	PlotExpansionEnabled.Changed:Connect(function()
+		if PlotExpansionEnabled.Value and PlotBuilderEnabled.Value then
+			PlotGridOverlay.Hide()
+		end
+	end)
+
+	PlotBuilderEnabled.Changed:Connect(function()
+		if PlotBuilderEnabled.Value == true then
+			PlotGridOverlay.Show()
+		else
+			PlotGridOverlay.Hide()
+		end
+	end)
 	PlotContext.ToggleGridAction.Pressed:Connect(function()
 		print("PlotContext button pressed.")
 
@@ -50,9 +67,9 @@ function PlotGridOverlay.Show()
 	print("Showing plot grid.")
 	local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
-	local surface = plotModel and plotModel:FindFirstChild("Surface") :: BasePart
+	local GridSurface = plotModel and plotModel:FindFirstChild("GridSurface") :: BasePart
 
-	local gridVisual = surface and surface:FindFirstChild("GridVisual") :: Texture
+	local gridVisual = GridSurface and GridSurface:FindFirstChild("GridVisual") :: Texture
 
 	if not gridVisual then
 		warn("GridVisual not found.")
@@ -72,9 +89,9 @@ function PlotGridOverlay.Hide()
 
 	local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
-	local surface = plotModel and plotModel:FindFirstChild("Surface") :: BasePart
+	local GridSurface = plotModel and plotModel:FindFirstChild("GridSurface") :: BasePart
 
-	local gridVisual = surface and surface:FindFirstChild("GridVisual") :: Texture
+	local gridVisual = GridSurface and GridSurface:FindFirstChild("GridVisual") :: Texture
 
 	if not gridVisual then
 		warn("GridVisual not found.")

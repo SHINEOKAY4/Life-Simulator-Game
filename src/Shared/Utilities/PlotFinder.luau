@@ -79,7 +79,7 @@ function PlotFinder.IsWithinBounds(player: Player): boolean
 		return false
 	end
 
-	local verticalTolerance = 4 -- studs around the top face
+	local verticalTolerance = 24 -- studs around the top face
 
 	local localPoint: Vector3 = surface.CFrame:PointToObjectSpace(humanoidRootPart.Position)
 	local halfSize: Vector3 = surface.Size * 0.5

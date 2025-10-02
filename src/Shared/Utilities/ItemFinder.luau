@@ -7,6 +7,7 @@ local Floors = require(ReplicatedStorage.Shared.Definitions.Catalog.Floors)
 local Walls = require(ReplicatedStorage.Shared.Definitions.Catalog.Walls)
 local Furnitures = require(ReplicatedStorage.Shared.Definitions.Catalog.Furnitures)
 local Roofs = require(ReplicatedStorage.Shared.Definitions.Catalog.Roofs)
+local Decorations = require(ReplicatedStorage.Shared.Definitions.Catalog.Decorations)
 
 local ItemFinder = {}
 local ItemsById = {}
@@ -18,13 +19,23 @@ local function merge(group: { [string]: any })
 	end
 end
 
+ItemFinder.Floors = Floors
+ItemFinder.Walls = Walls
+ItemFinder.Furnitures = Furnitures
+ItemFinder.Roofs = Roofs
+
 merge(Floors)
 merge(Walls)
 merge(Furnitures)
 merge(Roofs)
+merge(Decorations)
 
 function ItemFinder.FindItemById(itemId: string)
 	return ItemsById[itemId]
+end
+
+function ItemFinder.GetCategory(category: string)
+	return ItemFinder[category] or {}
 end
 
 function ItemFinder.Exists(itemId: string): boolean

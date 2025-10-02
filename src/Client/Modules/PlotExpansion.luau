@@ -13,10 +13,13 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 local PlotContext = PlayerGui:WaitForChild("PlotContext")
+local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
+local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
+local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
+
 local camera = Workspace.CurrentCamera :: Camera
 
 local PlotExpansion = {}
-local IsActive = false
 
 local Connection: RBXScriptConnection? = nil
 local _HoveredCover: BasePart? = nil
@@ -37,6 +40,12 @@ local function BuildParams(coversFolder: Folder): RaycastParams
 end
 
 function PlotExpansion.Init()
+	PlotBuilderEnabled.Changed:Connect(function()
+		if PlotBuilderEnabled.Value and PlotExpansionEnabled.Value then
+			PlotExpansion.Hide()
+		end
+	end)
+
 	PlotContext.ToggleExpansion.Pressed:Connect(function()
 		local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 		if not plotIndex then
@@ -45,7 +54,7 @@ function PlotExpansion.Init()
 		end
 
 		if PlotFinder.IsWithinBounds(Player) then
-			if IsActive then
+			if PlotExpansionEnabled.Value then
 				PlotExpansion.Hide()
 			else
 				PlotExpansion.Show()
@@ -83,7 +92,7 @@ function PlotExpansion.Init()
 end
 
 function PlotExpansion.Show()
-	IsActive = true
+	PlotExpansionEnabled.Value = true
 	PlotContext.ToggleClickPurchase.Enabled = true
 	local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
@@ -135,7 +144,7 @@ function PlotExpansion.Show()
 end
 
 function PlotExpansion.Hide()
-	IsActive = false
+	PlotExpansionEnabled.Value = false
 	PlotContext.ToggleClickPurchase.Enabled = false
 
 	if Connection then

@@ -9,11 +9,14 @@ local PlotStateStore = require(script.Parent.ClientStores.PlotStateStore)
 local PlotBuilder = require(ModulesFolder.PlotBuilder)
 local ObjectPreview = require(ModulesFolder.ObjectPreview)
 
+local PlotBuilderUI = require(script.Parent.UserInterface.PlotBuilderUI)
+
 PlotSelector.Init()
 PlotGrid.Init()
 PlotExpansion.Init()
 PlotStateStore.Init()
 ObjectPreview.Init()
 PlotBuilder.Init()
+PlotBuilderUI:Init()
 
 print("Client Main initialized.")

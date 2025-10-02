@@ -64,6 +64,22 @@ function PlotStateStore.Init()
 			StateSnapshot.PlacedItems = {} -- Added: ensure table exists
 		end
 
+		if delta and delta.Action == "Removed" and delta.Item then
+			for i = #StateSnapshot.PlacedItems, 1, -1 do
+				local o = StateSnapshot.PlacedItems[i]
+				local id = o.id or o.Id or o.ItemId
+				if
+					id == delta.Item.ItemId
+					and o.cellX == delta.Item.CellX
+					and o.cellZ == delta.Item.CellZ
+					and (o.facing or "North") == (delta.Item.Facing or "North")
+				then
+					table.remove(StateSnapshot.PlacedItems, i)
+					break
+				end
+			end
+			return
+		end
 		-- Only handle "Placed" for now (YAGNI) -- Added
 		if not delta or delta.Action ~= "Placed" or not delta.Item then
 			return

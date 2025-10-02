@@ -107,6 +107,14 @@ export type PlotState = {
 		depthCells: number?,
 		facing: Facing?
 	) -> (),
+	RemoveRoof: (
+		self: PlotState,
+		cellX: number,
+		cellZ: number,
+		widthCells: number,
+		depthCells: number,
+		facing: Facing
+	) -> (),
 	CanPlaceRoof: (
 		self: PlotState,
 		cellX: number,
@@ -158,6 +166,14 @@ export type PlotState = {
 		depthCells: number,
 		facing: Facing
 	) -> boolean,
+	RemoveCellObject: (
+		self: PlotState,
+		cellX: number,
+		cellZ: number,
+		widthCells: number,
+		depthCells: number,
+		facing: Facing
+	) -> (),
 }
 
 function PlotState.new(grid: any, chunkSizeInCells: number, save: SaveData): PlotState
@@ -573,6 +589,32 @@ function PlotState:PlaceRoof(
 	return true
 end
 
+function PlotState:RemoveRoof(cellX: number, cellZ: number, width: number, depth: number, facing: Facing)
+	-- ✅ normalize
+	width = tonumber(width) or 1
+	depth = tonumber(depth) or 1
+
+	local indices = self.Grid:FootprintCells(cellX, cellZ, width, depth, facing)
+	for i = 1, #indices do
+		self.RoofFilled[indices[i]] = false
+	end
+	for i = #self.Save.PlacedObjects, 1, -1 do
+		local o = self.Save.PlacedObjects[i]
+		local _, placementType, specWidth, specDepth = resolveCatalog(o.id)
+		local objFacing = o.facing or "North"
+		if
+			placementType == "Roof"
+			and o.cellX == cellX
+			and o.cellZ == cellZ
+			and specWidth == width
+			and specDepth == depth
+			and objFacing == facing
+		then
+			table.remove(self.Save.PlacedObjects, i)
+			break
+		end
+	end
+end
 -- Cell Objects --
 function PlotState:IsCellBuildable(cellX: number, cellZ: number): boolean
 	if not self.Grid:IsCellInBounds(cellX, cellZ) then
@@ -671,4 +713,30 @@ function PlotState:Place(
 	return true
 end
 
+function PlotState:RemoveCellObject(cellX: number, cellZ: number, width: number, depth: number, facing: Facing)
+	-- ✅ normalize
+	width = tonumber(width) or 1
+	depth = tonumber(depth) or 1
+
+	local indices = self.Grid:FootprintCells(cellX, cellZ, width, depth, facing)
+	for i = 1, #indices do
+		self.CellFree[indices[i]] = true
+	end
+	for i = #self.Save.PlacedObjects, 1, -1 do
+		local o = self.Save.PlacedObjects[i]
+		local _, placementType, specWidth, specDepth = resolveCatalog(o.id)
+		local objFacing = o.facing or "North"
+		if
+			placementType == "CellObject"
+			and o.cellX == cellX
+			and o.cellZ == cellZ
+			and specWidth == width
+			and specDepth == depth
+			and objFacing == facing
+		then
+			table.remove(self.Save.PlacedObjects, i)
+			break
+		end
+	end
+end
 return PlotState
