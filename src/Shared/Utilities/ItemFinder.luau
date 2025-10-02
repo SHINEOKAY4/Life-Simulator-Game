@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Floors = require(ReplicatedStorage.Shared.Definitions.Catalog.Floors)
 local Walls = require(ReplicatedStorage.Shared.Definitions.Catalog.Walls)
 local Furnitures = require(ReplicatedStorage.Shared.Definitions.Catalog.Furnitures)
+local Roofs = require(ReplicatedStorage.Shared.Definitions.Catalog.Roofs)
 
 local ItemFinder = {}
 local ItemsById = {}
@@ -20,6 +21,7 @@ end
 merge(Floors)
 merge(Walls)
 merge(Furnitures)
+merge(Roofs)
 
 function ItemFinder.FindItemById(itemId: string)
 	return ItemsById[itemId]

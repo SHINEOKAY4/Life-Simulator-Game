@@ -117,7 +117,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 		-- Prefer catalog PlacementType if available; otherwise trust save's `type` -- Added
 		local facing = obj.facing
 
-		-- Floors are 1x1 (we saved width/depth with data, but we standardize spawning to the cell) -- Added
+		-- WorldPlacer consults catalog specs for footprint sizing, so saved width/depth are honored. -- Added
 		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing) -- Added
 	end
 

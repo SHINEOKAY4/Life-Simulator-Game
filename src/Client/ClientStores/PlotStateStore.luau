@@ -5,7 +5,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
-local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local GridModule = require(ReplicatedStorage.Shared.Utilities.Grid)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 
@@ -74,28 +73,11 @@ function PlotStateStore.Init()
 		if not itemId then
 			return
 		end
-
-		local spec = ItemFinder.FindItemById(itemId)
-
-		-- Derive width/depth for snapshot consistency with PlotStateSync payload
-		local placementType = (spec and (spec.PlacementType or spec.Type)) or "CellObject"
-		local width = 1
-		local depth = 1
-		if placementType == "CellObject" then
-			width = spec and spec.WidthCells or 1
-			depth = spec and spec.DepthCells or 1
-		elseif placementType == "Floor" or placementType == "Wall" then
-			-- Floors and walls normalized to 1x1
-			width, depth = 1, 1
-		end
-
 		-- Append a normalized item entry, matching PlotStateSync schema
 		local entry = {
 			id = itemId,
 			cellX = delta.Item.CellX,
 			cellZ = delta.Item.CellZ,
-			width = width,
-			depth = depth,
 			facing = delta.Item.Facing or "North",
 		}
 

@@ -80,16 +80,20 @@ function BuildService.Build(
 	end
 
 	if itemData.PlacementType == "Floor" then
-		local success = state:PlaceFloor(payload.ItemId, payload.CellX, payload.CellZ, 1, 1, "North") -- Changed
+		local widthCells = itemData.WidthCells or itemData.Width or 1
+		local depthCells = itemData.DepthCells or itemData.Depth or 1
+		local floorFacing: Facing = "North"
+		local success =
+			state:PlaceFloor(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, floorFacing)
 		if not success then
 			return false, "Failed to place floor"
 		end
 
-		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing)
+		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, floorFacing)
 
 		Packets.PlacementDelta:FireClient(player, {
 			Action = "Placed", -- Added
-			Item = { ItemId = payload.ItemId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = facing }, -- Added
+			Item = { ItemId = payload.ItemId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = floorFacing }, -- Added
 		})
 
 		return true, "Floor placed"
@@ -108,8 +112,14 @@ function BuildService.Build(
 			end
 		end
 
-		local success =
-			state:Place(payload.ItemId, payload.CellX, payload.CellZ, itemData.WidthCells, itemData.DepthCells, facing)
+		local success = state:PlaceRoof(
+			payload.ItemId,
+			payload.CellX,
+			payload.CellZ,
+			itemData.WidthCells,
+			itemData.DepthCells,
+			facing
+		)
 
 		if not success then
 			return false, "Failed to place cell object"
@@ -138,6 +148,42 @@ function BuildService.Build(
 		})
 
 		return true, "Wall placed"
+	elseif itemData.PlacementType == "Roof" then
+		-- ✅ Allow roof placement only if floor exists below
+		if itemData.Rules and itemData.Rules.RequiresFloorUnderAllCells then
+			if
+				not state:HasFloorUnderFootprint(
+					payload.CellX,
+					payload.CellZ,
+					itemData.WidthCells,
+					itemData.DepthCells,
+					facing
+				)
+			then
+				return false, "Floor required under roof"
+			end
+		end
+
+		local success = state:PlaceRoof(
+			payload.ItemId,
+			payload.CellX,
+			payload.CellZ,
+			itemData.WidthCells,
+			itemData.DepthCells,
+			facing
+		)
+		if not success then
+			return false, "Failed to place roof"
+		end
+
+		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing)
+
+		Packets.PlacementDelta:FireClient(player, {
+			Action = "Placed",
+			Item = { ItemId = payload.ItemId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = facing },
+		})
+
+		return true, "Roof placed"
 	else
 		return false, "Unknown placement type"
 	end

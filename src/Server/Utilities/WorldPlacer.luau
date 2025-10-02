@@ -55,9 +55,16 @@ function WorldPlacer.Spawn(player: Player, grid: any, itemId: string, cellX: num
 	elseif placementType == "Floor" or placementType == "CellObject" then
 		local center = grid:FootprintCenterCFrame(cellX, cellZ, footprintWidth, footprintDepth, facing)
 		base = center * CFrame.Angles(0, yawFromFacing(facing), 0)
+	elseif placementType == "Roof" then
+		-- ADDED: roof placement
+		-- Rule: a roof is placed above the surface by a catalog-defined roof height, then seated by pivot-bottom.
+		local center = grid:FootprintCenterCFrame(cellX, cellZ, footprintWidth, footprintDepth, facing)
+		local yaw = CFrame.Angles(0, yawFromFacing(facing), 0)
+		local roofY = spec.HeightStuds -- studs above the plot surface plane
+		base = (center * yaw) * CFrame.new(0, roofY, 0)
 	end
 
-	if placementType == "Floor" then
+	if placementType == "Floor" or placementType == "Roof" then
 		model:PivotTo(base)
 	else
 		model:PivotTo(base * CFrame.new(0, liftFromPivotToBottom(model), 0))

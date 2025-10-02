@@ -1,24 +1,31 @@
 --!strict
 -- ServerScriptService/Server/Classes/PlotState.lua
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+
 export type Facing = "North" | "East" | "South" | "West"
 export type SaveData = {
 	UnlockedChunks: { { cx: number, cz: number } },
 	PlacedObjects: {
 		{
-			type: string?,
 			id: string,
 			cellX: number,
 			cellZ: number,
-			width: number,
-			depth: number,
-			facing: Facing,
+			facing: Facing?,
 		}
 	},
 }
 
 local PlotState = {}
 PlotState.__index = PlotState
+local function resolveCatalog(objectId: string): (any?, string, number, number)
+	local spec = ItemFinder.FindItemById(objectId)
+	local placementType = (spec and (spec.PlacementType or spec.Type)) or "CellObject"
+	local width = (spec and (spec.WidthCells or spec.Width)) or 1
+	local depth = (spec and (spec.DepthCells or spec.Depth)) or 1
+	return spec, placementType, width, depth
+end
 export type PlotState = {
 	Grid: any,
 	ChunkSizeInCells: number,
@@ -27,6 +34,7 @@ export type PlotState = {
 	ChunkUnlocked: { [number]: boolean },
 	CellFree: { [number]: boolean },
 	FloorFilled: { [number]: boolean },
+	RoofFilled: { [number]: boolean },
 	HorizontalEdgeColumns: number,
 	HorizontalEdgeRows: number,
 	VerticalEdgeColumns: number,
@@ -78,27 +86,44 @@ export type PlotState = {
 		self: PlotState,
 		cellX: number,
 		cellZ: number,
-		widthCells: number,
-		depthCells: number,
-		facing: Facing
+		widthCells: number?,
+		depthCells: number?,
+		facing: Facing?
 	) -> boolean,
 	PlaceFloor: (
 		self: PlotState,
 		id: string,
 		cellX: number,
 		cellZ: number,
-		widthCells: number,
-		depthCells: number,
-		facing: Facing
+		widthCells: number?,
+		depthCells: number?,
+		facing: Facing?
 	) -> boolean,
 	RemoveFloor: (
+		self: PlotState,
+		cellX: number,
+		cellZ: number,
+		widthCells: number?,
+		depthCells: number?,
+		facing: Facing?
+	) -> (),
+	CanPlaceRoof: (
 		self: PlotState,
 		cellX: number,
 		cellZ: number,
 		widthCells: number,
 		depthCells: number,
 		facing: Facing
-	) -> (),
+	) -> boolean,
+	PlaceRoof: (
+		self: PlotState,
+		objectId: string,
+		cellX: number,
+		cellZ: number,
+		widthCells: number,
+		depthCells: number,
+		facing: Facing
+	) -> boolean,
 	IsCellBuildable: (self: PlotState, cellX: number, cellZ: number) -> boolean,
 	CanPlace: (
 		self: PlotState,
@@ -149,6 +174,7 @@ function PlotState.new(grid: any, chunkSizeInCells: number, save: SaveData): Plo
 	self.CellFree = table.create(grid:CellCount(), true)
 
 	self.FloorFilled = table.create(grid:CellCount(), false)
+	self.RoofFilled = table.create(grid:CellCount(), false)
 
 	self.HorizontalEdgeColumns = grid.Columns -- x in [1..Columns]
 	self.HorizontalEdgeRows = grid.Rows + 1 -- z in [1..Rows+1]
@@ -285,8 +311,8 @@ function PlotState:PlaceWall(
 	objectId: string,
 	cellX: number,
 	cellZ: number,
-	widthCells: number,
-	depthCells: number,
+	_widthCells: number,
+	_depthCells: number,
 	facing: Facing,
 	requiresFloorOnBothSides: boolean?
 ): boolean
@@ -302,12 +328,9 @@ function PlotState:PlaceWall(
 	end
 
 	self.Save.PlacedObjects[#self.Save.PlacedObjects + 1] = {
-		type = "Wall",
 		id = objectId,
 		cellX = cellX,
 		cellZ = cellZ,
-		width = widthCells,
-		depth = depthCells,
 		facing = facing,
 	}
 	return true
@@ -324,7 +347,9 @@ function PlotState:RemoveWall(cellX: number, cellZ: number, facing: Facing)
 	-- Remove from Save.PlacedObjects (linear scan)
 	for i = #self.Save.PlacedObjects, 1, -1 do
 		local obj = self.Save.PlacedObjects[i]
-		if obj.type == "Wall" and obj.cellX == cellX and obj.cellZ == cellZ and obj.facing == facing then
+		local _, placementType = resolveCatalog(obj.id)
+		local objFacing = obj.facing or "North"
+		if placementType == "Wall" and obj.cellX == cellX and obj.cellZ == cellZ and objFacing == facing then
 			table.remove(self.Save.PlacedObjects, i)
 			break
 		end
@@ -341,26 +366,29 @@ function PlotState:HydrateFromSave()
 	-- Placed entities
 	for i = 1, #self.Save.PlacedObjects do
 		local savedObject = self.Save.PlacedObjects[i]
-		local savedType = savedObject.type or "CellObject" -- Default to CellObject if type is missing
+		local _, placementType, width, depth = resolveCatalog(savedObject.id)
+		local facing = savedObject.facing or "North"
 
-		if savedType == "Floor" then
-			local idx = self.Grid:CellToIndex(savedObject.cellX, savedObject.cellZ) -- Changed
-			self.FloorFilled[idx] = true -- Changed
-		elseif savedType == "Wall" then
-			local alignment, edgeX, edgeZ = self:EdgeOfCell(savedObject.cellX, savedObject.cellZ, savedObject.facing)
+		if placementType == "Floor" then
+			local floorFacing: Facing = "North"
+			local indices = self.Grid:FootprintCells(savedObject.cellX, savedObject.cellZ, width, depth, floorFacing)
+			for j = 1, #indices do
+				self.FloorFilled[indices[j]] = true
+			end
+		elseif placementType == "Wall" then
+			local alignment, edgeX, edgeZ = self:EdgeOfCell(savedObject.cellX, savedObject.cellZ, facing)
 			if alignment == "Horizontal" then
 				self.EdgeFreeHorizontal[self:HorizontalEdgeIndex(edgeX, edgeZ)] = false
 			else
 				self.EdgeFreeVertical[self:VerticalEdgeIndex(edgeX, edgeZ)] = false
 			end
-		else -- CellObject
-			local cellIndices = self.Grid:FootprintCells(
-				savedObject.cellX,
-				savedObject.cellZ,
-				savedObject.width,
-				savedObject.depth,
-				savedObject.facing
-			)
+		elseif placementType == "Roof" then
+			local indices = self.Grid:FootprintCells(savedObject.cellX, savedObject.cellZ, width, depth, facing)
+			for j = 1, #indices do
+				self.RoofFilled[indices[j]] = true
+			end
+		else -- CellObject footprint occupancy
+			local cellIndices = self.Grid:FootprintCells(savedObject.cellX, savedObject.cellZ, width, depth, facing)
 			for j = 1, #cellIndices do
 				self.CellFree[cellIndices[j]] = false
 			end
@@ -369,61 +397,180 @@ function PlotState:HydrateFromSave()
 end
 
 -- Floor --
-function PlotState:HasFloorUnderFootprint(cellX: number, cellZ: number): boolean
-	local cellIndex = self.Grid:CellToIndex(cellX, cellZ)
-	return self.FloorFilled[cellIndex] == true
-end
-
-function PlotState:CanPlaceFloor(cellX: number, cellZ: number): boolean
-	-- Floors ignore CellFree and only check: chunks unlocked + not already filled.
-	if not self.Grid:IsCellInBounds(cellX, cellZ) then
-		return false
-	end
-
-	local chunkX, chunkZ = self.Grid:CellToChunk(cellX, cellZ, self.ChunkSizeInCells)
-	if not self:IsChunkUnlocked(chunkX, chunkZ) then
-		return false
-	end
-
-	local idx = self.Grid:CellToIndex(cellX, cellZ)
-	if self.FloorFilled[idx] then
-		return false
+function PlotState:HasFloorUnderFootprint(
+	cellX: number,
+	cellZ: number,
+	widthCells: number,
+	depthCells: number,
+	facing: Facing
+): boolean
+	local indices = self.Grid:FootprintCells(cellX, cellZ, widthCells, depthCells, facing)
+	for i = 1, #indices do
+		if not self.FloorFilled[indices[i]] then
+			return false
+		end
 	end
 
 	return true
 end
 
-function PlotState:PlaceFloor(id: string, cellX: number, cellZ: number): boolean
-	if not self:CanPlaceFloor(cellX, cellZ, 1, 1, "North") then -- Changed
+function PlotState:CanPlaceFloor(
+	cellX: number,
+	cellZ: number,
+	widthCells: number?,
+	depthCells: number?,
+	facing: Facing?
+): boolean
+	local w = widthCells or 1
+	local d = depthCells or 1
+	local f = facing or "North"
+
+	if w < 1 or d < 1 then
 		return false
 	end
 
-	local idx = self.Grid:CellToIndex(cellX, cellZ) -- Changed
-	self.FloorFilled[idx] = true -- Changed
+	local minCellX: number, minCellZ: number, maxCellX: number, maxCellZ: number =
+		self.Grid:FootprintBounds(cellX, cellZ, w, d, f)
+	if minCellX < 1 or minCellZ < 1 or maxCellX > self.Grid.Columns or maxCellZ > self.Grid.Rows then
+		return false
+	end
 
-	self.Save.PlacedObjects[#self.Save.PlacedObjects + 1] = { -- Changed: persist normalized 1x1 entry
-		type = "Floor",
+	local minChunkX: number, minChunkZ: number, maxChunkX: number, maxChunkZ: number =
+		self.Grid:FootprintChunkRange(cellX, cellZ, w, d, f, self.ChunkSizeInCells)
+	for chunkZ = minChunkZ, maxChunkZ do
+		for chunkX = minChunkX, maxChunkX do
+			if not self:IsChunkUnlocked(chunkX, chunkZ) then
+				return false
+			end
+		end
+	end
+
+	local indices = self.Grid:FootprintCells(cellX, cellZ, w, d, f)
+	for i = 1, #indices do
+		if self.FloorFilled[indices[i]] then
+			return false
+		end
+	end
+
+	return true
+end
+
+function PlotState:PlaceFloor(
+	id: string,
+	cellX: number,
+	cellZ: number,
+	widthCells: number?,
+	depthCells: number?,
+	facing: Facing?
+): boolean
+	local w = widthCells or 1
+	local d = depthCells or 1
+	local f = facing or "North"
+
+	if not self:CanPlaceFloor(cellX, cellZ, w, d, f) then
+		return false
+	end
+
+	local indices = self.Grid:FootprintCells(cellX, cellZ, w, d, f)
+	for i = 1, #indices do
+		self.FloorFilled[indices[i]] = true
+	end
+
+	self.Save.PlacedObjects[#self.Save.PlacedObjects + 1] = {
 		id = id,
 		cellX = cellX,
 		cellZ = cellZ,
-		width = 1,
-		depth = 1,
-		facing = "North",
+		facing = f,
 	}
 	return true
 end
 
-function PlotState:RemoveFloor(cellX: number, cellZ: number)
-	local idx = self.Grid:CellToIndex(cellX, cellZ)
-	self.FloorFilled[idx] = false
+function PlotState:RemoveFloor(cellX: number, cellZ: number, widthCells: number?, depthCells: number?, facing: Facing?)
+	local w = widthCells or 1
+	local d = depthCells or 1
+	local f = facing or "North"
+	local indices = self.Grid:FootprintCells(cellX, cellZ, w, d, f)
+	for i = 1, #indices do
+		self.FloorFilled[indices[i]] = false
+	end
 
 	for i = #self.Save.PlacedObjects, 1, -1 do
 		local obj = self.Save.PlacedObjects[i]
-		if obj.type == "Floor" and obj.cellX == cellX and obj.cellZ == cellZ then
+		local _, placementType, specWidth, specDepth = resolveCatalog(obj.id)
+		local objFacing = obj.facing or "North"
+		if
+			placementType == "Floor"
+			and obj.cellX == cellX
+			and obj.cellZ == cellZ
+			and specWidth == w
+			and specDepth == d
+			and objFacing == f
+		then
 			table.remove(self.Save.PlacedObjects, i)
 			break
 		end
 	end
+end
+
+-- Roofs --
+
+-- ADDED: CanPlaceRoof — allow overlap with objects, forbid overlap with another roof
+function PlotState:CanPlaceRoof(
+	cellX: number,
+	cellZ: number,
+	widthCells: number,
+	depthCells: number,
+	facing: Facing
+): boolean
+	-- same chunk gating you use elsewhere
+	local minX, minZ, maxX, maxZ =
+		self.Grid:FootprintChunkRange(cellX, cellZ, widthCells, depthCells, facing, self.ChunkSizeInCells)
+	for cz = minZ, maxZ do
+		for cx = minX, maxX do
+			if not self:IsChunkUnlocked(cx, cz) then
+				return false
+			end
+		end
+	end
+
+	-- forbid roof-on-roof stacking
+	local indices = self.Grid:FootprintCells(cellX, cellZ, widthCells, depthCells, facing)
+	for i = 1, #indices do
+		if self.RoofFilled[indices[i]] then
+			return false
+		end
+	end
+
+	return true
+end
+
+-- ADDED: PlaceRoof — mark roof occupancy and persist to Save.PlacedObjects
+function PlotState:PlaceRoof(
+	objectId: string,
+	cellX: number,
+	cellZ: number,
+	widthCells: number,
+	depthCells: number,
+	facing: Facing
+): boolean
+	if not self:CanPlaceRoof(cellX, cellZ, widthCells, depthCells, facing) then
+		return false
+	end
+
+	-- mark roof occupancy
+	local indices = self.Grid:FootprintCells(cellX, cellZ, widthCells, depthCells, facing)
+	for i = 1, #indices do
+		self.RoofFilled[indices[i]] = true
+	end
+
+	-- persist
+	self.Save.PlacedObjects[#self.Save.PlacedObjects + 1] = {
+		id = objectId,
+		cellX = cellX,
+		cellZ = cellZ,
+		facing = facing,
+	}
+	return true
 end
 
 -- Cell Objects --
@@ -516,12 +663,9 @@ function PlotState:Place(
 	end
 
 	self.Save.PlacedObjects[#self.Save.PlacedObjects + 1] = {
-		type = "CellObject",
 		id = objectId,
 		cellX = anchorX,
 		cellZ = anchorZ,
-		width = widthCells,
-		depth = depthCells,
 		facing = facing,
 	}
 	return true

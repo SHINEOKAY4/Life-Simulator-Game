@@ -22,8 +22,6 @@ PlacementPackets.PlotStateSync = Packet("PlotStateSync", {
 		id = Packet.String,
 		cellX = Packet.NumberU16,
 		cellZ = Packet.NumberU16,
-		width = Packet.NumberU8,
-		depth = Packet.NumberU8,
 		facing = Packet.String,
 	},
 })

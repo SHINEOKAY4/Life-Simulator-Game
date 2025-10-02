@@ -22,8 +22,9 @@ local Connection: RBXScriptConnection? = nil
 
 local SelectedItem: Model? = nil
 local CurrentItemId: string? = nil -- Added
+local CurrentItemSpec: any? = nil
 type Facing = "North" | "East" | "South" | "West"
-type PreviewKind = "CellObject" | "Floor" | "Wall"
+type PreviewKind = "CellObject" | "Floor" | "Wall" | "Roof"
 type PreviewPose = {
 	ItemId: string,
 	CellX: number,
@@ -57,7 +58,7 @@ local function BuildMarker(cellSize: number, parent: Instance): BasePart
 	p.CanQuery = false
 	p.Material = Enum.Material.Pavement
 	p.Size = Vector3.new(cellSize, 0.05, cellSize)
-	p.Transparency = 0.8
+	p.Transparency = 1
 	p.Color = Color3.fromRGB(159, 234, 159) -- default "can place" color; updated per-frame below
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
@@ -79,7 +80,7 @@ local function AcquireMarker(cellSize: number, parent: Instance): BasePart
 		if marker.Parent ~= parent then
 			marker.Parent = parent
 		end
-		marker.Transparency = 0.4
+		marker.Transparency = 0.8
 		return marker
 	end
 	local marker = BuildMarker(cellSize, parent)
@@ -130,8 +131,8 @@ local function RenderFootprintMarkers(grid, surface: BasePart, cells: { number }
 
 		-- Color based on overall validity for this footprint (simple & readable)
 		marker.Color = tint
-		marker.Transparency = 0.4
-		marker.Material = Enum.Material.Neon
+		marker.Transparency = 0.2
+		marker.Material = Enum.Material.Glass
 	end
 
 	-- Hide any unused markers this frame
@@ -176,6 +177,49 @@ local function AnyCellOverlap(a: { number }, b: { number }): boolean -- Added
 	return false
 end -- Added
 
+local function ResolvePlacementEntry(entry: any): (any?, string, number, number, Facing)
+	local itemId = entry.id or entry.Id or entry.ItemId
+	local spec = if itemId then ItemFinder.FindItemById(itemId) else nil
+	local placementType = (spec and (spec.PlacementType or spec.Type)) or "CellObject"
+	local width = entry.width or entry.Width or (spec and spec.WidthCells) or 1
+	local depth = entry.depth or entry.Depth or (spec and spec.DepthCells) or 1
+	local facing = entry.facing or entry.Facing or "North"
+
+	if placementType == "Floor" then
+		local specWidth = spec and (spec.WidthCells or spec.Width)
+		local specDepth = spec and (spec.DepthCells or spec.Depth)
+		width = specWidth or width
+		depth = specDepth or depth
+		facing = "North"
+	elseif placementType == "Wall" then
+		width, depth = 1, 1
+	end
+
+	return spec, placementType, width, depth, facing :: Facing
+end
+
+local FloorCellMap: { [number]: boolean } = {}
+
+local function PopulateCellMapForType(grid, placed, placementType: string, target: { [number]: boolean })
+	table.clear(target)
+	if not placed then
+		return target
+	end
+
+	for i = 1, #placed do
+		local entry = placed[i]
+		local _, pType, width, depth, facing = ResolvePlacementEntry(entry)
+		if pType == placementType then
+			local cells = grid:ClippedFootprintCells(entry.cellX, entry.cellZ, width, depth, facing)
+			for j = 1, #cells do
+				target[cells[j]] = true
+			end
+		end
+	end
+
+	return target
+end
+
 local function isCellOccupiedForPreview(
 	grid,
 	kind: PreviewKind,
@@ -183,23 +227,24 @@ local function isCellOccupiedForPreview(
 	cellZ: number,
 	baseW: number,
 	baseD: number,
-	facing: Facing
+	facing: Facing,
+	placed
 ): boolean
-	local snapshot = PlotStateStore.GetStateSnapshot()
-	local placed = snapshot.PlacedItems
 	if not placed or #placed == 0 then
 		return false
 	end
 
 	-- Floor: 1x1, occupied if a floor with same cell already exists
 	if kind == "Floor" then
+		local myCells = grid:ClippedFootprintCells(cellX, cellZ, baseW, baseD, "North")
 		for i = 1, #placed do
 			local p = placed[i]
-			-- Changed: infer placement type from catalog only when needed
-			local spec = ItemFinder.FindItemById(p.id or p.Id or p.ItemId) -- Added
-			local pType = (spec and (spec.PlacementType or spec.Type)) or "CellObject" -- Added
-			if pType == "Floor" and p.cellX == cellX and p.cellZ == cellZ then
-				return true
+			local _, pType, width, depth = ResolvePlacementEntry(p)
+			if pType == "Floor" then
+				local other = grid:ClippedFootprintCells(p.cellX, p.cellZ, width, depth, "North")
+				if AnyCellOverlap(myCells, other) then
+					return true
+				end
 			end
 		end
 		return false
@@ -210,11 +255,24 @@ local function isCellOccupiedForPreview(
 		local myCells = grid:ClippedFootprintCells(cellX, cellZ, baseW, baseD, facing)
 		for i = 1, #placed do
 			local p = placed[i]
-			local spec = ItemFinder.FindItemById(p.id or p.Id or p.ItemId) -- Added
-			local pType = (spec and (spec.PlacementType or spec.Type)) or "CellObject" -- Added
+			local _, pType, width, depth, otherFacing = ResolvePlacementEntry(p)
 			if pType == "CellObject" then
-				local other =
-					grid:ClippedFootprintCells(p.cellX, p.cellZ, p.width or 1, p.depth or 1, p.facing or "North") -- Changed: normalize missing width/depth/facing
+				local other = grid:ClippedFootprintCells(p.cellX, p.cellZ, width, depth, otherFacing)
+				if AnyCellOverlap(myCells, other) then
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	if kind == "Roof" then
+		local myCells = grid:ClippedFootprintCells(cellX, cellZ, baseW, baseD, facing)
+		for i = 1, #placed do
+			local p = placed[i]
+			local _, pType, width, depth, otherFacing = ResolvePlacementEntry(p)
+			if pType == "Roof" then
+				local other = grid:ClippedFootprintCells(p.cellX, p.cellZ, width, depth, otherFacing)
 				if AnyCellOverlap(myCells, other) then
 					return true
 				end
@@ -235,6 +293,8 @@ local function PreviewKindFromItem(itemId: string): PreviewKind
 		return "Floor"
 	elseif itemType == "Wall" then
 		return "Wall"
+	elseif itemType == "Roof" then
+		return "Roof"
 	else
 		return "CellObject"
 	end
@@ -277,10 +337,35 @@ local function PreviewWall(model: Model, grid: any, cellX: number, cellZ: number
 	model:PivotTo(edgeCFrame * CFrame.new(0, lift, 0))
 end
 
-local function PreviewFloor(model: Model, grid, surface: BasePart, cellX: number, cellZ)
-	local base = grid:CellToWorldCenterCFrame(cellX, cellZ)
-	local alignedCFrame = AlignToSurface(base, surface)
+local function PreviewFloor(
+	model: Model,
+	grid,
+	surface: BasePart,
+	cellX: number,
+	cellZ: number,
+	widthCells: number,
+	depthCells: number,
+	facing: Facing
+)
+	local center = grid:FootprintCenterCFrame(cellX, cellZ, widthCells, depthCells, facing)
+	local alignedCFrame = AlignToSurface(center, surface)
 	model:PivotTo(alignedCFrame)
+end
+
+local function PreviewRoof(
+	model: Model,
+	grid,
+	surface: BasePart,
+	cellX: number,
+	cellZ: number,
+	facing: Facing,
+	lift: number
+)
+	-- Roof sits slightly higher than walls/floors
+	local base = grid:CellToWorldCenterCFrame(cellX, cellZ, lift)
+	local aligned = AlignToSurface(base, surface)
+	local yaw = CFrame.Angles(0, YawFromFacing(facing), 0)
+	model:PivotTo(aligned * yaw)
 end
 
 --Preview a CellObject (WxD) at the correct world pose for the current anchor cell and facing.
@@ -338,6 +423,8 @@ function ObjectPreview.RenderPreview(itemId: string)
 		warn("Item model not found for ID: " .. itemId)
 		return
 	end
+
+	CurrentItemSpec = ItemFinder.FindItemById(itemId)
 
 	if not PlotStateStore.IsReady() then
 		warn("PlotStateStore is not ready.")
@@ -417,38 +504,71 @@ function ObjectPreview.RenderPreview(itemId: string)
 
 		LastCellX, LastCellZ, LastFacing = cellX, cellZ, CurrentFacing
 
+		local snapshot = PlotStateStore.GetStateSnapshot()
+		local placed = snapshot.PlacedItems
+
 		local isUnlocked: boolean
-		if previewKind == "Wall" or previewKind == "Floor" then -- Changed
-			isUnlocked = IsFootprintUnlocked(grid, chunkSize, cellX, cellZ, 1, 1, "North") -- Changed
+		if previewKind == "Wall" then
+			isUnlocked = IsFootprintUnlocked(grid, chunkSize, cellX, cellZ, 1, 1, CurrentFacing)
+		elseif previewKind == "Floor" then
+			isUnlocked = IsFootprintUnlocked(grid, chunkSize, cellX, cellZ, baseW, baseD, "North")
 		else
 			isUnlocked = IsFootprintUnlocked(grid, chunkSize, cellX, cellZ, baseW, baseD, CurrentFacing)
 		end
 
-		local blocked = isCellOccupiedForPreview(grid, previewKind, cellX, cellZ, baseW, baseD, CurrentFacing)
+		local blocked = isCellOccupiedForPreview(grid, previewKind, cellX, cellZ, baseW, baseD, CurrentFacing, placed)
 
 		if previewKind == "Wall" then
 			PreviewWall(model, grid, cellX, cellZ, CurrentFacing, lift)
 		elseif previewKind == "Floor" then
-			PreviewFloor(model, grid, surface, cellX, cellZ)
+			PreviewFloor(model, grid, surface, cellX, cellZ, baseW, baseD, "North")
+		elseif previewKind == "Roof" then
+			local spec = CurrentItemSpec
+			local height = spec and spec.HeightStuds or 12
+			PreviewRoof(model, grid, surface, cellX, cellZ, CurrentFacing, height) -- small Y offset
 		else
 			PreviewCellObject(model, grid, surface, cellX, cellZ, CurrentFacing, baseW, baseD, lift)
 		end
 
-		local canPlace = isUnlocked and not blocked -- Added
-		highlight.FillColor = canPlace and Color3.fromRGB(159, 234, 159) or Color3.fromRGB(219, 136, 136) -- Changed
-		highlight.OutlineColor = canPlace and Color3.fromRGB(137, 255, 119) or Color3.fromRGB(255, 85, 85) -- Changed
+		local requiresFloor = false
+		if previewKind == "Roof" then
+			local spec = CurrentItemSpec
+			requiresFloor = spec ~= nil and spec.Rules ~= nil and spec.Rules.RequiresFloorUnderAllCells == true
+		end
+
+		local missingFloorSupport = false
+		local cells: { number }
+		local canPlace = isUnlocked and not blocked
 
 		ActiveMarkerCount = 0 -- reset pool usage for this frame
 
-		local cells: { number }
-		if previewKind == "Floor" or previewKind == "Wall" then
-			-- Floors/Walls occupy a 1x1 anchor cell for the purposes of cell highlighting.
+		if previewKind == "Wall" then
+			-- Walls occupy a single anchor cell edge; treat as 1x1 for overlay markers.
 			-- Use clipped footprint so markers never go OOB.
-			cells = grid:ClippedFootprintCells(cellX, cellZ, 1, 1, "North")
+			cells = grid:ClippedFootprintCells(cellX, cellZ, 1, 1, CurrentFacing)
+		elseif previewKind == "Floor" then
+			cells = grid:ClippedFootprintCells(cellX, cellZ, baseW, baseD, "North")
 		else
 			-- CellObject uses its (possibly rotated) footprint.
 			cells = grid:ClippedFootprintCells(cellX, cellZ, baseW, baseD, CurrentFacing)
 		end
+
+		if requiresFloor and not missingFloorSupport then
+			PopulateCellMapForType(grid, placed, "Floor", FloorCellMap)
+			for i = 1, #cells do
+				if not FloorCellMap[cells[i]] then
+					missingFloorSupport = true
+					break
+				end
+			end
+		end
+
+		if requiresFloor and missingFloorSupport then
+			canPlace = false
+		end
+
+		highlight.FillColor = canPlace and Color3.fromRGB(159, 234, 159) or Color3.fromRGB(219, 136, 136)
+		highlight.OutlineColor = canPlace and Color3.fromRGB(137, 255, 119) or Color3.fromRGB(255, 85, 85)
 
 		RenderFootprintMarkers(grid, surface, cells, canPlace)
 	end)
@@ -481,6 +601,8 @@ function ObjectPreview.ClearPreview()
 	end
 
 	LastCellX, LastCellZ = nil, nil
+	CurrentItemId = nil
+	CurrentItemSpec = nil
 end
 
 function ObjectPreview.GetCurrentPose(): PreviewPose?
