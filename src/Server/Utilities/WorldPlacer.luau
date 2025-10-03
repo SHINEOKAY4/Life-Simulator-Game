@@ -16,11 +16,6 @@ local GetLiftFromPivotToBottom = PlacementHelpers.GetLiftFromPivotToBottom
 
 -- Spawn a physical model for a saved/placed item. -- Added
 function WorldPlacer.Spawn(player: Player, grid: any, itemId: string, cellX: number, cellZ: number, facing: Facing)
-	local template = ItemFinder.ResolveItemModel(itemId)
-	if not template then
-		return
-	end
-
 	local spec = ItemFinder.FindItemById(itemId)
 	if not spec then
 		return
@@ -30,13 +25,10 @@ function WorldPlacer.Spawn(player: Player, grid: any, itemId: string, cellX: num
 	local footprintWidth = spec.WidthCells or spec.Width or 1
 	local footprintDepth = spec.DepthCells or spec.Depth or 1
 
-	local model = template:Clone()
-	local tags = model:GetTags()
-	-- remove existing tags
-	for _, tag in ipairs(tags) do
-		model:RemoveTag(tag)
+	local model = ItemFinder.CloneModel(itemId)
+	if not model then
+		return
 	end
-
 	model:SetAttribute("ItemId", itemId)
 	model:SetAttribute("CellX", cellX)
 	model:SetAttribute("CellZ", cellZ)
