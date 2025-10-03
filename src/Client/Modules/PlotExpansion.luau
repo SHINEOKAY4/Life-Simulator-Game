@@ -12,10 +12,19 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
-local PlotContext = PlayerGui:WaitForChild("PlotContext")
+
+local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
+local PlotContext = InputContextsFolder:WaitForChild("PlotContext")
+
+local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
+local ChunkHighlight = AssetsFolder.VisualTools:WaitForChild("ChunkHighlight") :: Highlight
+local PriceTag = AssetsFolder.VisualTools:WaitForChild("PriceTag") :: BillboardGui
+local PriceLabel = PriceTag:FindFirstChild("Label") :: TextLabel
+
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
 local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
+local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEnabled")
 
 local camera = Workspace.CurrentCamera :: Camera
 
@@ -24,10 +33,10 @@ local PlotExpansion = {}
 local Connection: RBXScriptConnection? = nil
 local _HoveredCover: BasePart? = nil
 
-local function ClearEffects(priceTag: BillboardGui, highlight: Highlight, coversFolder: Folder)
+local function ClearEffects()
 	_HoveredCover = nil
-	highlight.Adornee = nil
-	priceTag.Adornee = coversFolder
+	ChunkHighlight.Adornee = nil
+	PriceTag.Adornee = AssetsFolder.VisualTools
 end
 
 local function BuildParams(coversFolder: Folder): RaycastParams
@@ -42,6 +51,12 @@ end
 function PlotExpansion.Init()
 	PlotBuilderEnabled.Changed:Connect(function()
 		if PlotBuilderEnabled.Value and PlotExpansionEnabled.Value then
+			PlotExpansion.Hide()
+		end
+	end)
+
+	ObjectSelectorEnabled.Changed:Connect(function()
+		if ObjectSelectorEnabled.Value and PlotExpansionEnabled.Value then
 			PlotExpansion.Hide()
 		end
 	end)
@@ -89,6 +104,13 @@ function PlotExpansion.Init()
 			print("Purchase result:", success, message)
 		end
 	end)
+
+	Player:GetAttributeChangedSignal("WithinPlot"):Connect(function()
+		local IsWithinBounds = Player:GetAttribute("WithinPlot")
+		if not IsWithinBounds then
+			PlotExpansion.Hide()
+		end
+	end)
 end
 
 function PlotExpansion.Show()
@@ -98,29 +120,18 @@ function PlotExpansion.Show()
 	local plotModel = PlotFinder.FindPlot(plotIndex)
 	local coversFolder = plotModel and plotModel:FindFirstChild("Covers") :: Folder
 	local container = plotModel and plotModel:FindFirstChild("Container") :: Folder
-	local priceTag = container and container:FindFirstChild("PriceTag") :: BillboardGui
-	local priceLabel = priceTag and priceTag:FindFirstChild("Label") :: TextLabel
-	local highlight = container and container:FindFirstChild("ChunkHighlight") :: Highlight
-	local accumulatedTime = 0
+	PriceTag.Parent = container
 
 	local params = BuildParams(coversFolder)
+	PlotFinder.StartTracking(Player)
 
-	Connection = RunService.PreRender:Connect(function(deltaTime)
-		accumulatedTime += deltaTime
-		if accumulatedTime >= 0.5 then
-			accumulatedTime = 0
-			if not PlotFinder.IsWithinBounds(Player) then
-				PlotExpansion.Hide()
-				return
-			end
-		end
-
+	Connection = RunService.PreRender:Connect(function(_deltaTime)
 		local mouse = UserInputService:GetMouseLocation()
 		local ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
 		local result = Workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
 
 		if not result or not result.Instance or not result.Instance:IsA("BasePart") then
-			ClearEffects(priceTag, highlight, coversFolder)
+			ClearEffects()
 			return
 		end
 
@@ -135,32 +146,24 @@ function PlotExpansion.Show()
 		local success, message = PlotStateStore.CanPurchaseChunk(chunkX, chunkZ)
 		--#TODO: Add Additional visual effects
 		_HoveredCover = hitCover
-		highlight.Adornee = hitCover
-		priceTag.Adornee = hitCover
-		priceLabel.Text = if not success then message else "$" .. "400" -- #TODO: pricing logic
-		highlight.FillColor = if success then Color3.fromRGB(0, 255, 0) else Color3.fromRGB(255, 0, 0)
-		highlight.OutlineColor = if success then Color3.fromRGB(0, 100, 0) else Color3.fromRGB(100, 0, 0)
+		ChunkHighlight.Adornee = hitCover
+		PriceTag.Adornee = hitCover
+		PriceLabel.Text = if not success then message else "$" .. "400" -- #TODO: pricing logic
+		ChunkHighlight.FillColor = if success then Color3.fromRGB(0, 255, 0) else Color3.fromRGB(255, 0, 0)
+		ChunkHighlight.OutlineColor = if success then Color3.fromRGB(0, 100, 0) else Color3.fromRGB(100, 0, 0)
 	end)
 end
 
 function PlotExpansion.Hide()
 	PlotExpansionEnabled.Value = false
 	PlotContext.ToggleClickPurchase.Enabled = false
-
+	PriceTag.Parent = AssetsFolder.VisualTools
 	if Connection then
 		Connection:Disconnect()
 		Connection = nil
 	end
 
-	_HoveredCover = nil
-
-	local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
-	local plotModel = PlotFinder.FindPlot(plotIndex)
-	local coversFolder = plotModel and plotModel:FindFirstChild("Covers") :: Folder
-	local container = plotModel and plotModel:FindFirstChild("Container") :: Folder
-	local priceTag = container and container:FindFirstChild("PriceTag") :: BillboardGui
-	local highlight = container and container:FindFirstChild("ChunkHighlight") :: Highlight
-	ClearEffects(priceTag, highlight, coversFolder)
+	ClearEffects()
 end
 
 return PlotExpansion

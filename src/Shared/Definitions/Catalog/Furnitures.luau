@@ -24,6 +24,17 @@ local Furnitures = {
 		Tags = { "Basic", "Table" },
 		ModelPath = { "Furnitures", "WoodenTable" },
 	},
+	OldMattress = {
+		Name = "Old Mattress",
+		PlacementType = "CellObject",
+		WidthCells = 2,
+		DepthCells = 1,
+		Facing = { "North", "East", "South", "West" },
+		Cost = 200,
+		Rules = { RequiresFloorUnderAllCells = false },
+		Tags = { "Basic", "Bed" },
+		ModelPath = { "Furnitures", "OldMattress" },
+	},
 }
 
 return Furnitures

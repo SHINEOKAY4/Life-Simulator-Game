@@ -105,28 +105,16 @@ function BuildService.Build(
 
 		return true, "Floor placed"
 	elseif itemData.PlacementType == "CellObject" then
+		local widthCells = itemData.WidthCells or itemData.Width or 1
+		local depthCells = itemData.DepthCells or itemData.Depth or 1
+
 		if itemData.Rules and itemData.Rules.RequiresFloorUnderAllCells then
-			if
-				not state:HasFloorUnderFootprint(
-					payload.CellX,
-					payload.CellZ,
-					itemData.WidthCells,
-					itemData.DepthCells,
-					facing
-				)
-			then
+			if not state:HasFloorUnderFootprint(payload.CellX, payload.CellZ, widthCells, depthCells, facing) then
 				return false, "Floor required under all cells"
 			end
 		end
 
-		local success = state:PlaceRoof(
-			payload.ItemId,
-			payload.CellX,
-			payload.CellZ,
-			itemData.WidthCells,
-			itemData.DepthCells,
-			facing
-		)
+		local success = state:Place(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, facing)
 
 		if not success then
 			return false, "Failed to place cell object"

@@ -13,7 +13,11 @@ local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
-local PreviewContext = PlayerGui:WaitForChild("PreviewContext")
+local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
+local PreviewContext = InputContextsFolder:WaitForChild("PreviewContext")
+
+local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
+local PreviewHighlight = AssetsFolder.VisualTools:WaitForChild("PreviewHighlight") :: Highlight
 
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local objectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled")
@@ -48,7 +52,7 @@ local LastFacing: string? = nil
 -- Pool of thin Parts used to highlight the footprint cells the preview will occupy.
 local CellMarkers: { BasePart } = {}
 local ActiveMarkerCount = 0
-local MARKER_Y = 0.03 -- Lift markers slightly above the surface to avoid z-fighting.
+local MARKER_Y = 0.08 -- Lift markers slightly above the surface to avoid z-fighting.
 
 local function BuildMarker(cellSize: number, parent: Instance): BasePart
 	local markerPart = Instance.new("Part")
@@ -414,9 +418,8 @@ function ObjectPreview.RenderPreview(itemId: string)
 	local chunkSize = PlotStateStore.GetStateSnapshot().ChunkInfo.ChunkSizeInCells
 	local plotModel = surface.Parent :: Model
 	local containerFolder = plotModel:FindFirstChild("Container") :: Folder
-	local previewHighlight = containerFolder:FindFirstChild("ObjectHighlight") :: Highlight
 
-	previewHighlight.Adornee = itemModel
+	PreviewHighlight.Adornee = itemModel
 
 	itemModel.Parent = containerFolder
 	SelectedItem = itemModel
@@ -546,8 +549,8 @@ function ObjectPreview.RenderPreview(itemId: string)
 			canPlace = false
 		end
 
-		previewHighlight.FillColor = canPlace and Color3.fromRGB(159, 234, 159) or Color3.fromRGB(219, 136, 136)
-		previewHighlight.OutlineColor = canPlace and Color3.fromRGB(137, 255, 119) or Color3.fromRGB(255, 85, 85)
+		PreviewHighlight.FillColor = canPlace and Color3.fromRGB(159, 234, 159) or Color3.fromRGB(219, 136, 136)
+		PreviewHighlight.OutlineColor = canPlace and Color3.fromRGB(137, 255, 119) or Color3.fromRGB(255, 85, 85)
 
 		RenderFootprintMarkers(grid, surface, cells, canPlace)
 	end)
@@ -562,11 +565,8 @@ function ObjectPreview.ClearPreview()
 	HideUnusedMarkers()
 
 	if SelectedItem then
-		local containerFolder = SelectedItem.Parent
-		local previewHighlight = containerFolder and containerFolder:FindFirstChild("ObjectHighlight") :: Highlight?
-
-		if previewHighlight then
-			previewHighlight.Adornee = nil
+		if PreviewHighlight then
+			PreviewHighlight.Adornee = nil
 		end
 
 		SelectedItem:Destroy()

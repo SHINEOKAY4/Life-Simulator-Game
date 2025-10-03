@@ -11,6 +11,7 @@ local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlotStateStore = {}
 local StateSnapshot = {}
 
+local PlotModel = nil
 local CachedSurface: BasePart? = nil
 local CachedGrid: any? = nil
 
@@ -34,7 +35,7 @@ function PlotStateStore.Init()
 				if plotModel then
 					local surface = plotModel:FindFirstChild("Surface") :: BasePart?
 					local cellSize = plotModel:GetAttribute("CellSize") :: number?
-
+					PlotModel = plotModel
 					if surface and cellSize then
 						CachedSurface = surface
 						CachedGrid = GridModule.new(surface, cellSize, "BottomLeft")
@@ -107,6 +108,10 @@ end
 
 function PlotStateStore.IsReady(): boolean
 	return StateSnapshot.ChunkInfo ~= nil and StateSnapshot.ChunkUnlocked ~= nil
+end
+
+function PlotStateStore.GetPlotModel(): Model?
+	return PlotModel
 end
 
 function PlotStateStore.GetGrid()

@@ -1,7 +1,6 @@
 --!strict
 -- ReplicatedStorage/Client/Modules/PlotBuilder.lua
 
-local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
@@ -12,13 +11,16 @@ local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 local PlotBuilderGui = PlayerGui:WaitForChild("PlotBuilderGui")
-local BuildContext = PlayerGui:WaitForChild("BuildContext")
+
+local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
+local BuildContext = InputContextsFolder:WaitForChild("BuildContext")
+
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
 local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
+local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEnabled")
 
 local PlotBuilder = {}
-local Connection: RBXScriptConnection? = nil
 
 function PlotBuilder.Init()
 	PlotExpansionEnabled.Changed:Connect(function()
@@ -26,6 +28,13 @@ function PlotBuilder.Init()
 			PlotBuilder.Hide()
 		end
 	end)
+
+	ObjectSelectorEnabled.Changed:Connect(function()
+		if ObjectSelectorEnabled.Value and PlotBuilderEnabled.Value then
+			PlotBuilder.Hide()
+		end
+	end)
+
 	BuildContext.ToggleBuildMode.Pressed:Connect(function()
 		local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 		if not plotIndex then
@@ -44,17 +53,19 @@ function PlotBuilder.Init()
 	BuildContext.PlacePreview.Pressed:Connect(function()
 		PlotBuilder.PlaceSelectedPreview()
 	end)
+
+	Player:GetAttributeChangedSignal("WithinPlot"):Connect(function()
+		local IsWithinBounds = Player:GetAttribute("WithinPlot")
+		if not IsWithinBounds then
+			PlotBuilder.Hide()
+		end
+	end)
 end
 
 function PlotBuilder.Show()
 	PlotBuilderEnabled.Value = true
 	PlotBuilderGui.Main.Visible = PlotBuilderEnabled.Value
-
-	Connection = RunService.Heartbeat:Connect(function()
-		if not PlotFinder.IsWithinBounds(Player) then
-			PlotBuilder.Hide()
-		end
-	end)
+	PlotFinder.StartTracking(Player)
 end
 
 function PlotBuilder.Hide()
@@ -62,10 +73,6 @@ function PlotBuilder.Hide()
 	PlotBuilderGui.Main.Visible = PlotBuilderEnabled.Value
 
 	PlotBuilder.RemovePreview()
-	if Connection then
-		Connection:Disconnect()
-		Connection = nil
-	end
 end
 
 function PlotBuilder.PreviewSelected(itemId: string)

@@ -1,6 +1,6 @@
 --!strict
 -- StarterPlayer/StarterPlayerScripts/Client/Modules/PlotGridOverlay.lua
-local Runservice = game:GetService("RunService")
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
@@ -8,57 +8,36 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
-local PlotContext = PlayerGui:WaitForChild("PlotContext")
+local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
+
+local PlotContext = InputContextsFolder:WaitForChild("PlotContext")
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
+local PlotGridOverlayEnabled = ActiveQueryFolder:FindFirstChild("PlotGridOverlayEnabled")
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
-local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
 
 local PlotGridOverlay = {}
-local Connection: RBXScriptConnection? = nil
-local accumulatedTime = 0
-
-PlotGridOverlay.Visible = false
-
-local function OnHeartbeat(deltaTime)
-	accumulatedTime += deltaTime
-
-	if accumulatedTime >= 0.5 then
-		accumulatedTime = 0
-		if PlotGridOverlay.Visible and not PlotFinder.IsWithinBounds(Player) then
-			PlotGridOverlay.Visible = false
-			PlotGridOverlay.Hide()
-		end
-	end
-end
 
 function PlotGridOverlay.Init()
 	print("PlotGridOverlay module initialized.")
 
-	PlotExpansionEnabled.Changed:Connect(function()
-		if PlotExpansionEnabled.Value and PlotBuilderEnabled.Value then
+	-- Ensure the grid overlay is also toggled off when PlotBuilder is disabled
+	-- grid overlay should only be available when plot builder is active
+	PlotBuilderEnabled.Changed:Connect(function()
+		if not PlotBuilderEnabled.Value then
 			PlotGridOverlay.Hide()
+			PlotContext.ToggleGridAction.Enabled = false
+		else
+			PlotContext.ToggleGridAction.Enabled = true
 		end
 	end)
 
-	PlotBuilderEnabled.Changed:Connect(function()
-		if PlotBuilderEnabled.Value == true then
+	PlotContext.ToggleGridAction.Pressed:Connect(function()
+		print("PlotContext button pressed.")
+		PlotGridOverlayEnabled.Value = not PlotGridOverlayEnabled.Value
+		if PlotGridOverlayEnabled.Value then
 			PlotGridOverlay.Show()
 		else
 			PlotGridOverlay.Hide()
-		end
-	end)
-	PlotContext.ToggleGridAction.Pressed:Connect(function()
-		print("PlotContext button pressed.")
-
-		if PlotFinder.IsWithinBounds(Player) then
-			PlotGridOverlay.Visible = not PlotGridOverlay.Visible
-
-			if PlotGridOverlay.Visible then
-				PlotGridOverlay.Show()
-				Connection = Runservice.Heartbeat:Connect(OnHeartbeat)
-			else
-				PlotGridOverlay.Hide()
-			end
 		end
 	end)
 end
@@ -77,15 +56,11 @@ function PlotGridOverlay.Show()
 	end
 
 	gridVisual.Transparency = 0
+	PlotGridOverlayEnabled.Value = true
 end
 
 function PlotGridOverlay.Hide()
 	print("Hiding plot grid.")
-
-	if Connection then
-		Connection:Disconnect()
-		Connection = nil
-	end
 
 	local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
@@ -99,6 +74,7 @@ function PlotGridOverlay.Hide()
 	end
 
 	gridVisual.Transparency = 1
+	PlotGridOverlayEnabled.Value = false
 end
 
 return PlotGridOverlay

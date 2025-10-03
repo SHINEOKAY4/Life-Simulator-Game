@@ -16,15 +16,17 @@ local RightDock = PlotBuilderGui:WaitForChild("Main").Bottom.RightDock
 
 local HomeFrame = LeftDock:WaitForChild("Home")
 local FurnitureFrame = LeftDock:WaitForChild("Furnitures")
+local EnvironmentFrame = LeftDock:WaitForChild("Environment")
 
 local CategorySelection = PlotBuilderGui:WaitForChild("CategorySelection")
 local HomeSelection = PlotBuilderGui:WaitForChild("HomeSelection")
 local FurnitureSelection = PlotBuilderGui:WaitForChild("FurnitureSelection")
+local EnvironmentSelection = PlotBuilderGui:WaitForChild("EnvironmentSelection")
 
 local PlotBuilderUI = {}
 
 local ActiveView: string? = nil
-type CategoryPanel = "Home" | "Furnitures"
+type CategoryPanel = "Home" | "Furnitures" | "Environment"
 local ActivePanel: CategoryPanel? = nil
 
 local CATEGORY_TAGS = {
@@ -35,6 +37,9 @@ local CATEGORY_TAGS = {
 	Chairs = "Chair",
 	Tables = "Table",
 	Beds = "Bed",
+	Trees = "Tree",
+	Plants = "Plant",
+	Rocks = "Rock",
 }
 
 local buttonCache: { [string]: { TextButton } } = {}
@@ -157,9 +162,12 @@ local function switchCategoryPanel(category: CategoryPanel)
 	clearActiveCategory()
 
 	local isHome = ActivePanel == "Home"
+	local isFurniture = ActivePanel == "Furnitures"
+	local isEnvironment = ActivePanel == "Environment"
 	HomeFrame.Visible = isHome
 
-	FurnitureFrame.Visible = not isHome
+	FurnitureFrame.Visible = isFurniture
+	EnvironmentFrame.Visible = isEnvironment
 
 	scrollFrame.Visible = true
 end
@@ -210,6 +218,11 @@ function PlotBuilderUI:Init()
 		switchCategoryPanel("Furnitures")
 	end)
 
+	CategorySelection.Environment.Pressed:Connect(function()
+		print("CategorySelection Environment button pressed")
+		switchCategoryPanel("Environment")
+	end)
+
 	HomeSelection.Floors.Pressed:Connect(function()
 		print("HomeSelection Floors button pressed")
 		setActiveCategory("Floors")
@@ -243,6 +256,21 @@ function PlotBuilderUI:Init()
 	FurnitureSelection.Beds.Pressed:Connect(function()
 		print("FurnitureSelection Beds button pressed")
 		setActiveCategory("Beds")
+	end)
+
+	EnvironmentSelection.Trees.Pressed:Connect(function()
+		print("EnvironmentSelection Trees button pressed")
+		setActiveCategory("Trees")
+	end)
+
+	EnvironmentSelection.Plants.Pressed:Connect(function()
+		print("EnvironmentSelection Plants button pressed")
+		setActiveCategory("Plants")
+	end)
+
+	EnvironmentSelection.Rocks.Pressed:Connect(function()
+		print("EnvironmentSelection Rocks button pressed")
+		setActiveCategory("Rocks")
 	end)
 
 	switchCategoryPanel("Home")

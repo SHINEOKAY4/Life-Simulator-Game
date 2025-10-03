@@ -2,6 +2,7 @@
 -- ReplicatedStorage/Shared/Utilities/PlotFinder.lua
 -- Finds and manages plot models tagged with "Plot".
 
+local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 
 local PlotFinder = {}
@@ -93,6 +94,62 @@ function PlotFinder.IsWithinBounds(player: Player): boolean
 	local withinVertical = math.abs(localPoint.Y - topY) <= verticalTolerance
 
 	return withinX and withinZ and withinVertical
+end
+
+------------------------------------------------------------------
+
+if RunService:IsClient() then
+	local Connection = nil :: RBXScriptConnection?
+	local TrackingEnabled = false
+
+	local function StopTracking(player: Player)
+		if Connection then
+			Connection:Disconnect()
+			Connection = nil
+		end
+		TrackingEnabled = false
+		if player and player:GetAttribute("WithinPlot") then
+			player:SetAttribute("WithinPlot", false)
+		end
+	end
+
+	--[=[
+		@within PlotFinder
+		@private
+		Starts tracking whether the given player is within their plot bounds.
+		This function sets up a heartbeat connection to periodically check
+		the player's position and update the "WithinPlot" BoolValue in ReplicatedStorage.Shared.Booleans.
+	
+		@param player Player The player to track.
+	]=]
+	PlotFinder.StartTracking = function(player: Player)
+		if TrackingEnabled then
+			return
+		end
+		if not player then
+			return
+		end
+
+		TrackingEnabled = true
+		local accumulatedTime = 0
+
+		Connection = RunService.Heartbeat:Connect(function(deltaTime)
+			accumulatedTime += deltaTime
+
+			if accumulatedTime >= 0.5 then
+				accumulatedTime = 0
+
+				if PlotFinder.IsWithinBounds(player) then
+					if player:GetAttribute("WithinPlot") then
+						return
+					end
+					player:SetAttribute("WithinPlot", true)
+				else
+					StopTracking(player)
+				end
+			end
+		end)
+	end
 end
 
 BuildOrderedPlotList()
