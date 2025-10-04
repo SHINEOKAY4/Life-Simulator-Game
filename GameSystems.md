@@ -4,11 +4,9 @@
 
 - [Core Systems](#core-systems)
   - [1. Plot System](#1-plot-system)
-  - [2. House Shell System](#2-house-shell-system)
   - [3. Item System](#3-item-system)
   - [4. NPC System](#4-npc-system)
   - [5. Economy System](#5-economy-system)
-  - [6. Persistence System](#6-persistence-system)
 - [Gameplay Systems](#gameplay-systems)
   - [7. Motives & Needs System](#7-motives--needs-system)
   - [8. Stat & Progression System](#8-stat--progression-system)
@@ -35,11 +33,6 @@
 - Handles placement/removal of items
 - Tracks occupancy for collision/validation
 
-### 2. House Shell System
-
-- Visualizes player progression (Tier 0 shack → Tier 3 villa)
-- Expands buildable area each upgrade
-- Optionally supports skins/themes
 
 ### 3. Item System
 
@@ -61,12 +54,6 @@
 - Daily payouts, scaling by stats
 - Costs for items, upgrades, NPC creation
 - Balance curve: slow early, exponential midgame, prestige/rebirth late
-
-### 6. Persistence System
-
-- Saves/loads player blob (coins, house tier, items, NPCs)
-- Handles versioning, migrations, and idempotency
-- Supports large blobs safely (many NPCs, items)
 
 ---
 
@@ -108,6 +95,7 @@
 - Catalog shop menu
 - Ghost preview with red/green snap
 - Error feedback (occupied, no funds)
+- Rotation sanity check: select a placed wall/cell object, press Rotate on the radial UI, and confirm the server re-spawns it with the new facing without duplicating or deleting it.
 
 ### 12. HUD / Info System
 
@@ -118,7 +106,7 @@
 
 ### 13. Visual World System
 
-- House shells, item models, NPC avatars
+- item models, NPC avatars
 - NPC animations (idle, walk, use item)
 - Placement visuals (hover grid highlight)
 

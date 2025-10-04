@@ -31,7 +31,7 @@ local Connection: RBXScriptConnection? = nil
 local SelectedItem: Model? = nil
 local CurrentItemId: string? = nil
 local CurrentItemSpec: any? = nil
-type Facing = PlacementHelpers.Facing
+export type Facing = PlacementHelpers.Facing
 type PreviewKind = "CellObject" | "Floor" | "Wall" | "Roof"
 type PreviewPose = {
 	ItemId: string,
@@ -39,6 +39,14 @@ type PreviewPose = {
 	CellZ: number,
 	Facing: Facing,
 	Kind: PreviewKind,
+}
+
+type MoveOriginInfo = {
+	ItemId: string,
+	CellX: number,
+	CellZ: number,
+	Facing: Facing,
+	PlacementType: string,
 }
 
 local CurrentKind: PreviewKind = "CellObject"
@@ -49,10 +57,16 @@ local LastCellX: number? = nil
 local LastCellZ: number? = nil
 local LastFacing: string? = nil
 
+local MoveOriginSignature: MoveOriginInfo? = nil
+local MoveHoldActive = false
+local MoveHoldMousePosition: Vector2? = nil
+local MOUSE_MOVE_RELEASE_THRESHOLD = 2
+
 -- Pool of thin Parts used to highlight the footprint cells the preview will occupy.
 local CellMarkers: { BasePart } = {}
 local ActiveMarkerCount = 0
-local MARKER_Y = 0.08 -- Lift markers slightly above the surface to avoid z-fighting.
+local MARKER_Y = 0.08 -- Lift markers slightly above the surface to avoid z-fighting for tall previews.
+local FLOOR_MARKER_Y = -0.02 -- Sink floor markers slightly so thin floor meshes stay visible.
 
 local function BuildMarker(cellSize: number, parent: Instance): BasePart
 	local markerPart = Instance.new("Part")
@@ -99,7 +113,13 @@ local function HideUnusedMarkers()
 	end
 end
 
-local function RenderFootprintMarkers(grid, surface: BasePart, cells: { number }, canPlace: boolean)
+local function RenderFootprintMarkers(
+	grid,
+	surface: BasePart,
+	cells: { number },
+	canPlace: boolean,
+	previewKind: PreviewKind
+)
 	-- Parent markers next to the previewed model (the plot container keeps things tidy).
 	local plotModel = surface.Parent :: Model
 	local container = plotModel:FindFirstChild("Container") :: Folder
@@ -121,7 +141,8 @@ local function RenderFootprintMarkers(grid, surface: BasePart, cells: { number }
 		local center = grid:CellToWorldCenterCFrame(cellXIndex, cellZIndex)
 		local aligned =
 			CFrame.lookAt(center.Position, center.Position + surface.CFrame.LookVector, surface.CFrame.UpVector)
-		marker.CFrame = aligned * CFrame.new(0, MARKER_Y, 0)
+		local markerYOffset = if previewKind == "Floor" then FLOOR_MARKER_Y else MARKER_Y
+		marker.CFrame = aligned * CFrame.new(0, markerYOffset, 0)
 
 		-- Color based on overall validity for this footprint.
 		marker.Color = markerColor
@@ -180,8 +201,7 @@ local function PopulateCellMapForType(grid, placed, placementType: string, targe
 		return target
 	end
 
-	for i = 1, #placed do
-		local placedEntry = placed[i]
+	for _, placedEntry in pairs(placed) do
 		local _, entryPlacementType, width, depth, facing = ResolvePlacementEntry(placedEntry)
 		if entryPlacementType == placementType then
 			local cells = grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, facing)
@@ -202,22 +222,34 @@ local function isCellOccupiedForPreview(
 	baseWidthCells: number,
 	baseDepthCells: number,
 	facing: Facing,
-	placed
+	placed,
+	ignorePlacement: MoveOriginInfo?
 ): boolean
-	if not placed or #placed == 0 then
+	if not placed or next(placed) == nil then
 		return false
 	end
 
 	-- Floor: 1x1, occupied if a floor already exists in the same cell.
 	if kind == "Floor" then
 		local myCells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, "North")
-		for i = 1, #placed do
-			local placedEntry = placed[i]
-			local _, placementType, width, depth = ResolvePlacementEntry(placedEntry)
-			if placementType == "Floor" then
-				local other = grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, "North")
-				if AnyCellOverlap(myCells, other) then
-					return true
+		for _, placedEntry in pairs(placed) do
+			local _, placementType, width, depth, otherFacing = ResolvePlacementEntry(placedEntry)
+			if
+				not (
+					ignorePlacement
+					and placedEntry.id == ignorePlacement.ItemId
+					and placedEntry.cellX == ignorePlacement.CellX
+					and placedEntry.cellZ == ignorePlacement.CellZ
+					and otherFacing == ignorePlacement.Facing
+					and placementType == ignorePlacement.PlacementType
+				)
+			then
+				if placementType == "Floor" then
+					local other =
+						grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, "North")
+					if AnyCellOverlap(myCells, other) then
+						return true
+					end
 				end
 			end
 		end
@@ -227,14 +259,24 @@ local function isCellOccupiedForPreview(
 	-- CellObject: blocked by other CellObjects’ occupied cells (floors do not block here).
 	if kind == "CellObject" then
 		local myCells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, facing)
-		for i = 1, #placed do
-			local placedEntry = placed[i]
+		for _, placedEntry in pairs(placed) do
 			local _, placementType, width, depth, otherFacing = ResolvePlacementEntry(placedEntry)
-			if placementType == "CellObject" then
-				local other =
-					grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, otherFacing)
-				if AnyCellOverlap(myCells, other) then
-					return true
+			if
+				not (
+					ignorePlacement
+					and placedEntry.id == ignorePlacement.ItemId
+					and placedEntry.cellX == ignorePlacement.CellX
+					and placedEntry.cellZ == ignorePlacement.CellZ
+					and otherFacing == ignorePlacement.Facing
+					and placementType == ignorePlacement.PlacementType
+				)
+			then
+				if placementType == "CellObject" then
+					local other =
+						grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, otherFacing)
+					if AnyCellOverlap(myCells, other) then
+						return true
+					end
 				end
 			end
 		end
@@ -243,14 +285,24 @@ local function isCellOccupiedForPreview(
 
 	if kind == "Roof" then
 		local myCells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, facing)
-		for i = 1, #placed do
-			local placedEntry = placed[i]
+		for _, placedEntry in pairs(placed) do
 			local _, placementType, width, depth, otherFacing = ResolvePlacementEntry(placedEntry)
-			if placementType == "Roof" then
-				local other =
-					grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, otherFacing)
-				if AnyCellOverlap(myCells, other) then
-					return true
+			if
+				not (
+					ignorePlacement
+					and placedEntry.id == ignorePlacement.ItemId
+					and placedEntry.cellX == ignorePlacement.CellX
+					and placedEntry.cellZ == ignorePlacement.CellZ
+					and otherFacing == ignorePlacement.Facing
+					and placementType == ignorePlacement.PlacementType
+				)
+			then
+				if placementType == "Roof" then
+					local other =
+						grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, otherFacing)
+					if AnyCellOverlap(myCells, other) then
+						return true
+					end
 				end
 			end
 		end
@@ -383,12 +435,17 @@ function ObjectPreview.Init()
 		CurrentFacing = order[i]
 		LastFacing = nil
 	end)
+
+	PreviewContext.CancelPreview.Pressed:Connect(function()
+		ObjectPreview.ClearPreview()
+	end)
 end
 
-function ObjectPreview.RenderPreview(itemId: string)
+function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 	ObjectPreview.ClearPreview()
 
 	objectPreviewEnabled.Value = true
+	PreviewContext.CancelPreview.Enabled = true
 
 	local itemModel = ItemFinder.ResolveItemModel(itemId)
 	if not itemModel then
@@ -438,7 +495,7 @@ function ObjectPreview.RenderPreview(itemId: string)
 	raycastParams.FilterDescendantsInstances = { surface }
 	raycastParams.IgnoreWater = true
 
-	CurrentFacing = "North"
+	CurrentFacing = initialFacing or "North"
 
 	local previewKind: PreviewKind = PreviewKindFromItem(itemId)
 	local baseWidthCells, baseDepthCells = GetItemFootprintCells(itemId)
@@ -457,6 +514,17 @@ function ObjectPreview.RenderPreview(itemId: string)
 
 		-- Cast a ray from the current mouse position.
 		local mouse = UserInputService:GetMouseLocation()
+		if MoveHoldActive then
+			local originalMousePosition = MoveHoldMousePosition
+			if originalMousePosition then
+				if (mouse - originalMousePosition).Magnitude > MOUSE_MOVE_RELEASE_THRESHOLD then
+					MoveHoldActive = false
+					MoveHoldMousePosition = nil
+				end
+			else
+				MoveHoldMousePosition = mouse
+			end
+		end
 		local ray = Camera:ViewportPointToRay(mouse.X, mouse.Y)
 
 		local result = Workspace:Raycast(ray.Origin, ray.Direction * 2048, raycastParams)
@@ -467,6 +535,17 @@ function ObjectPreview.RenderPreview(itemId: string)
 		local isInside, cellX, cellZ = grid:WorldPointToCell(result.Position)
 		if not isInside then
 			cellX, cellZ = grid:WorldPointToClampedCell(result.Position)
+		end
+
+		local originSignature = MoveOriginSignature
+		if MoveHoldActive then
+			if originSignature and originSignature.CellX ~= nil and originSignature.CellZ ~= nil then
+				cellX = originSignature.CellX
+				cellZ = originSignature.CellZ
+			else
+				MoveHoldActive = false
+				MoveHoldMousePosition = nil
+			end
 		end
 
 		if LastCellX == cellX and LastCellZ == cellZ and LastFacing == CurrentFacing then
@@ -488,6 +567,11 @@ function ObjectPreview.RenderPreview(itemId: string)
 				IsFootprintUnlocked(grid, chunkSize, cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
 		end
 
+		local ignorePlacement = nil
+		if MoveOriginSignature ~= nil and CurrentItemId == MoveOriginSignature.ItemId then
+			ignorePlacement = MoveOriginSignature
+		end
+
 		local blocked = isCellOccupiedForPreview(
 			grid,
 			previewKind,
@@ -496,7 +580,8 @@ function ObjectPreview.RenderPreview(itemId: string)
 			baseWidthCells,
 			baseDepthCells,
 			CurrentFacing,
-			placed
+			placed,
+			ignorePlacement
 		)
 
 		if previewKind == "Wall" then
@@ -552,7 +637,7 @@ function ObjectPreview.RenderPreview(itemId: string)
 		PreviewHighlight.FillColor = canPlace and Color3.fromRGB(159, 234, 159) or Color3.fromRGB(219, 136, 136)
 		PreviewHighlight.OutlineColor = canPlace and Color3.fromRGB(137, 255, 119) or Color3.fromRGB(255, 85, 85)
 
-		RenderFootprintMarkers(grid, surface, cells, canPlace)
+		RenderFootprintMarkers(grid, surface, cells, canPlace, previewKind)
 	end)
 end
 
@@ -560,6 +645,7 @@ function ObjectPreview.ClearPreview()
 	-- Clear the current preview.
 	PreviewContext.RotateLeft.Enabled = false
 	PreviewContext.RotateRight.Enabled = false
+	PreviewContext.CancelPreview.Enabled = false
 	objectPreviewEnabled.Value = false
 	ActiveMarkerCount = 0
 	HideUnusedMarkers()
@@ -581,6 +667,9 @@ function ObjectPreview.ClearPreview()
 	LastCellX, LastCellZ = nil, nil
 	CurrentItemId = nil
 	CurrentItemSpec = nil
+	MoveOriginSignature = nil
+	MoveHoldActive = false
+	MoveHoldMousePosition = nil
 end
 
 function ObjectPreview.GetCurrentPose(): PreviewPose?
@@ -599,6 +688,49 @@ function ObjectPreview.GetCurrentPose(): PreviewPose?
 		Facing = CurrentFacing,
 		Kind = CurrentKind,
 	}
+end
+
+function ObjectPreview.SetMoveOrigin(originInfo: {
+	ItemId: string?,
+	CellX: number?,
+	CellZ: number?,
+	Facing: Facing?,
+}?)
+	if not originInfo then
+		MoveOriginSignature = nil
+		MoveHoldActive = false
+		MoveHoldMousePosition = nil
+		return
+	end
+
+	local itemId = originInfo.ItemId
+	local cellX = originInfo.CellX
+	local cellZ = originInfo.CellZ
+	if not itemId or cellX == nil or cellZ == nil then
+		MoveOriginSignature = nil
+		return
+	end
+
+	local entry = {
+		id = itemId,
+		cellX = cellX,
+		cellZ = cellZ,
+		facing = originInfo.Facing,
+	}
+
+	local _, placementType, _, _, resolvedFacingValue = ResolvePlacementEntry(entry)
+	local resolvedFacing: Facing = resolvedFacingValue :: Facing
+
+	MoveOriginSignature = {
+		ItemId = itemId,
+		CellX = cellX,
+		CellZ = cellZ,
+		Facing = resolvedFacing,
+		PlacementType = placementType,
+	}
+
+	MoveHoldActive = true
+	MoveHoldMousePosition = UserInputService:GetMouseLocation()
 end
 
 -- Expose the current preview pose so plot builder can send it to the server.

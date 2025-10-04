@@ -12,11 +12,36 @@ local PlotState = require(ServerScriptService.Server.Classes.PlotState)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 
 type PlotRuntimeState = PlotState.PlotState
+type PlacedObjectMap = PlotState.PlacedObjectMap
+type PlacedObjectSnapshot = { id: string, cellX: number, cellZ: number, facing: string }
 
 local PlotService = {}
 local PlotModels: { [number]: Model } = PlotFinder.GetOrderedPlots()
 local PlotGrids: { [number]: any } = {} -- [plotIndex] = Grid
 local PlayerRuntime: { [number]: PlotRuntimeState } = {}
+
+local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapshot }
+	local keys = {}
+	for key in pairs(map) do
+		keys[#keys + 1] = key
+	end
+	table.sort(keys)
+
+	local result = table.create(#keys)
+	for index = 1, #keys do
+		local saved = map[keys[index]]
+		if saved then
+			result[index] = {
+				id = saved.id,
+				cellX = saved.cellX,
+				cellZ = saved.cellZ,
+				facing = (saved.facing or "North") :: string,
+			}
+		end
+	end
+
+	return result
+end
 
 local function InitializePlayerPlot(player: Player, plotModel: Model)
 	local coversFolder = plotModel:FindFirstChild("Covers") :: Folder
@@ -50,7 +75,6 @@ function PlotService.Init()
 		return PlotService.Claim(player, plotIndex)
 	end
 
-	--#TODO: implement client side logic for unlocking chunks
 	Packets.UnlockChunkRequest.OnServerInvoke = function(player, chunkX, chunkZ)
 		local plotIndex = player:GetAttribute("OwnedPlotIndex") :: number
 		local plotModel = PlotFinder.FindPlot(plotIndex)
@@ -112,13 +136,9 @@ function PlotService.Load(player: Player, plotModel: Model)
 
 	PlayerRuntime[userId] = runtimeState
 
-	for i = 1, #data.PlacedObjects do -- Added
-		local obj = data.PlacedObjects[i] -- Added
-		-- Prefer catalog PlacementType if available; otherwise trust save's `type` -- Added
-		local facing = obj.facing
-
-		-- WorldPlacer consults catalog specs for footprint sizing, so saved width/depth are honored. -- Added
-		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing) -- Added
+	for _, obj in pairs(data.PlacedObjects) do
+		local facing = obj.facing or "North"
+		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing)
 	end
 
 	-- Possibly add a revision to discard stale client state in future (if problematic)
@@ -129,7 +149,8 @@ function PlotService.Load(player: Player, plotModel: Model)
 		ChunkRows = runtimeState.ChunkRows,
 	}
 
-	Packets.PlotStateSync:FireClient(player, chunkInfo, runtimeState.ChunkUnlocked, data.PlacedObjects)
+	local placedSnapshot = flattenPlacedObjects(data.PlacedObjects)
+	Packets.PlotStateSync:FireClient(player, chunkInfo, runtimeState.ChunkUnlocked, placedSnapshot)
 end
 
 function PlotService.Unclaim(player: Player)

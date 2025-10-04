@@ -21,12 +21,12 @@ local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEnabled") :: BoolValue
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled") :: BoolValue
 local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled") :: BoolValue
+local RadialBillboardButtonEnabled = ActiveQueryFolder:WaitForChild("RadialBillboardButtonEnabled") :: BoolValue
+local ObjectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled") :: BoolValue
 
 local ObjectSelector = {}
-local SelectedModel: Model? = nil
 
 local function ClearSelection()
-	SelectedModel = nil
 	SelectionHighlight.Adornee = nil
 	BillboardRadialUI.Hide()
 end
@@ -39,6 +39,9 @@ local function OnWorldClick()
 		return
 	end
 
+	if ObjectPreviewEnabled.Value then -- if object preview is active, ignore selection input
+		return
+	end
 	local containerFolder = plotModel:FindFirstChild("Container") :: Folder
 
 	local unitRay = Player:GetMouse().UnitRay
@@ -53,9 +56,7 @@ local function OnWorldClick()
 	if raycastResult and raycastResult.Instance then
 		local hitPart = raycastResult.Instance
 		local selectedModel = hitPart:FindFirstAncestorOfClass("Model")
-		SelectedModel = selectedModel
 		print("Selected model:", selectedModel:GetFullName())
-		SelectedModel = selectedModel
 		SelectionHighlight.Adornee = selectedModel
 		-- then open context menu for actions (e.g., delete, move, rotate) / radial menu controller script
 		BillboardRadialUI.Show(selectedModel)
@@ -79,7 +80,16 @@ function ObjectSelector.Init()
 		end
 	end)
 
+	--ObjectPreviewEnabled.Changed:Connect(function()
+	--	if ObjectPreviewEnabled.Value and ObjectSelectorEnabled.Value then
+	--ObjectSelector.Hide()
+	--	end
+	--end)
+
 	ObjectSelectorContext.SelectObject.Pressed:Connect(function()
+		if RadialBillboardButtonEnabled.Value then
+			return
+		end
 		OnWorldClick()
 	end)
 
@@ -112,7 +122,9 @@ end
 function ObjectSelector.Show()
 	ObjectSelectorEnabled.Value = true
 	ObjectSelectorContext.SelectObject.Enabled = true
+	PlotFinder.StartTracking(Player)
 end
+
 function ObjectSelector.Hide()
 	ObjectSelectorEnabled.Value = false -- Do not put this in Clear selection function so we can call ClearSelection without disabling the selector
 	ObjectSelectorContext.SelectObject.Enabled = false

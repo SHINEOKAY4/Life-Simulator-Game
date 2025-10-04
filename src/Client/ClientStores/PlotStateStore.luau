@@ -7,6 +7,8 @@ local Players = game:GetService("Players")
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local GridModule = require(ReplicatedStorage.Shared.Utilities.Grid)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
+local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 
 local PlotStateStore = {}
 local StateSnapshot = {}
@@ -23,7 +25,23 @@ function PlotStateStore.Init()
 	Packets.PlotStateSync.OnClientEvent:Connect(function(chunkInfo, unlockedChunks, placedItems)
 		StateSnapshot.ChunkInfo = chunkInfo
 		StateSnapshot.ChunkUnlocked = unlockedChunks
-		StateSnapshot.PlacedItems = placedItems
+		local placedMap = {}
+		if placedItems then
+			for _, entry in ipairs(placedItems) do
+				local facing = entry.facing or "North"
+				local itemSnapshot = {
+					id = entry.id,
+					cellX = entry.cellX,
+					cellZ = entry.cellZ,
+					facing = facing,
+				}
+				local spec = itemSnapshot.id and ItemFinder.FindItemById(itemSnapshot.id) or nil
+				local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
+				local key = PlacementKey.ForPlacementType(itemSnapshot.cellX, itemSnapshot.cellZ, facing, placementType)
+				placedMap[key] = itemSnapshot
+			end
+		end
+		StateSnapshot.PlacedItems = placedMap
 
 		-- Lazy initialize grid, helpful for external modules that need it
 		if not CachedGrid then
@@ -61,28 +79,9 @@ function PlotStateStore.Init()
 	Packets.PlacementDelta.OnClientEvent:Connect(function(delta)
 		-- delta shape (per PlacementPackets): { Action = "Placed", Item = { Id, CellX, CellZ, Facing } }
 
-		if not StateSnapshot.PlacedItems then
-			StateSnapshot.PlacedItems = {} -- Added: ensure table exists
-		end
+		StateSnapshot.PlacedItems = StateSnapshot.PlacedItems or {}
 
-		if delta and delta.Action == "Removed" and delta.Item then
-			for i = #StateSnapshot.PlacedItems, 1, -1 do
-				local o = StateSnapshot.PlacedItems[i]
-				local id = o.id or o.Id or o.ItemId
-				if
-					id == delta.Item.ItemId
-					and o.cellX == delta.Item.CellX
-					and o.cellZ == delta.Item.CellZ
-					and (o.facing or "North") == (delta.Item.Facing or "North")
-				then
-					table.remove(StateSnapshot.PlacedItems, i)
-					break
-				end
-			end
-			return
-		end
-		-- Only handle "Placed" for now (YAGNI) -- Added
-		if not delta or delta.Action ~= "Placed" or not delta.Item then
+		if not delta or not delta.Item then
 			return
 		end
 
@@ -90,15 +89,26 @@ function PlotStateStore.Init()
 		if not itemId then
 			return
 		end
-		-- Append a normalized item entry, matching PlotStateSync schema
-		local entry = {
+
+		local facing = delta.Item.Facing or "North"
+		local spec = itemId and ItemFinder.FindItemById(itemId) or nil
+		local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
+		local key = PlacementKey.ForPlacementType(delta.Item.CellX, delta.Item.CellZ, facing, placementType)
+		if delta.Action == "Removed" then
+			StateSnapshot.PlacedItems[key] = nil
+			return
+		end
+
+		if delta.Action ~= "Placed" then
+			return
+		end
+
+		StateSnapshot.PlacedItems[key] = {
 			id = itemId,
 			cellX = delta.Item.CellX,
 			cellZ = delta.Item.CellZ,
-			facing = delta.Item.Facing or "North",
+			facing = facing,
 		}
-
-		StateSnapshot.PlacedItems[#StateSnapshot.PlacedItems + 1] = entry
 	end)
 end
 
@@ -192,5 +202,4 @@ function PlotStateStore.RequestPurchase(chunkX: number, chunkZ: number): (boolea
 	return success, message
 end
 
---#TODO: Add function to get placed items, purchase items, remove items, etc.
 return PlotStateStore

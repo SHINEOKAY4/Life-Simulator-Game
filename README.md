@@ -66,7 +66,7 @@ Players can also **intervene directly** using the **Direct Action System** — s
 
 ### Late Game Progression
 
-- Upgrade house shell to Tier 3 (villa) → max grid space.  
+- Upgrade → max grid space.  
 - Support 4–6 NPCs simultaneously.  
 - Unlock high-end items (gym, advanced computer, luxury kitchen).  
 - NPCs achieve top-tier jobs (doctor, engineer, musician).  

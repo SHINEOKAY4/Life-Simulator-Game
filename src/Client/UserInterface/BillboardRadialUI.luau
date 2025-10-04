@@ -6,15 +6,22 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local ObjectAction = require(script.Parent.Parent.Modules.ObjectAction)
 
-local player = Players.LocalPlayer
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
+local ObjectSelectorContext = InputContextsFolder:WaitForChild("ObjectSelectorContext")
 
-local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
-local RadialBillboard = AssetsFolder.VisualTools:WaitForChild("RadialBillboard") :: BillboardGui
+local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
+local RadialBillboardButtonEnabled = ActiveQueryFolder:WaitForChild("RadialBillboardButtonEnabled") :: BoolValue
+
+local RadialBillboard = PlayerGui:WaitForChild("RadialBillboard") :: BillboardGui
 local HubFrame = RadialBillboard:WaitForChild("Root"):FindFirstChild("Hub") :: Frame
 local CenterLabel = HubFrame:FindFirstChild("CenterLabel") :: TextLabel
 
 local BillboardRadialUI = {}
+local AdorneeModel: Model? = nil
 
 local OriginalButtonPositions: { [TextButton]: UDim2 } = {}
 
@@ -71,27 +78,93 @@ local function AnimateButtonsOut()
 	end
 end
 
+local function UiClickGuard(length: number?)
+	if RadialBillboardButtonEnabled.Value then
+		return
+	end
+	local cooldown = length or 0.18
+	RadialBillboardButtonEnabled.Value = true
+	task.delay(cooldown, function()
+		RadialBillboardButtonEnabled.Value = false
+	end)
+end
+
 function BillboardRadialUI.Init()
 	print("BillboardRadialUI initialized.")
-end
-function BillboardRadialUI.Show(adornee: Model)
-	local plotModel = PlotFinder.FindPlot(player:GetAttribute("OwnedPlotIndex") :: number)
+	ObjectSelectorContext.CloseSelector.Pressed:Connect(function()
+		BillboardRadialUI.Hide()
+		ObjectAction.Close()
+		UiClickGuard() -- The order here is important to prevent input conflicts, this must be called after hiding the UI
+		print("CloseSelector action triggered")
+	end)
 
+	ObjectSelectorContext.MoveObject.Pressed:Connect(function()
+		print("MoveObject action triggered")
+		UiClickGuard()
+		if not AdorneeModel then
+			warn("No model selected for move action.")
+			return
+		end
+
+		ObjectAction.Move(AdorneeModel, Vector3.new(0, 0, 0))
+		--#TODO: You can add functionality here to handle the move action
+	end)
+
+	ObjectSelectorContext.RotateObject.Pressed:Connect(function()
+		print("RotateObject action triggered")
+		UiClickGuard()
+		if not AdorneeModel then
+			warn("No model selected for rotate action.")
+			return
+		end
+		ObjectAction.Rotate(AdorneeModel, Vector3.new(0, 0, 0))
+		--#TODO: You can add functionality here to handle the rotate action
+	end)
+
+	ObjectSelectorContext.DeleteObject.Pressed:Connect(function()
+		print("DeleteObject action triggered")
+		UiClickGuard()
+		if not AdorneeModel then
+			warn("No model selected for delete action.")
+			return
+		end
+		ObjectAction.Delete(AdorneeModel)
+		--#TODO: You can add functionality here to handle the delete action
+	end)
+
+	ObjectSelectorContext.CopyObject.Pressed:Connect(function()
+		print("CopyObject action triggered")
+		UiClickGuard()
+		if not AdorneeModel then
+			warn("No model selected for copy action.")
+			return
+		end
+		ObjectAction.Copy(AdorneeModel)
+	end)
+end
+
+function BillboardRadialUI.Show(adornee: Model)
+	local plotModel = PlotFinder.FindPlot(Player:GetAttribute("OwnedPlotIndex") :: number)
 	if not plotModel then
 		warn("No plot model found.")
 		return
 	end
-	local containerFolder = plotModel:FindFirstChild("Container") :: Folder
-	RadialBillboard.Parent = containerFolder
+	if AdorneeModel == adornee then
+		return
+	end
 	RadialBillboard.Adornee = adornee
+	AdorneeModel = adornee
 	CenterLabel.Text = adornee.Name
 	AnimateButtonsOut()
 end
 
 function BillboardRadialUI.Hide()
-	RadialBillboard.Parent = AssetsFolder.VisualTools
-	RadialBillboard.Adornee = AssetsFolder.VisualTools
+	RadialBillboardButtonEnabled.Value = false
+	AdorneeModel = nil
+	RadialBillboard.Parent = PlayerGui
+	RadialBillboard.Adornee = PlayerGui
 	CenterLabel.Text = "Object"
+	ObjectAction.Close()
 	AnimateButtonsIn()
 end
 return BillboardRadialUI

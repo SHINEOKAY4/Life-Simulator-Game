@@ -51,4 +51,21 @@ PlacementPackets.DestroyRequest = Packet("DestroyRequest", {
 	CellZ = Packet.NumberU8,
 	Facing = Packet.String,
 }):Response(Packet.Boolean8, Packet.StringLong)
+
+PlacementPackets.MoveRequest = Packet("MoveRequest", {
+	ItemId = Packet.String,
+	FromCellX = Packet.NumberU8,
+	FromCellZ = Packet.NumberU8,
+	FromFacing = Packet.String,
+	ToCellX = Packet.NumberU8,
+	ToCellZ = Packet.NumberU8,
+	ToFacing = Packet.String, -- allow rotate-during-move; client can pass old facing if not rotating
+}):Response(Packet.Boolean8, Packet.StringLong)
+
+PlacementPackets.RotateRequest = Packet("RotateRequest", {
+	ItemId = Packet.String,
+	FromKey = Packet.String,
+	ToFacing = Packet.String,
+}):Response(Packet.Boolean8, Packet.StringLong)
+
 return PlacementPackets

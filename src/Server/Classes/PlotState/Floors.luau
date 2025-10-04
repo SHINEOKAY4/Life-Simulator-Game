@@ -1,0 +1,247 @@
+--!strict
+-- ServerScriptService/Server/Classes/PlotState/Floors.lua
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+
+local Floors = {}
+
+type Facing = "North" | "East" | "South" | "West"
+
+local function defaultFacing(facing: Facing?): Facing
+	return facing or "North"
+end
+
+function Floors.attach(PlotState)
+	function PlotState:HasFloorUnderFootprint(
+		cellX: number,
+		cellZ: number,
+		widthCells: number,
+		depthCells: number,
+		facing: Facing
+	): boolean
+		local indices = self.Grid:FootprintCells(cellX, cellZ, widthCells, depthCells, facing)
+		for i = 1, #indices do
+			if not self.FloorFilled[indices[i]] then
+				return false
+			end
+		end
+		return true
+	end
+
+	function PlotState:CanPlaceFloor(
+		cellX: number,
+		cellZ: number,
+		widthCells: number?,
+		depthCells: number?,
+		facing: Facing?
+	): boolean
+		local w = widthCells or 1
+		local d = depthCells or 1
+		local f = defaultFacing(facing)
+
+		if w < 1 or d < 1 then
+			return false
+		end
+
+		local minCellX: number, minCellZ: number, maxCellX: number, maxCellZ: number =
+			self.Grid:FootprintBounds(cellX, cellZ, w, d, f)
+		if minCellX < 1 or minCellZ < 1 or maxCellX > self.Grid.Columns or maxCellZ > self.Grid.Rows then
+			return false
+		end
+
+		local minChunkX: number, minChunkZ: number, maxChunkX: number, maxChunkZ: number =
+			self.Grid:FootprintChunkRange(cellX, cellZ, w, d, f, self.ChunkSizeInCells)
+		for chunkZ = minChunkZ, maxChunkZ do
+			for chunkX = minChunkX, maxChunkX do
+				if not self:IsChunkUnlocked(chunkX, chunkZ) then
+					return false
+				end
+			end
+		end
+
+		local indices = self.Grid:FootprintCells(cellX, cellZ, w, d, f)
+		for i = 1, #indices do
+			if self.FloorFilled[indices[i]] then
+				return false
+			end
+		end
+
+		return true
+	end
+
+	function PlotState:PlaceFloor(
+		id: string,
+		cellX: number,
+		cellZ: number,
+		widthCells: number?,
+		depthCells: number?,
+		facing: Facing?
+	): boolean
+		local w = widthCells or 1
+		local d = depthCells or 1
+		local f = defaultFacing(facing)
+
+		if not self:CanPlaceFloor(cellX, cellZ, w, d, f) then
+			return false
+		end
+
+		local indices = self.Grid:FootprintCells(cellX, cellZ, w, d, f)
+		for i = 1, #indices do
+			self.FloorFilled[indices[i]] = true
+		end
+
+		local key = self:PlacementKeyForType(cellX, cellZ, f, "Floor")
+		if self.Save.PlacedObjects[key] then
+			for i = 1, #indices do
+				self.FloorFilled[indices[i]] = false
+			end
+			return false
+		end
+
+		self.Save.PlacedObjects[key] = {
+			id = id,
+			cellX = cellX,
+			cellZ = cellZ,
+			facing = f,
+		}
+		return true
+	end
+
+	function PlotState:RemoveFloor(
+		cellX: number,
+		cellZ: number,
+		widthCells: number?,
+		depthCells: number?,
+		facing: Facing?
+	)
+		local w = widthCells or 1
+		local d = depthCells or 1
+		local f = defaultFacing(facing)
+		local indices = self.Grid:FootprintCells(cellX, cellZ, w, d, f)
+		for i = 1, #indices do
+			self.FloorFilled[indices[i]] = false
+		end
+
+		local key = self:PlacementKeyForType(cellX, cellZ, f, "Floor")
+		local saved = self.Save.PlacedObjects[key]
+		if saved then
+			local spec = ItemFinder.FindItemById(saved.id)
+			assert(spec, ("Unknown catalog item '%s'"):format(saved.id))
+			local placementType = spec.PlacementType
+			local specWidth = spec.WidthCells
+			local specDepth = spec.DepthCells
+			local objFacing = saved.facing or "North"
+			if placementType == "Floor" and specWidth == w and specDepth == d and objFacing == f then
+				self.Save.PlacedObjects[key] = nil
+			end
+		end
+	end
+
+	function PlotState:MoveFloor(
+		itemId: string,
+		fromX: number,
+		fromZ: number,
+		toX: number,
+		toZ: number
+	): (boolean, string?)
+		local spec = ItemFinder.FindItemById(itemId)
+		if not spec then
+			return false, ("Unknown catalog item '%s'"):format(itemId)
+		end
+
+		if spec.PlacementType ~= "Floor" then
+			return false,
+				("Item '%s' of type '%s' cannot be moved as floor"):format(itemId, tostring(spec.PlacementType))
+		end
+
+		local width = spec.WidthCells or spec.Width or 1
+		local depth = spec.DepthCells or spec.Depth or 1
+		local facing: Facing = "North"
+
+		local fromKey = self:PlacementKeyForType(fromX, fromZ, facing, "Floor")
+		local saved = self.Save.PlacedObjects[fromKey]
+		if not saved or saved.id ~= itemId then
+			return false, ("Floor '%s' not found at (%d, %d)"):format(itemId, fromX, fromZ)
+		end
+
+		local toKey = self:PlacementKeyForType(toX, toZ, facing, "Floor")
+		if fromKey == toKey then
+			return true, nil
+		end
+
+		local existing = self.Save.PlacedObjects[toKey]
+		if existing and existing ~= saved then
+			return false, ("Destination already holds item '%s' at (%d, %d)"):format(existing.id, toX, toZ)
+		end
+
+		local minCellX: number, minCellZ: number, maxCellX: number, maxCellZ: number =
+			self.Grid:FootprintBounds(toX, toZ, width, depth, facing)
+		if minCellX < 1 or minCellZ < 1 or maxCellX > self.Grid.Columns or maxCellZ > self.Grid.Rows then
+			return false, "Destination is out of plot bounds"
+		end
+
+		local minChunkX, minChunkZ, maxChunkX, maxChunkZ =
+			self.Grid:FootprintChunkRange(toX, toZ, width, depth, facing, self.ChunkSizeInCells)
+		for cz = minChunkZ, maxChunkZ do
+			for cx = minChunkX, maxChunkX do
+				if not self:IsChunkInBounds(cx, cz) then
+					return false, ("Destination chunk (%d, %d) is outside plot bounds"):format(cx, cz)
+				end
+				if not self:IsChunkUnlocked(cx, cz) then
+					return false, ("Destination chunk (%d, %d) is locked"):format(cx, cz)
+				end
+			end
+		end
+
+		local okFrom, fromCellsResult = pcall(function()
+			return self.Grid:FootprintCells(fromX, fromZ, width, depth, facing)
+		end)
+		if not okFrom then
+			return false, ("Source footprint invalid: %s"):format(tostring(fromCellsResult))
+		end
+		local fromCells = fromCellsResult :: { number }
+
+		local okTo, toCellsResult = pcall(function()
+			return self.Grid:FootprintCells(toX, toZ, width, depth, facing)
+		end)
+		if not okTo then
+			return false, ("Destination footprint invalid: %s"):format(tostring(toCellsResult))
+		end
+		local toCells = toCellsResult :: { number }
+
+		local fromCellSet: { [number]: boolean } = {}
+		for _, index in fromCells do
+			fromCellSet[index] = true
+		end
+
+		for _, index in toCells do
+			if self.FloorFilled[index] and not fromCellSet[index] then
+				local blockX, blockZ = self.Grid:IndexToCell(index)
+				return false, ("Floor already placed at (%d, %d)"):format(blockX, blockZ)
+			end
+		end
+
+		for _, index in fromCells do
+			self.FloorFilled[index] = false
+		end
+		for _, index in toCells do
+			self.FloorFilled[index] = true
+		end
+
+		self.Save.PlacedObjects[fromKey] = nil
+		saved.cellX = toX
+		saved.cellZ = toZ
+		saved.facing = facing
+		self.Save.PlacedObjects[toKey] = saved
+
+		return true, nil
+	end
+
+	function PlotState:RotateFloor()
+		-- Floors do not have facing, so rotation is a no-op
+		return true, nil
+	end
+end
+
+return Floors

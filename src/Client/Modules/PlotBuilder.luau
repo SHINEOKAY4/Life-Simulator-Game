@@ -19,7 +19,9 @@ local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
 local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
 local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEnabled")
+local ObjectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled")
 
+type Facing = ObjectPreview.Facing
 local PlotBuilder = {}
 
 function PlotBuilder.Init()
@@ -32,6 +34,14 @@ function PlotBuilder.Init()
 	ObjectSelectorEnabled.Changed:Connect(function()
 		if ObjectSelectorEnabled.Value and PlotBuilderEnabled.Value then
 			PlotBuilder.Hide()
+		end
+	end)
+
+	ObjectPreviewEnabled.Changed:Connect(function()
+		-- if objectpreview is cancelled and plotbuilder is active, re-show plotbuilder and disable placing preview control
+		if not ObjectPreviewEnabled.Value and PlotBuilderEnabled.Value then
+			BuildContext.PlacePreview.Enabled = false
+			PlotBuilder.Show()
 		end
 	end)
 
@@ -75,8 +85,8 @@ function PlotBuilder.Hide()
 	PlotBuilder.RemovePreview()
 end
 
-function PlotBuilder.PreviewSelected(itemId: string)
-	ObjectPreview.RenderPreview(itemId)
+function PlotBuilder.PreviewSelected(itemId: string, initialFacing: string?)
+	ObjectPreview.RenderPreview(itemId, initialFacing :: Facing?)
 	BuildContext.PlacePreview.Enabled = true
 end
 

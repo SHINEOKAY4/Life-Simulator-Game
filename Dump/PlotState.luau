@@ -739,4 +739,58 @@ function PlotState:RemoveCellObject(cellX: number, cellZ: number, width: number,
 		end
 	end
 end
+
+function PlotState:MoveCellObject(
+	itemId: string,
+	fromX: number,
+	fromZ: number,
+	fromF: Facing,
+	toX: number,
+	toZ: number,
+	toF: Facing
+): boolean
+	local spec = ItemFinder.FindItemById(itemId)
+	if not spec then
+		return false
+	end
+
+	local placementType = spec.PlacementType or spec.Type or "CellObject"
+	if placementType ~= "CellObject" then
+		return false
+	end
+
+	local w = spec.WidthCells or spec.Width or 1
+	local d = spec.DepthCells or spec.Depth or 1
+
+	-- locate exact saved entry
+	local idx
+	for i = #self.Save.PlacedObjects, 1, -1 do
+		local o = self.Save.PlacedObjects[i]
+		if o.id == itemId and o.cellX == fromX and o.cellZ == fromZ and (o.facing or "North") == fromF then
+			idx = i
+			break
+		end
+	end
+	if not idx then
+		return false
+	end
+
+	-- normal validation for destination
+	if not self:CanPlace(toX, toZ, w, d, toF) then
+		return false
+	end
+
+	-- atomic swap: free old → reserve new, rollback on failure
+	self:FreeFootprint(fromX, fromZ, w, d, fromF)
+	if not self:ReserveFootprint(toX, toZ, w, d, toF) then
+		self:ReserveFootprint(fromX, fromZ, w, d, fromF)
+		return false
+	end
+
+	-- persist
+	local o = self.Save.PlacedObjects[idx]
+	o.cellX, o.cellZ, o.facing = toX, toZ, toF
+	return true
+end
+
 return PlotState
