@@ -1,5 +1,6 @@
 -- !strict
 -- ReplicatedStorage/Shared/Utilities/ItemFinder.lua
+
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -12,6 +13,7 @@ local Decorations = require(ReplicatedStorage.Shared.Definitions.Catalog.Decorat
 local ItemFinder = {}
 local ItemsById = {}
 local NoTagModels = {}
+local StationModels = {}
 
 local function merge(group: { [string]: any })
 	for id, spec in group do
@@ -99,12 +101,19 @@ function ItemFinder.CloneModel(itemId: string): Model
 	return ItemFinder.ResolveItemModel(itemId):Clone()
 end
 
-function ItemFinder.RemoveModelTags()
+function ItemFinder.IsStationModel(itemId: string): boolean
+	return StationModels[itemId] == true
+end
+
+function ItemFinder.ManageModelTags()
 	for itemId, _ in pairs(ItemsById) do
 		local model = ItemFinder.CloneModel(itemId)
 		if model then
 			local tags = model:GetTags()
 			for _, tag in ipairs(tags) do
+				if tag == "Station" then
+					StationModels[itemId] = true
+				end
 				model:RemoveTag(tag)
 			end
 			NoTagModels[itemId] = model
@@ -113,6 +122,6 @@ function ItemFinder.RemoveModelTags()
 end
 
 if RunService:IsServer() then
-	ItemFinder.RemoveModelTags()
+	ItemFinder.ManageModelTags()
 end
 return ItemFinder

@@ -90,7 +90,6 @@ local function UiClickGuard(length: number?)
 end
 
 function BillboardRadialUI.Init()
-	print("BillboardRadialUI initialized.")
 	ObjectSelectorContext.CloseSelector.Pressed:Connect(function()
 		BillboardRadialUI.Hide()
 		ObjectAction.Close()

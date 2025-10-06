@@ -10,15 +10,19 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local GridClass = require(ReplicatedStorage.Shared.Utilities.Grid)
 local PlotState = require(ServerScriptService.Server.Classes.PlotState)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
+local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
 type PlotRuntimeState = PlotState.PlotState
 type PlacedObjectMap = PlotState.PlacedObjectMap
 type PlacedObjectSnapshot = { id: string, cellX: number, cellZ: number, facing: string }
+type Facing = WorldPlacer.Facing
 
 local PlotService = {}
 local PlotModels: { [number]: Model } = PlotFinder.GetOrderedPlots()
 local PlotGrids: { [number]: any } = {} -- [plotIndex] = Grid
 local PlayerRuntime: { [number]: PlotRuntimeState } = {}
+
+PlotService.PlotClaimed = GoodSignal.new()
 
 local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapshot }
 	local keys = {}
@@ -63,7 +67,6 @@ local function InitializePlayerPlot(player: Player, plotModel: Model)
 end
 
 function PlotService.Init()
-	print("PlotService initialized")
 	-- Initialize PlotGrids
 	for index, plotModel in ipairs(PlotModels) do
 		local surface = plotModel:FindFirstChild("Surface") :: BasePart
@@ -113,6 +116,8 @@ function PlotService.Claim(player: Player, plotIndex: number)
 
 	PlotService.Load(player, plotModel) -- Order matters: must load before initializing plot
 	InitializePlayerPlot(player, plotModel)
+
+	PlotService.PlotClaimed:Fire(player, PlayerRuntime[player.UserId])
 	return true, "Plot claimed successfully"
 end
 
@@ -161,6 +166,27 @@ function PlotService.Unclaim(player: Player)
 
 	local plotModel = PlotModels[plotIndex]
 	if plotModel then
+		local containerFolder = plotModel:FindFirstChild("Container") :: Folder
+		local coversFolder = plotModel:FindFirstChild("Covers") :: Folder
+		for _, cover in ipairs(coversFolder:GetChildren()) do
+			if cover:IsA("BasePart") then
+				cover.Transparency = 0
+				cover.CanQuery = true
+			end
+		end
+
+		for _, item in ipairs(containerFolder:GetChildren()) do
+			if item:IsA("Model") then
+				WorldPlacer.Despawn(
+					player,
+					item:GetAttribute("ItemId") :: string,
+					item:GetAttribute("CellX") :: number,
+					item:GetAttribute("CellZ") :: number,
+					(item:GetAttribute("Facing") :: string) :: Facing
+				)
+				item:Destroy()
+			end
+		end
 		plotModel:SetAttribute("Claimed", false)
 		plotModel:SetAttribute("Owner", nil)
 	end

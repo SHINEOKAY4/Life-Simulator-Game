@@ -34,21 +34,21 @@
 - Tracks occupancy for collision/validation
 
 
-### 3. Item System
+### 2. Item System
 
 - Catalog of buyable/placeable objects
 - Defines function: which NPC motives/stat it affects
 - Costs, footprint, clearance requirements
 - Persistence: which items are placed where
 
-### 4. NPC System
+### 3. NPC System
 
 - Creates/manages lives
 - Includes life cycle: birth → child → teen → adult → elder → death
 - Stats/motives (Hunger, Energy, Hygiene, Fun, Health, Happiness, etc.)
 - Behaviors: finds items to satisfy needs
 
-### 5. Economy System
+### 4. Economy System
 
 - Jobs and income per NPC
 - Daily payouts, scaling by stats
@@ -59,27 +59,27 @@
 
 ## Gameplay Systems
 
-### 7. Motives & Needs System
+### 5. Motives & Needs System
 
 - Regular ticking down of NPC motives (Hunger, Energy, etc.)
 - Items can satisfy specific motives
 - Poor motives apply penalties to stats/jobs
 - If critical needs are unmet → health decline → early death
 
-### 8. Stat & Progression System
+### 6. Stat & Progression System
 
 - NPCs build stats (Intellect, Discipline, Creativity, etc.) from items
 - Stats affect career paths and job payouts
 - Education/training items improve stats faster
 
-### 9. Life Cycle & Legacy System
+### 7. Life Cycle & Legacy System
 
 - NPC ages over in-game years
 - Children inherit traits/stats partially from parents
 - Death → NPC removed; history log updated
 - Legacy system: memorial UI or generations tree
 
-### 10. Job & Career System
+### 8. Job & Career System
 
 - Catalog of jobs with requirements (stats, age)
 - NPCs auto-pick best available job
@@ -90,21 +90,21 @@
 
 ## Player-Facing Systems
 
-### 11. Build/Placement UI System
+### 9. Build/Placement UI System
 
 - Catalog shop menu
 - Ghost preview with red/green snap
 - Error feedback (occupied, no funds)
 - Rotation sanity check: select a placed wall/cell object, press Rotate on the radial UI, and confirm the server re-spawns it with the new facing without duplicating or deleting it.
 
-### 12. HUD / Info System
+### 10. HUD / Info System
 
 - Coins balance
 - NPC motives panel (bars)
 - Job info + daily payout timer
 - House tier info + upgrade button
 
-### 13. Visual World System
+### 11. Visual World System
 
 - item models, NPC avatars
 - NPC animations (idle, walk, use item)
@@ -114,23 +114,23 @@
 
 ## Support Systems (Live Ops)
 
-### 14. Rate Limiting & Security
+### 12. Rate Limiting & Security
 
 - Prevent remote spam and dupe exploits
 - Server-only authority on costs, placement, payouts
 
-### 15. Analytics & Telemetry
+### 13. Analytics & Telemetry
 
 - Track economy balance (coins earned/spent)
 - Track NPC deaths, upgrades purchased
 - Track session length, churn points
 
-### 16. Feature Flag System
+### 14. Feature Flag System
 
 - Server can disable payouts, stop purchases, or adjust multipliers live
 - Critical for hotfixing without republishing
 
-### 17. Direct Action System
+### 15. Direct Action System
 
 - Allows players to proactively shape NPC behavior
 - Action menu opens when clicking an NPC

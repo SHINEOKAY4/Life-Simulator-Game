@@ -61,8 +61,6 @@ function PlotStateStore.Init()
 				end
 			end
 		end
-
-		print("PlotStateStore: Received plot state sync")
 	end)
 
 	Packets.PlotStateUnlockDelta.OnClientEvent:Connect(function(indices)

@@ -18,8 +18,6 @@ local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled"
 local PlotGridOverlay = {}
 
 function PlotGridOverlay.Init()
-	print("PlotGridOverlay module initialized.")
-
 	-- Ensure the grid overlay is also toggled off when PlotBuilder is disabled
 	-- grid overlay should only be available when plot builder is active
 	PlotBuilderEnabled.Changed:Connect(function()

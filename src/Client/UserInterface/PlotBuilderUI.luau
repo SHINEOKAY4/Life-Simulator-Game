@@ -199,7 +199,6 @@ local function setActiveCategory(category: string)
 end
 
 function PlotBuilderUI:Init()
-	print("PlotBuilderUI initialized")
 	local objectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled")
 	objectPreviewEnabled.Changed:Connect(function()
 		local enabled = objectPreviewEnabled.Value

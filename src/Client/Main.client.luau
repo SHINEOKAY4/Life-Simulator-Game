@@ -25,4 +25,7 @@ ObjectAction.Init()
 PlotBuilderUI:Init()
 BillboardRadialUI.Init()
 
-print("Client Main initialized.")
+local NewResident = require(ModulesFolder.NewResident)
+local ResidentsStore = require(script.Parent.ClientStores.ResidentsStore)
+ResidentsStore.Init()
+NewResident.Init()

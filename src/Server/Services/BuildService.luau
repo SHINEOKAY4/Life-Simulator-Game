@@ -29,7 +29,6 @@ local function coerceFacing(value: string?): Facing?
 end
 
 function BuildService.Init()
-	print("BuildService initialized.")
 	Packets.PlaceRequest.OnServerInvoke = function(
 		player: Player,
 		payload: { ItemId: string, CellX: number, CellZ: number, Facing: string }

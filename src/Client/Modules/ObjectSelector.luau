@@ -32,7 +32,6 @@ local function ClearSelection()
 end
 
 local function OnWorldClick()
-	print("Mouse button 1 pressed - ObjectSelector action triggered.")
 	local plotModel = PlotStateStore.GetPlotModel()
 	if not plotModel then
 		warn("No plot model found.")
@@ -67,8 +66,6 @@ local function OnWorldClick()
 end
 
 function ObjectSelector.Init()
-	print("ObjectSelector module initialized.")
-
 	PlotBuilderEnabled.Changed:Connect(function()
 		if PlotBuilderEnabled.Value and ObjectSelectorEnabled.Value then
 			ObjectSelector.Hide()
