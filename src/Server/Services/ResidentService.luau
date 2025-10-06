@@ -59,7 +59,6 @@ function ResidentService.Init()
 end
 
 function ResidentService.Load(player: Player)
-	print("ResidentService Load")
 	local userId = player.UserId
 
 	if PlayerResidents[userId] then
@@ -96,7 +95,7 @@ function ResidentService.Load(player: Player)
 		ResidentsPackets.PromptResidentCreation:FireClient(player)
 	else
 		for _, resident in ipairs(residents) do
-			print("Resident: " .. resident.Name .. ", Age: " .. resident.Age .. ", Occupation: " .. resident.Occupation)
+			--print("Resident: " .. resident.Name .. ", Age: " .. resident.Age .. ", Occupation: " .. resident.Occupation)
 			PlayerResidents[userId][resident.Name] = ResidentState.new(resident)
 			-- Here you would typically create NPC instances or load them into the game world
 			ResidentBehavior.SpawnResident(player, resident)
@@ -113,7 +112,6 @@ function ResidentService.Load(player: Player)
 end
 
 function ResidentService.Unload(player: Player)
-	print("ResidentService Unload")
 	local userId = player.UserId
 	if not PlayerResidents[userId] then
 		return

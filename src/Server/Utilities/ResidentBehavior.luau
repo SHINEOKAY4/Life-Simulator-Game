@@ -8,8 +8,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local PlacementHelpers = require(ReplicatedStorage.Shared.Utilities.PlacementHelpers)
-local GridClass = require(ReplicatedStorage.Shared.Utilities.Grid)
 local ResidentState = require(ServerScriptService.Server.Classes.ResidentState)
+local PlotService = require(ServerScriptService.Server.Services.PlotService)
+local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
 local ResidentsFolder = ReplicatedStorage.Assets.Residents
 
@@ -17,14 +18,14 @@ local ResidentPlacer = {}
 
 type Facing = PlacementHelpers.Facing
 
+ResidentPlacer.DestinationReached = GoodSignal.new() -- (player: Player, residentName: string, stationName: string)
+
 local VALID_FACINGS: { [string]: true } = {
 	North = true,
 	East = true,
 	South = true,
 	West = true,
 }
-
-local PlotGridCache = setmetatable({} :: { [Model]: any }, { __mode = "k" })
 
 local function normalizeFacing(facingValue: any): Facing
 	if typeof(facingValue) == "string" and VALID_FACINGS[facingValue] then
@@ -38,27 +39,10 @@ local function getPlotGrid(plotModel: Model?): any?
 		return nil
 	end
 
-	local cached = PlotGridCache[plotModel]
-	if cached then
-		return cached
+	local grid = PlotService.GetGridForPlot(plotModel)
+	if not grid then
+		warn(('[ResidentBehavior] No grid available for plot "%s"'):format(plotModel.Name))
 	end
-
-	local surface = plotModel:FindFirstChild("Surface") :: BasePart?
-	local cellSize = plotModel:GetAttribute("CellSize") :: number?
-	if not surface or typeof(cellSize) ~= "number" then
-		return nil
-	end
-
-	local success, gridOrError = pcall(GridClass.new, surface, cellSize)
-	if not success then
-		warn(
-			('[ResidentBehavior] Failed to create grid for plot "%s": %s'):format(plotModel.Name, tostring(gridOrError))
-		)
-		return nil
-	end
-
-	local grid = gridOrError
-	PlotGridCache[plotModel] = grid
 	return grid
 end
 
@@ -132,7 +116,7 @@ function ResidentPlacer.DespawnResident(player: Player, residentName: string)
 	local plotIndex = player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
 	local residentsFolder = plotModel and plotModel:FindFirstChild("Residents") :: Folder
-	print(residentsFolder, residentsFolder:FindFirstChild(residentName))
+
 	local residentModel = residentsFolder and residentsFolder:FindFirstChild(residentName) :: Model?
 	if residentModel then
 		residentModel:Destroy()
@@ -216,6 +200,8 @@ function ResidentPlacer.MoveToStation(player: Player, resident: string, targetSt
 			warn("[ResidentBehavior] Path failed for " .. residentModel.Name)
 		end
 	end
+
+	ResidentPlacer.DestinationReached:Fire(player, resident, targetStation)
 end
 
 return ResidentPlacer

@@ -230,4 +230,21 @@ function PlotService.GetState(player: Player): PlotRuntimeState?
 	return PlayerRuntime[player.UserId]
 end
 
+function PlotService.GetGrid(plotIndex: number): any?
+	return PlotGrids[plotIndex]
+end
+
+function PlotService.GetGridForPlot(plotModel: Model?): any?
+	if not plotModel then
+		return nil
+	end
+
+	local indexOrder = plotModel:GetAttribute("IndexOrder")
+	if typeof(indexOrder) ~= "number" then
+		return nil
+	end
+
+	return PlotService.GetGrid(indexOrder)
+end
+
 return PlotService
