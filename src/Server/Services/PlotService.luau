@@ -16,11 +16,15 @@ type PlotRuntimeState = PlotState.PlotState
 type PlacedObjectMap = PlotState.PlacedObjectMap
 type PlacedObjectSnapshot = { id: string, cellX: number, cellZ: number, facing: string }
 type Facing = WorldPlacer.Facing
+type StationOccupancy = { Residents: { [number]: string }, Occupied: boolean }
+type StationInstanceMap = { [string]: StationOccupancy }
+type PlayerStationCache = { [string]: StationInstanceMap }
 
 local PlotService = {}
 local PlotModels: { [number]: Model } = PlotFinder.GetOrderedPlots()
 local PlotGrids: { [number]: any } = {} -- [plotIndex] = Grid
 local PlayerRuntime: { [number]: PlotRuntimeState } = {}
+local PlayerStations: { [number]: PlayerStationCache } = {} -- [playerId] = { stationName = {uid}, ... }
 
 PlotService.PlotClaimed = GoodSignal.new()
 
@@ -140,10 +144,19 @@ function PlotService.Load(player: Player, plotModel: Model)
 	runtimeState:HydrateFromSave()
 
 	PlayerRuntime[userId] = runtimeState
+	PlayerStations[userId] = {}
 
-	for _, obj in pairs(data.PlacedObjects) do
+	-- Station names are the object IDs of the stations and the key is the unique id for easier reference
+	for uniqueKey, obj in pairs(data.PlacedObjects) do
 		local facing = obj.facing or "North"
-		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing)
+		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing, {
+			metadata = obj.Metadata,
+		})
+		local stationCache = PlayerStations[userId]
+		stationCache[obj.id] = stationCache[obj.id] or {}
+		stationCache[obj.id][uniqueKey] = { Residents = {}, Occupied = false } -- Initialize with empty resident list and not occupied  -- Add uniqueKey to the list for this station id
+		-- e.g ["WoodenTable"] = {object1, object2, ...} -- this is to support multiple instances of the same station
+		-- Helpful for finding another pathing option, weighing options by stats, checking if a station is occupied, etc
 	end
 
 	-- Possibly add a revision to discard stale client state in future (if problematic)
@@ -193,6 +206,7 @@ function PlotService.Unclaim(player: Player)
 
 	player:SetAttribute("OwnedPlotIndex", nil)
 	PlayerRuntime[player.UserId] = nil
+	PlayerStations[player.UserId] = nil
 
 	return true, "Plot unclaimed"
 end
@@ -245,6 +259,16 @@ function PlotService.GetGridForPlot(plotModel: Model?): any?
 	end
 
 	return PlotService.GetGrid(indexOrder)
+end
+
+function PlotService.GetStationsForPlayer(player: Player): PlayerStationCache
+	local userId = player.UserId
+	local stations = PlayerStations[userId]
+	if not stations then
+		stations = {}
+		PlayerStations[userId] = stations
+	end
+	return stations
 end
 
 return PlotService

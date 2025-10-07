@@ -20,9 +20,9 @@ export type SavedPlacedObject = {
 	cellX: number,
 	cellZ: number,
 	facing: Facing?,
+	Metadata: { [string]: any }?,
 }
 
--- Placed objects are stored by a composite key "cellX:cellZ:facing" to make lookups O(1).
 export type PlacedObjectMap = { [string]: SavedPlacedObject }
 
 export type SaveData = {
@@ -79,12 +79,26 @@ export type PlotState = {
 		objectId: string,
 		cellX: number,
 		cellZ: number,
-		widthCells: number,
-		depthCells: number,
+		_widthCells: number,
+		_depthCells: number,
 		facing: Facing,
 		requiresFloorOnBothSides: boolean?
 	) -> boolean,
-	RemoveWall: (self: PlotState, cellX: number, cellZ: number, facing: Facing) -> (),
+	ReplaceWallSegment: (
+		self: PlotState,
+		objectId: string,
+		cellX: number,
+		cellZ: number,
+		facing: Facing,
+		requiresFloorOnBothSides: boolean?,
+		replaceableTag: string?
+	) -> (string?, string?),
+	RemoveWall: (
+		self: PlotState,
+		cellX: number,
+		cellZ: number,
+		facing: Facing
+	) -> { removedId: string, restoredId: string? }?,
 	HydrateFromSave: (self: PlotState) -> (),
 	HasFloorUnderFootprint: (
 		self: PlotState,

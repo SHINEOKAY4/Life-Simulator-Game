@@ -55,6 +55,16 @@ local function OnWorldClick()
 	if raycastResult and raycastResult.Instance then
 		local hitPart = raycastResult.Instance
 		local selectedModel = hitPart:FindFirstAncestorOfClass("Model")
+		if not selectedModel then
+			warn("No model ancestor found for hit part:", hitPart:GetFullName())
+			ClearSelection()
+			return
+		end
+
+		if BillboardRadialUI.IsVisibleFor(selectedModel) then
+			return
+		end
+
 		print("Selected model:", selectedModel:GetFullName())
 		SelectionHighlight.Adornee = selectedModel
 		-- then open context menu for actions (e.g., delete, move, rotate) / radial menu controller script
@@ -84,6 +94,7 @@ function ObjectSelector.Init()
 	--end)
 
 	ObjectSelectorContext.SelectObject.Pressed:Connect(function()
+		--#TODO: Add a debounce here to prevent multiple rapid clicks
 		if RadialBillboardButtonEnabled.Value then
 			return
 		end

@@ -124,7 +124,90 @@ function Walls.attach(PlotState)
 		return true
 	end
 
-	function PlotState:RemoveWall(cellX: number, cellZ: number, facing: Facing)
+	local function validateFloorRequirement(self, alignment: "Horizontal" | "Vertical", edgeX: number, edgeZ: number)
+		if alignment == "Horizontal" then
+			if edgeZ >= 2 and not self.FloorFilled[self.Grid:CellToIndex(edgeX, edgeZ - 1)] then
+				return false
+			end
+			if edgeZ <= self.Grid.Rows and not self.FloorFilled[self.Grid:CellToIndex(edgeX, edgeZ)] then
+				return false
+			end
+		else
+			if edgeX >= 2 and not self.FloorFilled[self.Grid:CellToIndex(edgeX - 1, edgeZ)] then
+				return false
+			end
+			if edgeX <= self.Grid.Columns and not self.FloorFilled[self.Grid:CellToIndex(edgeX, edgeZ)] then
+				return false
+			end
+		end
+		return true
+	end
+
+	function PlotState:ReplaceWallSegment(
+		objectId: string,
+		cellX: number,
+		cellZ: number,
+		facing: Facing,
+		requiresFloorOnBothSides: boolean?,
+		replaceableTag: string?
+	): (string?, string?)
+		local key = self:PlacementKeyForType(cellX, cellZ, facing, "Wall")
+		local saved = self.Save.PlacedObjects[key]
+		if not saved then
+			return nil, "No existing wall to replace"
+		end
+
+		local spec = ItemFinder.FindItemById(saved.id)
+		if not spec or spec.PlacementType ~= "Wall" then
+			return nil, "Existing item is not replaceable"
+		end
+
+		if replaceableTag and not ItemFinder.HasTag(saved.id, replaceableTag) then
+			return nil, "Wall cannot host this door"
+		end
+
+		if requiresFloorOnBothSides then
+			local alignment, edgeX, edgeZ = edgeOfCell(facing, cellX, cellZ)
+			local direction: "Horizontal" | "Vertical" = if alignment == "Horizontal" then "Horizontal" else "Vertical"
+			if not validateFloorRequirement(self, direction, edgeX, edgeZ) then
+				return nil, "Requires floor on both sides"
+			end
+		end
+
+		local previousId = saved.id
+		saved.id = objectId
+		saved.Metadata = saved.Metadata or {}
+		saved.Metadata.PreviousId = previousId
+		saved.Metadata.ReplaceableTag = replaceableTag
+		saved.Metadata.RequiresFloorOnBothSides = requiresFloorOnBothSides == true
+		self.Save.PlacedObjects[key] = saved
+		return previousId, nil
+	end
+
+	function PlotState:RemoveWall(
+		cellX: number,
+		cellZ: number,
+		facing: Facing
+	): { removedId: string, restoredId: string? }?
+		local key = self:PlacementKeyForType(cellX, cellZ, facing, "Wall")
+		local saved = self.Save.PlacedObjects[key]
+		if not saved then
+			return nil
+		end
+
+		local removedId = saved.id
+		local metadata = saved.Metadata
+		if metadata and metadata.PreviousId then
+			saved.id = metadata.PreviousId
+			local savedMutable: any = saved
+			savedMutable.Metadata = nil
+			self.Save.PlacedObjects[key] = saved
+			return {
+				removedId = removedId,
+				restoredId = saved.id,
+			}
+		end
+
 		local alignment, edgeX, edgeZ = edgeOfCell(facing, cellX, cellZ)
 		if alignment == "Horizontal" then
 			self.EdgeFreeHorizontal[self:HorizontalEdgeIndex(edgeX, edgeZ)] = true
@@ -132,17 +215,10 @@ function Walls.attach(PlotState)
 			self.EdgeFreeVertical[self:VerticalEdgeIndex(edgeX, edgeZ)] = true
 		end
 
-		local key = self:PlacementKeyForType(cellX, cellZ, facing, "Wall")
-		local saved = self.Save.PlacedObjects[key]
-		if saved then
-			local spec = ItemFinder.FindItemById(saved.id)
-			assert(spec, ("Unknown catalog item '%s'"):format(saved.id))
-			local placementType = spec.PlacementType
-			local objFacing = saved.facing or "North"
-			if placementType == "Wall" and objFacing == facing then
-				self.Save.PlacedObjects[key] = nil
-			end
-		end
+		self.Save.PlacedObjects[key] = nil
+		return {
+			removedId = removedId,
+		}
 	end
 
 	function PlotState:MoveWall(
@@ -162,6 +238,10 @@ function Walls.attach(PlotState)
 		if spec.PlacementType ~= "Wall" then
 			return false,
 				("Item '%s' of type '%s' cannot be moved as wall"):format(itemId, tostring(spec.PlacementType))
+		end
+
+		if spec.RequiresExistingWall == true then
+			return false, "Door segments cannot be moved"
 		end
 
 		local requiresFloor = spec.RequiresFloorOnBothSides == true
@@ -292,6 +372,10 @@ function Walls.attach(PlotState)
 		local spec = ItemFinder.FindItemById(itemId)
 		if not spec then
 			return false, ("Unknown catalog item '%s'"):format(itemId)
+		end
+
+		if spec.RequiresExistingWall == true then
+			return false, "Door segments cannot be rotated"
 		end
 
 		local allowedFacing = spec.Facing :: { Facing }?

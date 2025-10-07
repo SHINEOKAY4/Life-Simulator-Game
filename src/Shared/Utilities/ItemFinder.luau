@@ -9,11 +9,11 @@ local Walls = require(ReplicatedStorage.Shared.Definitions.Catalog.Walls)
 local Furnitures = require(ReplicatedStorage.Shared.Definitions.Catalog.Furnitures)
 local Roofs = require(ReplicatedStorage.Shared.Definitions.Catalog.Roofs)
 local Decorations = require(ReplicatedStorage.Shared.Definitions.Catalog.Decorations)
+local Doors = require(ReplicatedStorage.Shared.Definitions.Catalog.Doors)
 
 local ItemFinder = {}
 local ItemsById = {}
 local NoTagModels = {}
-local StationModels = {}
 
 local function merge(group: { [string]: any })
 	for id, spec in group do
@@ -26,12 +26,14 @@ ItemFinder.Floors = Floors
 ItemFinder.Walls = Walls
 ItemFinder.Furnitures = Furnitures
 ItemFinder.Roofs = Roofs
+ItemFinder.Doors = Doors
 
 merge(Floors)
 merge(Walls)
 merge(Furnitures)
 merge(Roofs)
 merge(Decorations)
+merge(Doors)
 
 function ItemFinder.FindItemById(itemId: string)
 	return ItemsById[itemId]
@@ -101,19 +103,12 @@ function ItemFinder.CloneModel(itemId: string): Model
 	return ItemFinder.ResolveItemModel(itemId):Clone()
 end
 
-function ItemFinder.IsStationModel(itemId: string): boolean
-	return StationModels[itemId] == true
-end
-
 function ItemFinder.ManageModelTags()
 	for itemId, _ in pairs(ItemsById) do
 		local model = ItemFinder.CloneModel(itemId)
 		if model then
 			local tags = model:GetTags()
 			for _, tag in ipairs(tags) do
-				if tag == "Station" then
-					StationModels[itemId] = true
-				end
 				model:RemoveTag(tag)
 			end
 			NoTagModels[itemId] = model

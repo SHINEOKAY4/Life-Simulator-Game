@@ -46,38 +46,4 @@ function ResidentState.new(payload: ResidentData)
 	return self
 end
 
-function ResidentState:Drift() end
-
-function ResidentState:CanHire(jobName: string, gates): boolean
-	self = self :: ResidentStateInstance
-	if jobName == "" then
-		return false
-	end
-	if gates.Intelligence and self.Intelligence < gates.Intelligence then
-		return false
-	end
-	if gates.Fitness and self.Fitness < gates.Fitness then
-		return false
-	end
-	if gates.Social and self.Social < gates.Social then
-		return false
-	end
-
-	return true
-end
-
-function ResidentState:BeginShift() end
-
-function ResidentState:StartShift() end
-
-function ResidentState:EndShift() end
-
-function ResidentState:Eat() end
-
-function ResidentState:Rest() end
-
-function ResidentState:Exercise() end
-
-function ResidentState:Socialize() end
-
 return ResidentState

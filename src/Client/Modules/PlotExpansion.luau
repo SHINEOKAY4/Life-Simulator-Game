@@ -120,6 +120,7 @@ function PlotExpansion.Show()
 	local plotModel = PlotFinder.FindPlot(plotIndex)
 	local coversFolder = plotModel and plotModel:FindFirstChild("Covers") :: Folder
 	local container = plotModel and plotModel:FindFirstChild("Container") :: Folder
+	PriceTag.Enabled = true
 	PriceTag.Parent = container
 
 	local params = BuildParams(coversFolder)
@@ -158,6 +159,7 @@ function PlotExpansion.Hide()
 	PlotExpansionEnabled.Value = false
 	PlotContext.ToggleClickPurchase.Enabled = false
 	PriceTag.Parent = AssetsFolder.VisualTools
+	PriceTag.Enabled = false
 	if Connection then
 		Connection:Disconnect()
 		Connection = nil

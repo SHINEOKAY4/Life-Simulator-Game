@@ -47,19 +47,6 @@ RadialBillboard.DescendantAdded:Connect(function(descendant)
 	tryRegisterDescendant(descendant)
 end)
 
-local function AnimateButtonsIn()
-	for _, button in pairs(RadialBillboard:GetDescendants()) do
-		if button:IsA("TextButton") then
-			registerButton(button)
-			-- Tween the button to the HubFrame position
-			local targetPosition = HubFrame.Position
-			local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.In)
-			local tween = TweenService:Create(button, tweenInfo, { Position = targetPosition })
-			tween:Play()
-		end
-	end
-end
-
 local function AnimateButtonsOut()
 	for _, button in pairs(RadialBillboard:GetDescendants()) do
 		if button:IsA("TextButton") then
@@ -148,12 +135,15 @@ function BillboardRadialUI.Show(adornee: Model)
 		warn("No plot model found.")
 		return
 	end
-	if AdorneeModel == adornee then
+	if AdorneeModel == adornee and RadialBillboard.Enabled then
 		return
 	end
+	RadialBillboard.Enabled = true
 	RadialBillboard.Adornee = adornee
 	AdorneeModel = adornee
-	CenterLabel.Text = adornee.Name
+	local itemIdValue = adornee:GetAttribute("ItemId")
+	local displayId = if typeof(itemIdValue) == "string" and itemIdValue ~= "" then itemIdValue else adornee.Name
+	CenterLabel.Text = displayId
 	AnimateButtonsOut()
 end
 
@@ -162,8 +152,20 @@ function BillboardRadialUI.Hide()
 	AdorneeModel = nil
 	RadialBillboard.Parent = PlayerGui
 	RadialBillboard.Adornee = PlayerGui
+	RadialBillboard.Enabled = false
 	CenterLabel.Text = "Object"
 	ObjectAction.Close()
-	AnimateButtonsIn()
+end
+
+function BillboardRadialUI.IsVisible(): boolean
+	return RadialBillboard.Enabled
+end
+
+function BillboardRadialUI.IsVisibleFor(model: Model): boolean
+	return RadialBillboard.Enabled and AdorneeModel == model
+end
+
+function BillboardRadialUI.GetCurrentAdornee(): Model?
+	return AdorneeModel
 end
 return BillboardRadialUI

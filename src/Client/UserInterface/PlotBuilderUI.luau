@@ -34,12 +34,14 @@ local CATEGORY_TAGS = {
 	Walls = "Wall",
 	Roofs = "Roof",
 	Decorations = "Decoration",
+	Doors = "Door",
 	Chairs = "Chair",
 	Tables = "Table",
 	Beds = "Bed",
 	Trees = "Tree",
 	Plants = "Plant",
 	Rocks = "Rock",
+	Outdoors = "Outdoor",
 }
 
 local buttonCache: { [string]: { TextButton } } = {}
@@ -242,6 +244,11 @@ function PlotBuilderUI:Init()
 		setActiveCategory("Decorations")
 	end)
 
+	HomeSelection.Doors.Pressed:Connect(function()
+		print("HomeSelection Doors button pressed")
+		setActiveCategory("Doors")
+	end)
+
 	FurnitureSelection.Chairs.Pressed:Connect(function()
 		print("FurnitureSelection Chairs button pressed")
 		setActiveCategory("Chairs")
@@ -255,6 +262,11 @@ function PlotBuilderUI:Init()
 	FurnitureSelection.Beds.Pressed:Connect(function()
 		print("FurnitureSelection Beds button pressed")
 		setActiveCategory("Beds")
+	end)
+
+	EnvironmentSelection.Outdoors.Pressed:Connect(function()
+		print("FurnitureSelection Outdoors button pressed")
+		setActiveCategory("Outdoors")
 	end)
 
 	EnvironmentSelection.Trees.Pressed:Connect(function()

@@ -14,11 +14,104 @@ local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 
 type Facing = PlotStateModule.Facing
 type PlotRuntimeState = PlotStateModule.PlotState
+type SavedPlacedObject = PlotStateModule.SavedPlacedObject
 
 local BuildService = {}
 
 local Limiter = RateLimiter.new()
 local PlaceBucket = Limiter:Bucket("place", { ratePerSecond = 4, burst = 6 })
+
+local function moveDoorSegment(
+	player: Player,
+	state: PlotRuntimeState,
+	resolvedId: string,
+	spec: any,
+	fromX: number,
+	fromZ: number,
+	fromF: Facing,
+	toX: number,
+	toZ: number,
+	toF: Facing
+): (boolean, string?)
+	local requiresFloorOnBothSides = spec.RequiresFloorOnBothSides == true
+	local replaceableTag = spec.ReplaceableWallTag
+
+	local replacedId, replaceErr =
+		state:ReplaceWallSegment(resolvedId, toX, toZ, toF, requiresFloorOnBothSides, replaceableTag)
+	if not replacedId then
+		return false, replaceErr or "Failed to attach door at destination"
+	end
+
+	local destKey = state:PlacementKeyForType(toX, toZ, toF, "Wall")
+	local savedDoor = state.Save.PlacedObjects[destKey]
+
+	local removeResult = state:RemoveWall(fromX, fromZ, fromF)
+	if not removeResult then
+		local revertDest = state:RemoveWall(toX, toZ, toF)
+		if revertDest and revertDest.restoredId then
+			local revertDoorId, revertErr =
+				state:ReplaceWallSegment(resolvedId, fromX, fromZ, fromF, requiresFloorOnBothSides, replaceableTag)
+			if not revertDoorId then
+				warn(("[BuildService] Failed to restore door after move failure: %s"):format(tostring(revertErr)))
+			end
+		end
+		return false, "Door not found at original location"
+	end
+
+	local removedId = removeResult.removedId
+	local restoredId = removeResult.restoredId
+
+	WorldPlacer.Despawn(player, removedId, fromX, fromZ, fromF)
+	Packets.PlacementDelta:FireClient(player, {
+		Action = "Removed",
+		Item = {
+			ItemId = removedId,
+			CellX = fromX,
+			CellZ = fromZ,
+			Facing = fromF,
+		},
+	})
+
+	if restoredId then
+		WorldPlacer.Spawn(player, state.Grid, restoredId, fromX, fromZ, fromF)
+		Packets.PlacementDelta:FireClient(player, {
+			Action = "Placed",
+			Item = {
+				ItemId = restoredId,
+				CellX = fromX,
+				CellZ = fromZ,
+				Facing = fromF,
+			},
+		})
+	end
+
+	WorldPlacer.Despawn(player, replacedId, toX, toZ, toF)
+	Packets.PlacementDelta:FireClient(player, {
+		Action = "Removed",
+		Item = {
+			ItemId = replacedId,
+			CellX = toX,
+			CellZ = toZ,
+			Facing = toF,
+		},
+	})
+
+	WorldPlacer.Spawn(player, state.Grid, resolvedId, toX, toZ, toF, {
+		previousWallId = replacedId,
+		metadata = savedDoor and savedDoor.Metadata,
+	})
+	Packets.PlacementDelta:FireClient(player, {
+		Action = "Placed",
+		Item = {
+			ItemId = resolvedId,
+			CellX = toX,
+			CellZ = toZ,
+			Facing = toF,
+		},
+	})
+
+	return true, nil
+end
 
 local function coerceFacing(value: string?): Facing?
 	if value == "North" or value == "East" or value == "South" or value == "West" then
@@ -26,6 +119,47 @@ local function coerceFacing(value: string?): Facing?
 	end
 
 	return nil
+end
+
+local function resolvePlacedItem(
+	state: PlotRuntimeState,
+	identifier: string
+): (string?, any?, Facing?, SavedPlacedObject?)
+	if type(identifier) ~= "string" or identifier == "" then
+		return nil, nil, nil, nil
+	end
+
+	local spec = ItemFinder.FindItemById(identifier)
+	if spec then
+		return identifier, spec, nil, nil
+	end
+
+	local placedMap = (state.Save and state.Save.PlacedObjects) or nil
+	if placedMap then
+		local saved = placedMap[identifier]
+		if saved then
+			local savedSpec = ItemFinder.FindItemById(saved.id)
+			if savedSpec then
+				return saved.id, savedSpec, PlacementKey.NormalizeFacing(saved.facing), saved
+			end
+		end
+	end
+
+	local parseOk, parsedCellX, parsedCellZ, parsedFacingValue, parsedPlacementType =
+		pcall(PlacementKey.ParseWithType, identifier)
+	if parseOk and placedMap then
+		local parsedFacing: Facing = coerceFacing(parsedFacingValue :: string?) or "North"
+		local canonKey = state:PlacementKeyForType(parsedCellX, parsedCellZ, parsedFacing, parsedPlacementType)
+		local saved = placedMap[canonKey]
+		if saved then
+			local savedSpec = ItemFinder.FindItemById(saved.id)
+			if savedSpec then
+				return saved.id, savedSpec, PlacementKey.NormalizeFacing(saved.facing), saved
+			end
+		end
+	end
+
+	return nil, nil, nil, nil
 end
 
 function BuildService.Init()
@@ -157,6 +291,39 @@ function BuildService.Build(
 		return true, "Cell object placed"
 	elseif itemData.PlacementType == "Wall" then
 		local requiresFloorOnBothSides = itemData.RequiresFloorOnBothSides or false
+		if itemData.RequiresExistingWall then
+			local replacedId, err = state:ReplaceWallSegment(
+				payload.ItemId,
+				payload.CellX,
+				payload.CellZ,
+				facing,
+				requiresFloorOnBothSides,
+				itemData.ReplaceableWallTag
+			)
+			if not replacedId then
+				return false, err or "Failed to replace wall"
+			end
+
+			WorldPlacer.Despawn(player, replacedId, payload.CellX, payload.CellZ, facing)
+			local key = state:PlacementKeyForType(payload.CellX, payload.CellZ, facing, "Wall")
+			local savedDoor = state.Save.PlacedObjects[key]
+			WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing, {
+				previousWallId = replacedId,
+				metadata = savedDoor and savedDoor.Metadata,
+			})
+
+			Packets.PlacementDelta:FireClient(player, {
+				Action = "Removed",
+				Item = { ItemId = replacedId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = facing },
+			})
+			Packets.PlacementDelta:FireClient(player, {
+				Action = "Placed",
+				Item = { ItemId = payload.ItemId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = facing },
+			})
+
+			return true, "Door installed"
+		end
+
 		local success =
 			state:PlaceWall(payload.ItemId, payload.CellX, payload.CellZ, 1, 1, facing, requiresFloorOnBothSides)
 		if not success then
@@ -221,30 +388,55 @@ function BuildService.Destroy(
 		return false, "No plot runtime state"
 	end
 
-	local spec = ItemFinder.FindItemById(payload.ItemId)
-	if not spec then
+	local resolvedId, spec, savedFacingHint, savedFromIdentifier = resolvePlacedItem(state, payload.ItemId)
+	if not spec or not resolvedId then
 		return false, "Invalid item ID"
 	end
 	local placementType = spec.PlacementType or spec.Type or "CellObject"
 
 	local payloadFacing: Facing? = coerceFacing(payload.Facing)
-	local keyFacing: Facing = payloadFacing or "North"
+	local keyFacing: Facing
+	if payloadFacing then
+		keyFacing = payloadFacing
+	elseif savedFacingHint then
+		keyFacing = savedFacingHint :: Facing
+	else
+		keyFacing = "North"
+	end
 	local key = state:PlacementKeyForType(payload.CellX, payload.CellZ, keyFacing, placementType)
 	local saved = state.Save.PlacedObjects[key]
-	if not saved or saved.id ~= payload.ItemId then
+	if not saved or saved.id ~= resolvedId then
+		if
+			savedFromIdentifier
+			and savedFromIdentifier.cellX == payload.CellX
+			and savedFromIdentifier.cellZ == payload.CellZ
+		then
+			saved = savedFromIdentifier
+			keyFacing = PlacementKey.NormalizeFacing(savedFromIdentifier.facing)
+		end
+	end
+	if not saved or saved.id ~= resolvedId then
 		return false, "Item not found at location"
 	end
 
 	local w = spec.WidthCells or 1
 	local d = spec.DepthCells or 1
-	local savedFacing: Facing = PlacementKey.NormalizeFacing(saved.facing)
-	local f: Facing = savedFacing
+	local placementFacing: Facing = PlacementKey.NormalizeFacing(saved.facing)
+	local f: Facing = placementFacing
+
+	local removedId = resolvedId
+	local restoredId: string? = nil
 
 	-- switch by type
 	if placementType == "Floor" then
 		state:RemoveFloor(payload.CellX, payload.CellZ)
 	elseif placementType == "Wall" then
-		state:RemoveWall(payload.CellX, payload.CellZ, f)
+		local result = state:RemoveWall(payload.CellX, payload.CellZ, f)
+		if not result then
+			return false, "Item not found at location"
+		end
+		removedId = result.removedId
+		restoredId = result.restoredId
 	elseif placementType == "Roof" then
 		state:RemoveRoof(payload.CellX, payload.CellZ, w, d, f)
 	else -- CellObject
@@ -252,11 +444,19 @@ function BuildService.Destroy(
 	end
 
 	-- world + client delta
-	WorldPlacer.Despawn(player, payload.ItemId, payload.CellX, payload.CellZ, f)
+	WorldPlacer.Despawn(player, removedId, payload.CellX, payload.CellZ, f)
 	Packets.PlacementDelta:FireClient(player, {
 		Action = "Removed",
-		Item = { ItemId = payload.ItemId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = f },
+		Item = { ItemId = removedId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = f },
 	})
+
+	if restoredId then
+		WorldPlacer.Spawn(player, state.Grid, restoredId, payload.CellX, payload.CellZ, f)
+		Packets.PlacementDelta:FireClient(player, {
+			Action = "Placed",
+			Item = { ItemId = restoredId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = f },
+		})
+	end
 
 	return true, "Removed"
 end
@@ -278,8 +478,8 @@ function BuildService.Move(
 		return false, "No plot runtime state"
 	end
 
-	local spec = ItemFinder.FindItemById(payload.ItemId)
-	if not spec then
+	local resolvedId, spec = resolvePlacedItem(state, payload.ItemId)
+	if not spec or not resolvedId then
 		return false, "Invalid item ID"
 	end
 
@@ -310,7 +510,7 @@ function BuildService.Move(
 		end
 
 		moveSucceeded, moveError = state:MoveCellObject(
-			payload.ItemId,
+			resolvedId,
 			payload.FromCellX,
 			payload.FromCellZ,
 			fromF,
@@ -322,10 +522,31 @@ function BuildService.Move(
 		removedFacing = "North"
 		placedFacing = "North"
 		moveSucceeded, moveError =
-			state:MoveFloor(payload.ItemId, payload.FromCellX, payload.FromCellZ, payload.ToCellX, payload.ToCellZ)
+			state:MoveFloor(resolvedId, payload.FromCellX, payload.FromCellZ, payload.ToCellX, payload.ToCellZ)
 	elseif placementType == "Wall" then
+		if spec.RequiresExistingWall then
+			if payload.FromCellX == payload.ToCellX and payload.FromCellZ == payload.ToCellZ and fromF == toF then
+				return true, "Moved"
+			end
+			local doorSucceeded, doorError = moveDoorSegment(
+				player,
+				state,
+				resolvedId,
+				spec,
+				payload.FromCellX,
+				payload.FromCellZ,
+				fromF,
+				payload.ToCellX,
+				payload.ToCellZ,
+				toF
+			)
+			if not doorSucceeded then
+				return false, doorError or "Door move failed"
+			end
+			return true, "Moved"
+		end
 		moveSucceeded, moveError = state:MoveWall(
-			payload.ItemId,
+			resolvedId,
 			payload.FromCellX,
 			payload.FromCellZ,
 			fromF,
@@ -341,7 +562,7 @@ function BuildService.Move(
 		end
 
 		moveSucceeded, moveError = state:MoveRoof(
-			payload.ItemId,
+			resolvedId,
 			payload.FromCellX,
 			payload.FromCellZ,
 			fromF,
@@ -357,13 +578,13 @@ function BuildService.Move(
 		return false, moveError or "Move failed"
 	end
 
-	WorldPlacer.Despawn(player, payload.ItemId, payload.FromCellX, payload.FromCellZ, removedFacing)
-	WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.ToCellX, payload.ToCellZ, placedFacing)
+	WorldPlacer.Despawn(player, resolvedId, payload.FromCellX, payload.FromCellZ, removedFacing)
+	WorldPlacer.Spawn(player, state.Grid, resolvedId, payload.ToCellX, payload.ToCellZ, placedFacing)
 
 	Packets.PlacementDelta:FireClient(player, {
 		Action = "Removed",
 		Item = {
-			ItemId = payload.ItemId,
+			ItemId = resolvedId,
 			CellX = payload.FromCellX,
 			CellZ = payload.FromCellZ,
 			Facing = removedFacing,
@@ -372,7 +593,7 @@ function BuildService.Move(
 	Packets.PlacementDelta:FireClient(player, {
 		Action = "Placed",
 		Item = {
-			ItemId = payload.ItemId,
+			ItemId = resolvedId,
 			CellX = payload.ToCellX,
 			CellZ = payload.ToCellZ,
 			Facing = placedFacing,
@@ -401,18 +622,21 @@ function BuildService.Rotate(
 	end
 	local targetFacing: Facing = PlacementKey.NormalizeFacing(toFacingValue)
 
-	local spec = ItemFinder.FindItemById(payload.ItemId)
-	if not spec then
+	local resolvedId, spec = resolvePlacedItem(state, payload.ItemId)
+	if not spec or not resolvedId then
 		return false, "Invalid item ID"
 	end
 
 	local placementType = spec.PlacementType or spec.Type or "CellObject"
+	if placementType == "Wall" and spec.RequiresExistingWall then
+		return false, "Doors cannot be rotated"
+	end
 	if placementType == "Floor" then
 		return false, "Floors cannot be rotated"
 	end
 
 	local saved = state.Save.PlacedObjects[payload.FromKey]
-	if not saved or saved.id ~= payload.ItemId then
+	if not saved or saved.id ~= resolvedId then
 		return false, "Item not found at key"
 	end
 
@@ -450,9 +674,9 @@ function BuildService.Rotate(
 				return false, "Floor required under all cells"
 			end
 		end
-		rotated, rotateErr = state:RotateCellObject(payload.ItemId, payload.FromKey, targetFacing)
+		rotated, rotateErr = state:RotateCellObject(resolvedId, payload.FromKey, targetFacing)
 	elseif placementType == "Wall" then
-		rotated, rotateErr = state:RotateWall(payload.ItemId, payload.FromKey, targetFacing)
+		rotated, rotateErr = state:RotateWall(resolvedId, payload.FromKey, targetFacing)
 	elseif placementType == "Roof" then
 		local width = spec.WidthCells or spec.Width or 1
 		local depth = spec.DepthCells or spec.Depth or 1
@@ -461,7 +685,7 @@ function BuildService.Rotate(
 				return false, "Floor required under roof"
 			end
 		end
-		rotated, rotateErr = state:RotateRoof(payload.ItemId, payload.FromKey, targetFacing)
+		rotated, rotateErr = state:RotateRoof(resolvedId, payload.FromKey, targetFacing)
 	else
 		return false, ("Cannot rotate items of type '%s'"):format(tostring(placementType))
 	end
@@ -470,13 +694,13 @@ function BuildService.Rotate(
 		return false, rotateErr or "Rotation failed"
 	end
 
-	WorldPlacer.Despawn(player, payload.ItemId, cellX, cellZ, currentFacing)
-	WorldPlacer.Spawn(player, state.Grid, payload.ItemId, cellX, cellZ, targetFacing)
+	WorldPlacer.Despawn(player, resolvedId, cellX, cellZ, currentFacing)
+	WorldPlacer.Spawn(player, state.Grid, resolvedId, cellX, cellZ, targetFacing)
 
 	Packets.PlacementDelta:FireClient(player, {
 		Action = "Removed",
 		Item = {
-			ItemId = payload.ItemId,
+			ItemId = resolvedId,
 			CellX = cellX,
 			CellZ = cellZ,
 			Facing = currentFacing,
@@ -485,7 +709,7 @@ function BuildService.Rotate(
 	Packets.PlacementDelta:FireClient(player, {
 		Action = "Placed",
 		Item = {
-			ItemId = payload.ItemId,
+			ItemId = resolvedId,
 			CellX = cellX,
 			CellZ = cellZ,
 			Facing = targetFacing,

@@ -1,11 +1,14 @@
 --!strict
 -- ServerScriptService/Server/Utilities/WorldPlacer.lua
 
+local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local PlotState = require(ServerScriptService.Server.Classes.PlotState)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementHelpers = require(ReplicatedStorage.Shared.Utilities.PlacementHelpers)
+local DoorWallFill = require(ReplicatedStorage.Shared.Utilities.DoorWallFill)
 
 export type Facing = PlacementHelpers.Facing
 
@@ -14,8 +17,21 @@ local WorldPlacer = {}
 local GetYawFromFacing = PlacementHelpers.GetYawFromFacing
 local GetLiftFromPivotToBottom = PlacementHelpers.GetLiftFromPivotToBottom
 
--- Spawn a physical model for a saved/placed item. -- Added
-function WorldPlacer.Spawn(player: Player, grid: any, itemId: string, cellX: number, cellZ: number, facing: Facing)
+export type SpawnOptions = {
+	metadata: { [string]: any }?,
+	previousWallId: string?,
+}
+
+-- Spawn a physical model for a saved/placed item.
+function WorldPlacer.Spawn(
+	player: Player,
+	grid: any,
+	itemId: string,
+	cellX: number,
+	cellZ: number,
+	facing: Facing,
+	options: SpawnOptions?
+)
 	local spec = ItemFinder.FindItemById(itemId)
 	if not spec then
 		return
@@ -33,6 +49,14 @@ function WorldPlacer.Spawn(player: Player, grid: any, itemId: string, cellX: num
 	model:SetAttribute("CellX", cellX)
 	model:SetAttribute("CellZ", cellZ)
 	model:SetAttribute("Facing", tostring(facing))
+	if options and options.previousWallId then
+		model:SetAttribute("PreviousWallId", options.previousWallId)
+	elseif options and options.metadata then
+		local metaPrev = options.metadata.PreviousId
+		if typeof(metaPrev) == "string" and metaPrev ~= "" then
+			model:SetAttribute("PreviousWallId", metaPrev)
+		end
+	end
 
 	local base: CFrame
 	if placementType == "Wall" then
@@ -55,6 +79,10 @@ function WorldPlacer.Spawn(player: Player, grid: any, itemId: string, cellX: num
 		model:PivotTo(base * CFrame.new(0, GetLiftFromPivotToBottom(model), 0))
 	end
 
+	if placementType == "Wall" and spec.RequiresExistingWall == true then
+		DoorWallFill.Apply(model, spec, options)
+	end
+
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") then
 			part.Anchored = true
@@ -62,10 +90,12 @@ function WorldPlacer.Spawn(player: Player, grid: any, itemId: string, cellX: num
 			part.CanQuery = true
 		end
 	end
-
+	local fromKey = PlotState:PlacementKeyForType(cellX, cellZ, facing, placementType)
 	local plotIndex = player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
 	local container = plotModel and plotModel:FindFirstChild("Container") :: Model
+
+	model.Name = fromKey
 	model.Parent = container
 end
 

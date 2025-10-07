@@ -8,7 +8,9 @@ local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local ObjectPreview = require(script.Parent.ObjectPreview)
 local PlotBuilder = require(script.Parent.PlotBuilder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local PlacementHelpers = require(ReplicatedStorage.Shared.Utilities.PlacementHelpers)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -25,12 +27,25 @@ local CurrentSelectedObject: Model? = nil
 local SelectedObjectOriginalParent: Instance? = nil
 local DetachedPreviewObject: Model? = nil
 local DetachedPreviewOriginalParent: Instance? = nil
+local TemporaryRestoredWall: Model? = nil
+
+local function destroyTemporaryWall()
+	if TemporaryRestoredWall then
+		if TemporaryRestoredWall:GetAttribute("TemporaryDoorWallRestore") then
+			TemporaryRestoredWall:Destroy()
+		else
+			TemporaryRestoredWall.Parent = nil
+		end
+		TemporaryRestoredWall = nil
+	end
+end
 
 local function clearDetachedPreviewState()
 	CurrentSelectedObject = nil
 	SelectedObjectOriginalParent = nil
 	DetachedPreviewObject = nil
 	DetachedPreviewOriginalParent = nil
+	destroyTemporaryWall()
 end
 
 local function captureDetachedPreview(object: Model?, originalParent: Instance?)
@@ -54,7 +69,9 @@ local function restoreDetachedPreview(): boolean
 		return false
 	end
 
-	object.Parent = originalParent
+	object.Parent = originalParent --#TODO: Bug (The Parent property of 2:15:South:Wall is locked, current parent: NULL, new parent Container )
+
+	-- Currently harmless but unsightly, ideally should be fixed properly
 	clearDetachedPreviewState()
 	return true
 end
@@ -76,6 +93,67 @@ local function sanitizeFacing(value: any): Facing
 	return "North"
 end
 
+local function getObjectItemId(object: Model): string?
+	local attr = object:GetAttribute("ItemId")
+	if typeof(attr) == "string" and attr ~= "" then
+		return attr
+	end
+	local fallback = object.Name
+	if typeof(fallback) == "string" and fallback ~= "" then
+		return fallback
+	end
+	return nil
+end
+
+local function spawnTemporaryWallFill(object: Model, parent: Instance)
+	destroyTemporaryWall()
+
+	local previousWallIdAttr = object:GetAttribute("PreviousWallId")
+	if typeof(previousWallIdAttr) ~= "string" or previousWallIdAttr == "" then
+		return
+	end
+
+	local cellX = tonumber(object:GetAttribute("CellX"))
+	local cellZ = tonumber(object:GetAttribute("CellZ"))
+	if not cellX or not cellZ then
+		return
+	end
+
+	local facingAttr = object:GetAttribute("Facing")
+	local facing: Facing = sanitizeFacing(facingAttr)
+
+	local grid = PlotStateStore.GetGrid()
+	if not grid then
+		return
+	end
+
+	local wallModel = ItemFinder.CloneModel(previousWallIdAttr)
+	if not wallModel then
+		return
+	end
+
+	local base = grid:CellToWorldEdgeCenterCFrame(cellX, cellZ, facing)
+	local lift = PlacementHelpers.GetLiftFromPivotToBottom(wallModel)
+	wallModel:PivotTo(base * CFrame.new(0, lift, 0))
+
+	wallModel:SetAttribute("ItemId", previousWallIdAttr)
+	wallModel:SetAttribute("CellX", cellX)
+	wallModel:SetAttribute("CellZ", cellZ)
+	wallModel:SetAttribute("Facing", facing)
+	wallModel:SetAttribute("TemporaryDoorWallRestore", true)
+
+	for _, descendant in wallModel:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanTouch = false
+			descendant.CanQuery = true
+		end
+	end
+
+	wallModel.Parent = parent
+	TemporaryRestoredWall = wallModel
+end
+
 local function PlaceSelectedPreview(object: Model)
 	local pose = ObjectPreview.GetCurrentPose() :: PreviewPose?
 	if not pose then
@@ -92,13 +170,19 @@ local function PlaceSelectedPreview(object: Model)
 		then fromFacingAttr :: string
 		else "North"
 
+	local itemId = getObjectItemId(object)
+	if not itemId then
+		warn("Cannot move object without item id")
+		return
+	end
+
 	local toFacing = pose.Facing
 	if pose.Kind == "Floor" then
 		toFacing = "North"
 	end
 
 	local payload = {
-		ItemId = object.Name,
+		ItemId = itemId,
 		FromCellX = fromCellX,
 		FromCellZ = fromCellZ,
 		FromFacing = fromFacing,
@@ -107,18 +191,37 @@ local function PlaceSelectedPreview(object: Model)
 		ToFacing = toFacing,
 	}
 
+	local isNoOpMove = fromCellX == pose.CellX and fromCellZ == pose.CellZ and fromFacing == toFacing
+	if isNoOpMove then
+		ObjectActionContext.ClickMoveRequest.Enabled = false
+		ObjectPreview.ClearPreview()
+		if not restoreDetachedPreview() then
+			clearDetachedPreviewState()
+		end
+		return
+	end
+
 	local success, result = Packets.MoveRequest:Fire(payload)
 	if not success then
 		warn("Move request failed:", result)
-		-- Do not reparent for now, let the player try again/ better game experience
-		-- Toast or UI feedback could be added here
-		-- And visual effect to indicate failure
+		local restored = restoreDetachedPreview()
+		if not restored then
+			clearDetachedPreviewState()
+		end
+		ObjectActionContext.ClickMoveRequest.Enabled = false
+		ObjectPreview.ClearPreview()
 		return
 	end
 
 	ObjectActionContext.ClickMoveRequest.Enabled = false
 	ObjectPreview.ClearPreview()
-	clearDetachedPreviewState()
+	if isNoOpMove then
+		if not restoreDetachedPreview() then
+			clearDetachedPreviewState()
+		end
+	else
+		clearDetachedPreviewState()
+	end
 end
 
 function ObjectAction.Init()
@@ -155,20 +258,33 @@ function ObjectAction.Move(object: Model, newPosition: Vector3)
 	-- The objectpreview of that object is now shown visually following the cursor to sell the illusion of movement
 	-- When the player clicks a position during object previewing, to place must send a move request to the server with the new position
 	-- the objectpreview is hidden and the visuals are taken care of by the server world placer
+	local itemId = getObjectItemId(object)
+	if not itemId then
+		warn("Cannot move object without item id")
+		return
+	end
+
+	local spec = ItemFinder.FindItemById(itemId)
 	local originalParent = object.Parent
+	if spec and originalParent then
+		local placementType = spec.PlacementType or spec.Type or "CellObject"
+		if placementType == "Wall" and spec.RequiresExistingWall == true then
+			spawnTemporaryWallFill(object, originalParent)
+		end
+	end
 	captureDetachedPreview(object, originalParent)
 	object.Parent = nil
 	local facingAttr = object:GetAttribute("Facing")
 	local initialFacing: Facing = if typeof(facingAttr) == "string" and facingAttr ~= ""
 		then facingAttr :: Facing
 		else "North"
-	ObjectPreview.RenderPreview(object.Name, initialFacing)
+	ObjectPreview.RenderPreview(itemId, initialFacing)
 
 	local cellXAttr = tonumber(object:GetAttribute("CellX"))
 	local cellZAttr = tonumber(object:GetAttribute("CellZ"))
 	if cellXAttr ~= nil and cellZAttr ~= nil then
 		ObjectPreview.SetMoveOrigin({
-			ItemId = object.Name,
+			ItemId = itemId,
 			CellX = cellXAttr,
 			CellZ = cellZAttr,
 			Facing = initialFacing,
@@ -181,7 +297,11 @@ end
 
 function ObjectAction.Rotate(object: Model, rotation: Vector3)
 	print("Rotating object:", object:GetFullName(), "to new rotation:", rotation)
-	local itemId = object.Name
+	local itemId = getObjectItemId(object)
+	if not itemId then
+		warn("Unknown item id for rotation")
+		return
+	end
 	local spec = ItemFinder.FindItemById(itemId)
 	if not spec then
 		warn("Unknown item id for rotation:", itemId)
@@ -239,8 +359,13 @@ end
 function ObjectAction.Delete(object: Model)
 	print("Deleting object:", object:GetFullName())
 	-- Implement deletion logic here
+	local itemId = getObjectItemId(object)
+	if not itemId then
+		warn("Cannot delete object without item id")
+		return
+	end
 	local itemData = {
-		ItemId = object.Name,
+		ItemId = itemId,
 		CellX = tonumber(object:GetAttribute("CellX")) :: number,
 		CellZ = tonumber(object:GetAttribute("CellZ")) :: number,
 		Facing = object:GetAttribute("Facing") :: string,
@@ -251,8 +376,13 @@ end
 function ObjectAction.Copy(object: Model)
 	print("Copying object:", object:GetFullName())
 	-- Implement copy logic here
+	local itemId = getObjectItemId(object)
+	if not itemId then
+		warn("Cannot copy object without item id")
+		return
+	end
 	local facing = object:GetAttribute("Facing") :: string
-	PlotBuilder.PreviewSelected(object.Name, facing)
+	PlotBuilder.PreviewSelected(itemId, facing)
 end
 
 function ObjectAction.Close()

@@ -11,11 +11,13 @@ local PlotService = require(ServicesFolder.PlotService)
 local BuildService = require(ServicesFolder.BuildService)
 
 local ResidentService = require(ServicesFolder.ResidentService)
+local ResidentActionService = require(ServicesFolder.ResidentActionService)
 
 PlotService.Init()
 BuildService.Init()
 
 ResidentService.Init()
+ResidentActionService.Init()
 
 local function OnPlayerAdded(player: Player)
 	print("Player added: " .. player.Name)

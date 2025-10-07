@@ -125,7 +125,8 @@ function ResidentPlacer.DespawnResident(player: Player, residentName: string)
 	end
 end
 
---#TODO If the path is blocked or failed check if the player has the same station and attempt to go to that station instead then repeat until all options are exhausted
+-- Also if occupied by another resident and maxresidents are reached for that station go to another available station
+--If the path is blocked or failed check if the player has the same station and attempt to go to that station instead then repeat until all options are exhausted
 function ResidentPlacer.MoveToStation(player: Player, resident: string, targetStation: string)
 	local plotIndex = player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
@@ -139,11 +140,13 @@ function ResidentPlacer.MoveToStation(player: Player, resident: string, targetSt
 
 	local humanoid = residentModel:FindFirstChildOfClass("Humanoid") :: Humanoid?
 	local rootPart = residentModel:FindFirstChild("HumanoidRootPart") :: BasePart?
-	local targetStationModel = containerFolder and containerFolder:FindFirstChild(targetStation) :: Model?
-	if not targetStationModel or not ItemFinder.IsStationModel(targetStationModel.Name) then
-		warn("Target station not found or invalid: " .. targetStation)
-		return
+
+	local itemSpec = ItemFinder.FindItemById(targetStation)
+
+	if not itemSpec then
+		warn("Item spec not found for target station: " .. targetStation)
 	end
+
 	if not rootPart then
 		warn("HumanoidRootPart not found in resident model: " .. resident)
 		return
@@ -153,19 +156,10 @@ function ResidentPlacer.MoveToStation(player: Player, resident: string, targetSt
 		return
 	end
 
-	local target = targetStationModel.PrimaryPart
-	if not target then
-		warn("Target station has no PrimaryPart: " .. targetStation)
-		return
-	end
-
-	local desiredPosition = computeApproachPosition(plotModel, targetStationModel, rootPart.Position.Y)
-	local goalPosition = desiredPosition or target.Position
-
 	local function follow(goal: Vector3): boolean
 		local path = PathfindingService:CreatePath({
-			AgentRadius = 2,
-			AgentHeight = 5,
+			--AgentRadius = 2,
+			--AgentHeight = 5,
 			AgentCanJump = true,
 			WaypointSpacing = 4,
 		})
@@ -187,18 +181,58 @@ function ResidentPlacer.MoveToStation(player: Player, resident: string, targetSt
 		return true
 	end
 
-	if not follow(goalPosition) then
-		if desiredPosition then
-			warn(
-				("[ResidentBehavior] Path failed for %s when approaching %s offset; retrying direct target"):format(
-					residentModel.Name,
-					targetStation
+	local playerStations = PlotService.GetStationsForPlayer(player)
+	local stationScope = playerStations and playerStations[targetStation]
+	if not stationScope then
+		warn(("[ResidentBehavior] No station scope found for station '%s'"):format(targetStation))
+		return
+	end
+
+	for objectName, value in pairs(stationScope) do
+		local targetStationModel = containerFolder:FindFirstChild(objectName) :: Model?
+		local maxOccupancy = itemSpec.maxOccupancy or 1
+
+		value.Occupied = true
+		table.insert(value.Residents, resident)
+
+		if not targetStationModel then
+			warn(("[ResidentBehavior] Station model '%s' not found in container"):format(objectName))
+			continue
+		end
+		if value.Occupied and #value.Residents > maxOccupancy then
+			-- Multi-occupancy station, allow approach
+			warn(("[ResidentBehavior] Station '%s' is fully occupied"):format(objectName))
+			continue
+		end
+
+		local target = targetStationModel.PrimaryPart :: BasePart?
+
+		if not target then
+			warn(("[ResidentBehavior] No PrimaryPart found for station model '%s'"):format(objectName))
+			continue
+		end
+
+		local desiredPosition = computeApproachPosition(plotModel, targetStationModel, rootPart.Position.Y)
+		local goalPosition = desiredPosition or target.Position
+
+		if not follow(goalPosition) then
+			if desiredPosition then
+				warn(
+					("[ResidentBehavior] Path failed for %s when approaching %s offset; retrying direct target"):format(
+						residentModel.Name,
+						targetStation
+					)
 				)
-			)
+			end
+			if not follow(target.Position) then
+				warn("[ResidentBehavior] Path failed for " .. residentModel.Name)
+				value.Occupied = false
+				table.remove(value.Residents, table.find(value.Residents, resident) :: number)
+				continue
+			end
 		end
-		if not follow(target.Position) then
-			warn("[ResidentBehavior] Path failed for " .. residentModel.Name)
-		end
+
+		break
 	end
 
 	ResidentPlacer.DestinationReached:Fire(player, resident, targetStation)

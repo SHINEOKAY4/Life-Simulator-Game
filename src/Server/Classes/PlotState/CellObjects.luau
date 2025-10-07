@@ -51,6 +51,39 @@ function CellObjects.attach(PlotState)
 			end
 		end
 
+		local minCellX: number, minCellZ: number, maxCellX: number, maxCellZ: number =
+			self.Grid:FootprintBounds(anchorX, anchorZ, widthCells, depthCells, facing)
+		local rotatedWidth = maxCellX - minCellX + 1
+		local rotatedDepth = maxCellZ - minCellZ + 1
+
+		if rotatedWidth > 1 then
+			for cellZ = minCellZ, maxCellZ do
+				for cellX = minCellX, maxCellX - 1 do
+					local alignment, edgeX, edgeZ = self:EdgeOfCell(cellX, cellZ, "East")
+					if alignment == "Vertical" then
+						local edgeIndex = self:VerticalEdgeIndex(edgeX, edgeZ)
+						if not self.EdgeFreeVertical[edgeIndex] then
+							return false
+						end
+					end
+				end
+			end
+		end
+
+		if rotatedDepth > 1 then
+			for cellZ = minCellZ, maxCellZ - 1 do
+				for cellX = minCellX, maxCellX do
+					local alignment, edgeX, edgeZ = self:EdgeOfCell(cellX, cellZ, "South")
+					if alignment == "Horizontal" then
+						local edgeIndex = self:HorizontalEdgeIndex(edgeX, edgeZ)
+						if not self.EdgeFreeHorizontal[edgeIndex] then
+							return false
+						end
+					end
+				end
+			end
+		end
+
 		return true
 	end
 

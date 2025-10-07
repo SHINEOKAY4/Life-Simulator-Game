@@ -10,6 +10,7 @@ local Players = game:GetService("Players")
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementHelpers = require(ReplicatedStorage.Shared.Utilities.PlacementHelpers)
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
+local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -212,6 +213,47 @@ local function PopulateCellMapForType(grid, placed, placementType: string, targe
 	end
 
 	return target
+end
+
+local function EdgeOfCell(cellX: number, cellZ: number, facing: Facing): ("Horizontal" | "Vertical", number, number)
+	if facing == "North" then
+		return "Horizontal", cellX, cellZ
+	elseif facing == "South" then
+		return "Horizontal", cellX, cellZ + 1
+	elseif facing == "West" then
+		return "Vertical", cellX, cellZ
+	else
+		return "Vertical", cellX + 1, cellZ
+	end
+end
+
+local function EdgeKey(edgeX: number, edgeZ: number): string
+	return (`%d:%d`):format(edgeX, edgeZ)
+end
+
+local HorizontalWallEdges: { [string]: boolean } = {}
+local VerticalWallEdges: { [string]: boolean } = {}
+
+local function PopulateWallEdgeMaps(placed)
+	table.clear(HorizontalWallEdges)
+	table.clear(VerticalWallEdges)
+	if not placed then
+		return
+	end
+
+	for _, entry in pairs(placed) do
+		local _, placementType, _width, _depth, facing = ResolvePlacementEntry(entry)
+		if placementType == "Wall" then
+			local normalizedFacing: Facing = PlacementKey.NormalizeFacing(facing :: Facing)
+			local alignment, edgeX, edgeZ = EdgeOfCell(entry.cellX, entry.cellZ, normalizedFacing)
+			local key = EdgeKey(edgeX, edgeZ)
+			if alignment == "Horizontal" then
+				HorizontalWallEdges[key] = true
+			else
+				VerticalWallEdges[key] = true
+			end
+		end
+	end
 end
 
 local function isCellOccupiedForPreview(
@@ -585,6 +627,49 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 		)
 
 		if previewKind == "Wall" then
+			local spec = CurrentItemSpec
+			if spec and spec.RequiresExistingWall then
+				local placementKey = PlacementKey.ForPlacementType(cellX, cellZ, CurrentFacing, "Wall")
+				local occupant = placed and placed[placementKey]
+				if not occupant then
+					blocked = true
+				else
+					local occupantMatchesOrigin = false
+					if ignorePlacement then
+						local sameId = occupant.id == ignorePlacement.ItemId
+						local sameCell = occupant.cellX == ignorePlacement.CellX
+							and occupant.cellZ == ignorePlacement.CellZ
+						local sameFacing = PlacementKey.NormalizeFacing(occupant.facing) == ignorePlacement.Facing
+						occupantMatchesOrigin = sameId and sameCell and sameFacing
+					end
+
+					if occupantMatchesOrigin then
+						blocked = false
+					else
+						local replaceableTag = spec.ReplaceableWallTag
+						local occupantCheckId = occupant.id
+						local occupantSpec = occupantCheckId and ItemFinder.FindItemById(occupantCheckId) or nil
+						if occupantSpec and occupantSpec.RequiresExistingWall == true then
+							local maybePreviousId = occupant.Metadata and occupant.Metadata.PreviousId
+							if typeof(maybePreviousId) == "string" and maybePreviousId ~= "" then
+								occupantCheckId = maybePreviousId
+								occupantSpec = ItemFinder.FindItemById(maybePreviousId)
+							end
+						end
+
+						local canReplace = occupantSpec ~= nil and occupantSpec.PlacementType == "Wall"
+						if canReplace and replaceableTag then
+							canReplace = ItemFinder.HasTag(occupantCheckId, replaceableTag)
+						end
+						if not canReplace then
+							blocked = true
+						end
+					end
+				end
+			end
+		end
+
+		if previewKind == "Wall" then
 			PreviewWall(model, grid, cellX, cellZ, CurrentFacing, lift)
 		elseif previewKind == "Floor" then
 			PreviewFloor(model, grid, surface, cellX, cellZ, baseWidthCells, baseDepthCells, "North")
@@ -614,10 +699,58 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 			-- Walls occupy a single anchor cell edge; treat as 1x1 for overlay markers and clamp to bounds.
 			cells = grid:ClippedFootprintCells(cellX, cellZ, 1, 1, CurrentFacing)
 		elseif previewKind == "Floor" then
+			-- Floors are rotated to face North.
 			cells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, "North")
 		else
 			-- CellObject uses its (possibly rotated) footprint.
 			cells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
+		end
+
+		if previewKind == "CellObject" and not blocked then
+			local minCellX: number, minCellZ: number, maxCellX: number, maxCellZ: number =
+				grid:FootprintBounds(cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
+			local rotatedWidth = maxCellX - minCellX + 1
+			local rotatedDepth = maxCellZ - minCellZ + 1
+
+			if rotatedWidth > 1 or rotatedDepth > 1 then
+				PopulateWallEdgeMaps(placed)
+
+				if rotatedWidth > 1 then
+					for z = minCellZ, maxCellZ do
+						for x = minCellX, maxCellX - 1 do
+							local alignment, edgeX, edgeZ = EdgeOfCell(x, z, "East")
+							if alignment == "Vertical" then
+								local key = EdgeKey(edgeX, edgeZ)
+								if VerticalWallEdges[key] then
+									blocked = true
+									break
+								end
+							end
+						end
+						if blocked then
+							break
+						end
+					end
+				end
+
+				if not blocked and rotatedDepth > 1 then
+					for z = minCellZ, maxCellZ - 1 do
+						for x = minCellX, maxCellX do
+							local alignment, edgeX, edgeZ = EdgeOfCell(x, z, "South")
+							if alignment == "Horizontal" then
+								local key = EdgeKey(edgeX, edgeZ)
+								if HorizontalWallEdges[key] then
+									blocked = true
+									break
+								end
+							end
+						end
+						if blocked then
+							break
+						end
+					end
+				end
+			end
 		end
 
 		if requiresFloor and not missingFloorSupport then
@@ -631,6 +764,10 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 		end
 
 		if requiresFloor and missingFloorSupport then
+			canPlace = false
+		end
+
+		if blocked then
 			canPlace = false
 		end
 
