@@ -17,17 +17,16 @@ ResidentsPackets.ResidentStateSync = Packet("ResidentStateSync", {
 	{
 		Name = Packet.String,
 		Age = Packet.NumberU8,
-		Occupation = Packet.String,
 		Gender = Packet.String,
-		Cash = Packet.NumberU32,
-		Mood = Packet.NumberU8,
-		Intelligence = Packet.NumberU8,
-		Fitness = Packet.NumberU8,
-		Social = Packet.NumberU8,
-		Hunger = Packet.NumberU8,
-		Energy = Packet.NumberU8,
-		Hygiene = Packet.NumberU8,
-		Fun = Packet.NumberU8,
+		Traits = { Packet.String },
+		Occupation = Packet.String,
+		Needs = {
+			Hunger = Packet.NumberU8,
+			Energy = Packet.NumberU8,
+			Hygiene = Packet.NumberU8,
+			Fun = Packet.NumberU8,
+			Social = Packet.NumberU8,
+		},
 	},
 })
 

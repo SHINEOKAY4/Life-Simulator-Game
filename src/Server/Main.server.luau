@@ -11,9 +11,9 @@ local PlotService = require(ServicesFolder.PlotService)
 local BuildService = require(ServicesFolder.BuildService)
 local ResidentService = require(ServicesFolder.ResidentService)
 
+ResidentService.Init()
 PlotService.Init()
 BuildService.Init()
-ResidentService.Init()
 
 local function OnPlayerAdded(player: Player)
 	print("Player added: " .. player.Name)
@@ -25,7 +25,7 @@ local function OnPlayerRemoving(player: Player)
 	print("Player removing: " .. player.Name)
 	-- For now unload order matters, unloading plot service while other services still uses the plot will cause issues
 
-	PlotService.Unclaim(player)
+	PlotService.Unclaim(player) -- This should always be lower in the unload order
 end
 
 Players.PlayerAdded:Connect(OnPlayerAdded)
