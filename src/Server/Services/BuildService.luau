@@ -171,6 +171,7 @@ function BuildService.Init()
 			local waitSeconds = PlaceBucket:SecondsUntilNextToken(player)
 			return false, ("Too fast. Try again in %.2fs"):format(waitSeconds)
 		end
+		print(payload.ItemId)
 		return BuildService.Build(player, payload)
 	end
 
@@ -178,6 +179,7 @@ function BuildService.Init()
 		player: Player,
 		payload: { ItemId: string, CellX: number, CellZ: number, Facing: string }
 	): (boolean, string)
+		print(payload.ItemId)
 		return BuildService.Destroy(player, payload)
 	end
 	-- MoveRequest packet handler can be added here
@@ -197,6 +199,7 @@ function BuildService.Init()
 			local waitSeconds = PlaceBucket:SecondsUntilNextToken(player)
 			return false, ("Too fast. Try again in %.2fs"):format(waitSeconds)
 		end
+
 		return BuildService.Move(player, payload)
 	end
 
@@ -276,12 +279,17 @@ function BuildService.Build(
 			end
 		end
 
-		local success = state:Place(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, facing)
+		local success, uniqueId =
+			state:Place(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, facing)
 
 		if not success then
 			return false, "Failed to place cell object"
 		end
 
+		local stationType = if itemData.StationType then itemData.StationType else nil
+		if stationType then
+			PlotService.AddStationForPlayer(player, stationType, uniqueId, payload.ItemId)
+		end
 		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing)
 
 		Packets.PlacementDelta:FireClient(player, {
@@ -441,6 +449,8 @@ function BuildService.Destroy(
 		state:RemoveRoof(payload.CellX, payload.CellZ, w, d, f)
 	else -- CellObject
 		state:RemoveCellObject(payload.CellX, payload.CellZ, w, d, f)
+		print(spec.StationType, payload.ItemId)
+		PlotService.RemoveStationForPlayer(player, spec.StationType, key) -- Passed payload.ItemId instead of resolvedId (the itemId is the unique identifier for stations which was sent by client)
 	end
 
 	-- world + client delta

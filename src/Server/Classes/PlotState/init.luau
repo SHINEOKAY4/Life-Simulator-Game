@@ -191,7 +191,7 @@ export type PlotState = {
 		widthCells: number,
 		depthCells: number,
 		facing: Facing
-	) -> boolean,
+	) -> (boolean, string),
 	RemoveCellObject: (
 		self: PlotState,
 		cellX: number,

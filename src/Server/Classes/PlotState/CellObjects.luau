@@ -143,7 +143,7 @@ function CellObjects.attach(PlotState)
 			cellZ = anchorZ,
 			facing = facing,
 		}
-		return true
+		return true, key
 	end
 
 	function PlotState:RemoveCellObject(cellX: number, cellZ: number, width: number, depth: number, facing: Facing)

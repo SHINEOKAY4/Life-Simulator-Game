@@ -24,6 +24,10 @@ ResidentsPackets.ResidentStateSync = Packet("ResidentStateSync", {
 		Intelligence = Packet.NumberU8,
 		Fitness = Packet.NumberU8,
 		Social = Packet.NumberU8,
+		Hunger = Packet.NumberU8,
+		Energy = Packet.NumberU8,
+		Hygiene = Packet.NumberU8,
+		Fun = Packet.NumberU8,
 	},
 })
 

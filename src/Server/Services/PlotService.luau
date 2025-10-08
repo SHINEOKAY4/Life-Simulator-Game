@@ -10,13 +10,14 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local GridClass = require(ReplicatedStorage.Shared.Utilities.Grid)
 local PlotState = require(ServerScriptService.Server.Classes.PlotState)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
+local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
 type PlotRuntimeState = PlotState.PlotState
 type PlacedObjectMap = PlotState.PlacedObjectMap
 type PlacedObjectSnapshot = { id: string, cellX: number, cellZ: number, facing: string }
 type Facing = WorldPlacer.Facing
-type StationOccupancy = { Residents: { [number]: string }, Occupied: boolean }
+type StationOccupancy = { Id: string, Residents: { [number]: string }, Occupied: boolean }
 type StationInstanceMap = { [string]: StationOccupancy }
 type PlayerStationCache = { [string]: StationInstanceMap }
 
@@ -152,10 +153,16 @@ function PlotService.Load(player: Player, plotModel: Model)
 		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing, {
 			metadata = obj.Metadata,
 		})
+
+		local itemSpec = ItemFinder.FindItemById(obj.id)
+		local stationType = itemSpec and itemSpec.StationType or nil
+		if not stationType then
+			continue
+		end
 		local stationCache = PlayerStations[userId]
-		stationCache[obj.id] = stationCache[obj.id] or {}
-		stationCache[obj.id][uniqueKey] = { Residents = {}, Occupied = false } -- Initialize with empty resident list and not occupied  -- Add uniqueKey to the list for this station id
-		-- e.g ["WoodenTable"] = {object1, object2, ...} -- this is to support multiple instances of the same station
+		stationCache[stationType] = stationCache[stationType] or {}
+		stationCache[stationType][uniqueKey] = { Id = obj.id, Residents = {}, Occupied = false } -- Initialize with empty resident list and not occupied  -- Add uniqueKey to the list for this station id
+		-- e.g ["RestStation"] = {object1, object2, ...} -- this is to support multiple instances of the same station
 		-- Helpful for finding another pathing option, weighing options by stats, checking if a station is occupied, etc
 	end
 
@@ -271,4 +278,34 @@ function PlotService.GetStationsForPlayer(player: Player): PlayerStationCache
 	return stations
 end
 
+function PlotService.AddStationForPlayer(player: Player, stationName: string, uniqueId: string, itemId: string)
+	local userId = player.UserId
+	local stationCache = PlayerStations[userId]
+	if not stationCache then
+		stationCache = {}
+		PlayerStations[userId] = stationCache
+	end
+
+	stationCache[stationName] = stationCache[stationName] or {}
+	stationCache[stationName][uniqueId] = { Id = itemId, Residents = {}, Occupied = false }
+end
+
+function PlotService.RemoveStationForPlayer(player: Player, stationName: string, uniqueId: string)
+	local userId = player.UserId
+	local stationCache = PlayerStations[userId]
+	if not stationCache then
+		return
+	end
+
+	local stationInstances = stationCache[stationName]
+	if not stationInstances then
+		return
+	end
+
+	stationInstances[uniqueId] = nil
+
+	if next(stationInstances) == nil then
+		stationCache[stationName] = nil
+	end
+end
 return PlotService
