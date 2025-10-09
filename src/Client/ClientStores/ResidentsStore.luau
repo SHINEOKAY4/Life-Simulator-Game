@@ -5,17 +5,46 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
 
 local ResidentsStore = {}
-local ResidentsData = {}
+local PlayersResidents = {}
 
 function ResidentsStore.Init()
-	print("ResidentsStore initialized.")
-
 	-- Future implementation for managing resident data on the client side
-	ResidentsPackets.ResidentStateSync.OnClientEvent:Connect(function(residentsData)
-		ResidentsData = residentsData
-		print("Residents state synchronized:", ResidentsData)
-		-- Here you would typically update your UI or state management system with the new residents data
+	ResidentsPackets.PlayersResidentsSync.OnClientEvent:Connect(function(payload)
+		if not PlayersResidents[payload.UserId] then
+			PlayersResidents[payload.UserId] = {}
+		end
+
+		for _, resident in ipairs(payload.Residents) do -- Rebuild the keyed table
+			PlayersResidents[payload.UserId][resident.Name] = resident
+		end
+		print("Residents state synchronized for all players.", PlayersResidents)
 	end)
+
+	ResidentsPackets.PlayerResidentDelta.OnClientEvent:Connect(function(payload)
+		local userId = payload.UserId
+
+		if not PlayersResidents[userId] then
+			PlayersResidents[userId] = {}
+		end
+		local delta = payload.ResidentDelta[1]
+
+		if delta then
+			PlayersResidents[userId][payload.ResidentName] = delta
+		else
+			PlayersResidents[userId][payload.ResidentName] = nil
+		end
+		print("Resident delta received for user:", PlayersResidents)
+	end)
+end
+
+function ResidentsStore.RequestAddResident(residentData: { Name: string, Gender: string })
+	local success, message = ResidentsPackets.AddResidentRequest:Fire(residentData)
+	return success, message
+end
+
+function ResidentsStore.RequestDeleteResident(residentName: string)
+	local success, message = ResidentsPackets.DeleteResidentRequest:Fire(residentName)
+	return success, message
 end
 
 return ResidentsStore

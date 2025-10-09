@@ -2,6 +2,8 @@
 -- StarterPlayerScripts/Modules/NewResident.lua
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local ResidentStore = require(script.Parent.Parent.ClientStores.ResidentsStore)
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
 
 local NewResident = {}
@@ -24,9 +26,11 @@ function NewResident.Init()
 			Name = "Jane Doe",
 			Gender = "Female",
 		}
-		local success, message = ResidentsPackets.AddResidentRequest:Fire(johnDoe)
-		local success2, message2 = ResidentsPackets.AddResidentRequest:Fire(janeDoe)
+
+		local success, message = ResidentStore.RequestAddResident(johnDoe)
 		print("AddResidentRequest response:", success, message)
+
+		local success2, message2 = ResidentStore.RequestAddResident(janeDoe)
 		print("AddResidentRequest response:", success2, message2)
 	end)
 end

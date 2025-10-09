@@ -5,12 +5,13 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Packets = require(ReplicatedStorage.Network.ResidentsPackets)
+local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
 
 local ResidentService = {}
-local PlayersResidents = {}
+local PlayersResidents: { [number]: any } = {} -- [userId] = {residentData}
+local NameToIndexMap: { [number]: { [string]: number } } = {} -- [userId][name] = index
 
 local Config = {
 	MaxResidentsPerHousehold = 8,
@@ -21,21 +22,42 @@ function ResidentService.Init()
 		ResidentService.Load(player)
 	end)
 
-	Packets.AddResidentRequest.OnServerInvoke = function(player: Player, residentData: any)
-		return ResidentService.CreateResident(player, residentData)
+	ResidentsPackets.AddResidentRequest.OnServerInvoke = function(player: Player, residentData: any)
+		local success, message = ResidentService.CreateResident(player, residentData)
+		return success, message
+	end
+
+	ResidentsPackets.DeleteResidentRequest.OnServerInvoke = function(player: Player, residentName: string)
+		local success, message = ResidentService.DeleteResident(player, residentName)
+		return success, message
 	end
 end
 
 function ResidentService.Load(player: Player)
 	local data = PlayerSession.GetDataAwait(player, "HouseholdState") :: any
+	local userId = player.UserId
+
+	local payload = {
+		UserId = userId,
+		Residents = data.Residents,
+	}
 
 	if data.ResidentsCount == 0 then
-		Packets.PromptResidentCreation:FireClient(player)
-		PlayersResidents[player.UserId] = data.Residents or {}
-	else
-		PlayersResidents[player.UserId] = data.Residents or {}
-		Packets.ResidentStateSync:FireClient(player, PlayersResidents[player.UserId])
+		ResidentsPackets.PromptResidentCreation:FireClient(player)
 	end
+
+	-- Build a keyed map and index map for easier access
+	PlayersResidents[userId] = {}
+	NameToIndexMap[userId] = {}
+
+	for index, resident in ipairs(data.Residents) do
+		local mapKey = resident.Name
+		local indexKey = index
+		PlayersResidents[userId][mapKey] = resident
+		NameToIndexMap[userId][mapKey] = indexKey
+	end
+
+	ResidentsPackets.PlayersResidentsSync:Fire(payload)
 end
 
 function ResidentService.CreateResident(player: Player, residentData: any)
@@ -78,14 +100,59 @@ function ResidentService.CreateResident(player: Player, residentData: any)
 			Social = 100,
 		},
 	}
+
+	local payload = {
+		UserId = player.UserId,
+		ResidentName = newResidentData.Name,
+		ResidentDelta = { newResidentData },
+	}
 	-- Add the new resident
-	table.insert(PlayersResidents[player.UserId], newResidentData)
+	PlayersResidents[player.UserId][newResidentData.Name] = newResidentData
+	NameToIndexMap[player.UserId][newResidentData.Name] = #data.Residents
+	table.insert(data.Residents, newResidentData) -- Append to the saved data
 	data.ResidentsCount += 1
+
+	ResidentsPackets.PlayerResidentDelta:Fire(payload)
 	return true, "Resident created successfully."
+end
+
+function ResidentService.DeleteResident(player: Player, residentName: string)
+	local data = PlayerSession.GetDataAwait(player, "HouseholdState") :: any
+	local userId = player.UserId
+	local resident = PlayersResidents[userId][residentName]
+
+	if not resident then
+		return false, "Resident not found."
+	end
+
+	local index = NameToIndexMap[userId][residentName]
+	if not index then
+		return false, "Resident index not found."
+	end
+
+	table.remove(data.Residents, index)
+
+	PlayersResidents[userId][residentName] = nil
+
+	-- Rebuild the index map
+	NameToIndexMap[userId] = {}
+	for idx, res in ipairs(data.Residents) do
+		NameToIndexMap[userId][res.Name] = idx
+	end
+
+	data.ResidentsCount = math.max(0, data.ResidentsCount - 1)
+	local payload = {
+		UserId = userId,
+		ResidentName = residentName,
+		ResidentDelta = {},
+	}
+	ResidentsPackets.PlayerResidentDelta:Fire(payload)
+	return true, "Resident deleted successfully."
 end
 
 function ResidentService.Unload(player: Player)
 	PlayersResidents[player.UserId] = nil
+	NameToIndexMap[player.UserId] = nil
 end
 
 function ResidentService.GetResidents(player: Player?)
