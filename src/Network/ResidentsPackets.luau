@@ -17,7 +17,7 @@ ResidentsPackets.DeleteResidentRequest =
 	Packet("DeleteResidentRequest", Packet.String):Response(Packet.Boolean8, Packet.StringLong)
 
 ResidentsPackets.PlayerResidentDelta = Packet("PlayerResidentDelta", {
-	UserId = Packet.NumberS32,
+	UserId = Packet.NumberF64,
 	ResidentName = Packet.String, -- Mainly for deletions
 	ResidentDelta = {
 		{
@@ -37,7 +37,7 @@ ResidentsPackets.PlayerResidentDelta = Packet("PlayerResidentDelta", {
 	},
 })
 ResidentsPackets.PlayersResidentsSync = Packet("ResidentStateSync", {
-	UserId = Packet.NumberS32,
+	UserId = Packet.NumberF64,
 	Residents = {
 		{
 			Name = Packet.String,

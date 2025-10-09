@@ -1,14 +1,14 @@
 --!strict
--- StarterPlayerScripts/Modules/NewResident.lua
+-- StarterPlayerScripts/Client/UserInterface/NewResident.lua
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ResidentStore = require(script.Parent.Parent.ClientStores.ResidentsStore)
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
 
-local NewResident = {}
+local NewResidentUI = {}
 
-function NewResident.Init()
+function NewResidentUI.Init()
 	ResidentsPackets.PromptResidentCreation.OnClientEvent:Connect(function()
 		print("Received PromptResidentCreation packet from server. Opening resident creation UI...")
 		-- Here you would typically trigger your UI to open
@@ -35,4 +35,4 @@ function NewResident.Init()
 	end)
 end
 
-return NewResident
+return NewResidentUI

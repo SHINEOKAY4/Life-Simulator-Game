@@ -107,10 +107,10 @@ function ResidentService.CreateResident(player: Player, residentData: any)
 		ResidentDelta = { newResidentData },
 	}
 	-- Add the new resident
+	table.insert(data.Residents, newResidentData) -- Append to the saved data first, so the index is correct, NameToIndexMap uses # of array
+	data.ResidentsCount += 1
 	PlayersResidents[player.UserId][newResidentData.Name] = newResidentData
 	NameToIndexMap[player.UserId][newResidentData.Name] = #data.Residents
-	table.insert(data.Residents, newResidentData) -- Append to the saved data
-	data.ResidentsCount += 1
 
 	ResidentsPackets.PlayerResidentDelta:Fire(payload)
 	return true, "Resident created successfully."
@@ -129,7 +129,7 @@ function ResidentService.DeleteResident(player: Player, residentName: string)
 	if not index then
 		return false, "Resident index not found."
 	end
-
+	print(residentName, index, data.Residents)
 	table.remove(data.Residents, index)
 
 	PlayersResidents[userId][residentName] = nil

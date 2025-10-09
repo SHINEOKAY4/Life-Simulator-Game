@@ -1,5 +1,11 @@
 --!strict
 -- StarterPlayer/StarterPlayerScripts/Client/Main.client.lua
+
+local Players = game:GetService("Players")
+
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
 local ModulesFolder = script.Parent.Modules
 
 local PlotSelector = require(ModulesFolder.PlotSelector)
@@ -25,7 +31,34 @@ ObjectAction.Init()
 PlotBuilderUI:Init()
 BillboardRadialUI.Init()
 
-local NewResident = require(ModulesFolder.NewResident)
 local ResidentsStore = require(script.Parent.ClientStores.ResidentsStore)
+local ResidentReplication = require(ModulesFolder.ResidentReplication)
+
+local NewResidentUI = require(script.Parent.UserInterface.NewResidentUI)
+
+ResidentReplication.Init()
 ResidentsStore.Init()
-NewResident.Init()
+NewResidentUI.Init()
+
+local function SetCollisionGroup(character: Model)
+	for _, descendant in ipairs(character:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.CollisionGroup = "Players"
+		end
+	end
+end
+
+SetCollisionGroup(Character)
+
+LocalPlayer.CharacterAdded:Connect(SetCollisionGroup)
+
+for _, player in ipairs(Players:GetPlayers()) do
+	if player ~= LocalPlayer and player.Character then
+		SetCollisionGroup(player.Character)
+		player.CharacterAdded:Connect(SetCollisionGroup)
+	end
+end
+
+Players.PlayerAdded:Connect(function(player: Player)
+	player.CharacterAdded:Connect(SetCollisionGroup)
+end)
