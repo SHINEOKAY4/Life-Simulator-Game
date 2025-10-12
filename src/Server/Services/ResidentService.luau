@@ -5,9 +5,13 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local ResidentState = require(ServerScriptService.Server.Classes.ResidentState)
+local ResidentPlacer = require(ServerScriptService.Server.Utilities.ResidentPlacer)
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
+
+type ResidentData = ResidentState.ResidentData
 
 local ResidentService = {}
 local PlayersResidents: { [number]: any } = {} -- [userId] = {residentData}
@@ -53,14 +57,15 @@ function ResidentService.Load(player: Player)
 	for index, resident in ipairs(data.Residents) do
 		local mapKey = resident.Name
 		local indexKey = index
-		PlayersResidents[userId][mapKey] = resident
+		PlayersResidents[userId][mapKey] = ResidentState.new(resident)
 		NameToIndexMap[userId][mapKey] = indexKey
+		ResidentPlacer.Spawn(player, PlayersResidents[userId][mapKey])
 	end
 
 	ResidentsPackets.PlayersResidentsSync:Fire(payload)
 end
 
-function ResidentService.CreateResident(player: Player, residentData: any)
+function ResidentService.CreateResident(player: Player, residentData: ResidentData)
 	local data = PlayerSession.GetDataAwait(player, "HouseholdState") :: any
 
 	local maxGlobalResidentsPerHousehold = Config.MaxResidentsPerHousehold
@@ -109,9 +114,10 @@ function ResidentService.CreateResident(player: Player, residentData: any)
 	-- Add the new resident
 	table.insert(data.Residents, newResidentData) -- Append to the saved data first, so the index is correct, NameToIndexMap uses # of array
 	data.ResidentsCount += 1
-	PlayersResidents[player.UserId][newResidentData.Name] = newResidentData
+	PlayersResidents[player.UserId][newResidentData.Name] = ResidentState.new(newResidentData)
 	NameToIndexMap[player.UserId][newResidentData.Name] = #data.Residents
 
+	ResidentPlacer.Spawn(player, PlayersResidents[player.UserId][newResidentData.Name])
 	ResidentsPackets.PlayerResidentDelta:Fire(payload)
 	return true, "Resident created successfully."
 end
@@ -146,13 +152,19 @@ function ResidentService.DeleteResident(player: Player, residentName: string)
 		ResidentName = residentName,
 		ResidentDelta = {},
 	}
+
+	resident:Destroy()
 	ResidentsPackets.PlayerResidentDelta:Fire(payload)
 	return true, "Resident deleted successfully."
 end
 
 function ResidentService.Unload(player: Player)
-	PlayersResidents[player.UserId] = nil
-	NameToIndexMap[player.UserId] = nil
+	local userId = player.UserId
+	for _, resident in pairs(PlayersResidents[userId] or {}) do
+		resident:Destroy()
+	end
+	PlayersResidents[userId] = nil
+	NameToIndexMap[userId] = nil
 end
 
 function ResidentService.GetResidents(player: Player?)

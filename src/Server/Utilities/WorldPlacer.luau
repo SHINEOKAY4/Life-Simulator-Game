@@ -16,6 +16,10 @@ local WorldPlacer = {}
 
 local GetYawFromFacing = PlacementHelpers.GetYawFromFacing
 local GetLiftFromPivotToBottom = PlacementHelpers.GetLiftFromPivotToBottom
+local GetFlatAlignedCFrame = PlacementHelpers.GetFlatAlignedCFrame
+local GetRotationOnly = PlacementHelpers.GetRotation
+local GetPivotRotation = PlacementHelpers.GetPivotRotation
+local GetLiftAlongDirection = PlacementHelpers.GetLiftAlongDirection
 
 export type SpawnOptions = {
 	metadata: { [string]: any }?,
@@ -40,6 +44,10 @@ function WorldPlacer.Spawn(
 	local placementType = spec.PlacementType or "CellObject"
 	local footprintWidth = spec.WidthCells or spec.Width or 1
 	local footprintDepth = spec.DepthCells or spec.Depth or 1
+	local extraLift = 0
+	if typeof(spec.SurfaceOffsetStuds) == "number" then
+		extraLift = spec.SurfaceOffsetStuds
+	end
 
 	local model = ItemFinder.CloneModel(itemId)
 	if not model then
@@ -59,11 +67,23 @@ function WorldPlacer.Spawn(
 	end
 
 	local base: CFrame
+	local target: CFrame?
 	if placementType == "Wall" then
 		base = grid:CellToWorldEdgeCenterCFrame(cellX, cellZ, facing)
-	elseif placementType == "Floor" or placementType == "CellObject" then
+	elseif placementType == "Floor" then
 		local center = grid:FootprintCenterCFrame(cellX, cellZ, footprintWidth, footprintDepth, facing)
 		base = center * CFrame.Angles(0, GetYawFromFacing(facing), 0)
+	elseif placementType == "CellObject" then
+		local center = grid:FootprintCenterCFrame(cellX, cellZ, footprintWidth, footprintDepth, facing)
+		local yaw = CFrame.Angles(0, GetYawFromFacing(facing), 0)
+		local plotSurface: BasePart? = grid and grid.Plot
+		local aligned = GetFlatAlignedCFrame(plotSurface, center.Position)
+		local baseRotation = GetRotationOnly(aligned)
+		local pivotRotation = GetPivotRotation(model)
+		local orientation = baseRotation * yaw * pivotRotation
+		local surfaceUp = plotSurface and plotSurface.CFrame.UpVector or Vector3.yAxis
+		local lift = GetLiftAlongDirection(model, surfaceUp) + extraLift
+		target = CFrame.new(center.Position + surfaceUp * lift) * orientation
 	elseif placementType == "Roof" then
 		-- ADDED: roof placement
 		-- Rule: a roof is placed above the surface by a catalog-defined roof height, then seated by pivot-bottom.
@@ -73,7 +93,9 @@ function WorldPlacer.Spawn(
 		base = (center * yaw) * CFrame.new(0, roofY, 0)
 	end
 
-	if placementType == "Floor" or placementType == "Roof" then
+	if target then
+		model:PivotTo(target)
+	elseif placementType == "Floor" or placementType == "Roof" then
 		model:PivotTo(base)
 	else
 		model:PivotTo(base * CFrame.new(0, GetLiftFromPivotToBottom(model), 0))

@@ -28,6 +28,7 @@ local PlayerRuntime: { [number]: PlotRuntimeState } = {}
 local PlayerStations: { [number]: PlayerStationCache } = {} -- [playerId] = { stationName = {uid}, ... }
 
 PlotService.PlotClaimed = GoodSignal.new()
+PlotService.PlotUnclaimed = GoodSignal.new()
 
 local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapshot }
 	local keys = {}
@@ -215,6 +216,7 @@ function PlotService.Unclaim(player: Player)
 	PlayerRuntime[player.UserId] = nil
 	PlayerStations[player.UserId] = nil
 
+	PlotService.PlotUnclaimed:Fire(player, plotIndex)
 	return true, "Plot unclaimed"
 end
 

@@ -42,6 +42,7 @@ local CATEGORY_TAGS = {
 	Plants = "Plant",
 	Rocks = "Rock",
 	Outdoors = "Outdoor",
+	Appliances = "Appliance",
 }
 
 local buttonCache: { [string]: { TextButton } } = {}
@@ -247,6 +248,11 @@ function PlotBuilderUI:Init()
 	HomeSelection.Doors.Pressed:Connect(function()
 		print("HomeSelection Doors button pressed")
 		setActiveCategory("Doors")
+	end)
+
+	HomeSelection.Appliances.Pressed:Connect(function()
+		print("HomeSelection Appliances button pressed")
+		setActiveCategory("Appliances")
 	end)
 
 	FurnitureSelection.Chairs.Pressed:Connect(function()

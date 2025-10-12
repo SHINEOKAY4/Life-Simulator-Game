@@ -8,6 +8,7 @@ local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 
 local ModulesFolder = script.Parent.Modules
 
+local DayAndNight = require(ModulesFolder.DayAndNight)
 local PlotSelector = require(ModulesFolder.PlotSelector)
 local PlotGrid = require(ModulesFolder.PlotGridOverlay)
 local PlotExpansion = require(ModulesFolder.PlotExpansion)
@@ -20,6 +21,7 @@ local ObjectAction = require(ModulesFolder.ObjectAction)
 local PlotBuilderUI = require(script.Parent.UserInterface.PlotBuilderUI)
 local BillboardRadialUI = require(script.Parent.UserInterface.BillboardRadialUI)
 
+DayAndNight.Init()
 PlotSelector.Init()
 PlotGrid.Init()
 PlotExpansion.Init()
@@ -32,11 +34,8 @@ PlotBuilderUI:Init()
 BillboardRadialUI.Init()
 
 local ResidentsStore = require(script.Parent.ClientStores.ResidentsStore)
-local ResidentReplication = require(ModulesFolder.ResidentReplication)
-
 local NewResidentUI = require(script.Parent.UserInterface.NewResidentUI)
 
-ResidentReplication.Init()
 ResidentsStore.Init()
 NewResidentUI.Init()
 

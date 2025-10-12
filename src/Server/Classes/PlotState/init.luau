@@ -284,6 +284,7 @@ function PlotState.new(grid: any, chunkSizeInCells: number, save: SaveData): Plo
 	self.EdgeFreeHorizontal = table.create(self.HorizontalEdgeColumns * self.HorizontalEdgeRows, true)
 	self.EdgeFreeVertical = table.create(self.VerticalEdgeColumns * self.VerticalEdgeRows, true)
 	self.Save = save
+	self.Save.UnlockedChunks = self.Save.UnlockedChunks or {}
 	self.Save.PlacedObjects = self.Save.PlacedObjects or {}
 
 	local normalizedPlaced: PlacedObjectMap = {}

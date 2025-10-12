@@ -115,25 +115,34 @@ function Floors.attach(PlotState)
 		depthCells: number?,
 		facing: Facing?
 	)
-		local w = widthCells or 1
-		local d = depthCells or 1
 		local f = defaultFacing(facing)
+		local resolvedWidth = widthCells
+		local resolvedDepth = depthCells
+
+		local placementKey = self:PlacementKeyForType(cellX, cellZ, f, "Floor")
+		local saved = self.Save.PlacedObjects[placementKey]
+		local spec = saved and ItemFinder.FindItemById(saved.id) or nil
+
+		if spec then
+			resolvedWidth = resolvedWidth or spec.WidthCells or spec.Width or 1
+			resolvedDepth = resolvedDepth or spec.DepthCells or spec.Depth or 1
+		end
+
+		local w = resolvedWidth or 1
+		local d = resolvedDepth or 1
 		local indices = self.Grid:FootprintCells(cellX, cellZ, w, d, f)
 		for i = 1, #indices do
 			self.FloorFilled[indices[i]] = false
 		end
 
-		local key = self:PlacementKeyForType(cellX, cellZ, f, "Floor")
-		local saved = self.Save.PlacedObjects[key]
 		if saved then
-			local spec = ItemFinder.FindItemById(saved.id)
 			assert(spec, ("Unknown catalog item '%s'"):format(saved.id))
 			local placementType = spec.PlacementType
-			local specWidth = spec.WidthCells
-			local specDepth = spec.DepthCells
+			local specWidth = spec.WidthCells or spec.Width or 1
+			local specDepth = spec.DepthCells or spec.Depth or 1
 			local objFacing = saved.facing or "North"
 			if placementType == "Floor" and specWidth == w and specDepth == d and objFacing == f then
-				self.Save.PlacedObjects[key] = nil
+				self.Save.PlacedObjects[placementKey] = nil
 			end
 		end
 	end

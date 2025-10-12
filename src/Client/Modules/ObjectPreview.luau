@@ -58,6 +58,8 @@ local LastCellX: number? = nil
 local LastCellZ: number? = nil
 local LastFacing: string? = nil
 
+local CurrentPivotRotation: CFrame = CFrame.identity
+
 local MoveOriginSignature: MoveOriginInfo? = nil
 local MoveHoldActive = false
 local MoveHoldMousePosition: Vector2? = nil
@@ -156,9 +158,10 @@ local function RenderFootprintMarkers(
 end
 
 local YawFromFacing = PlacementHelpers.GetYawFromFacing
-
--- This computes how far to lift the model so the pivot does not sink below the surface.
-local GetLiftFromPivotToBottom = PlacementHelpers.GetLiftFromPivotToBottom
+local GetFlatAlignedCFrame = PlacementHelpers.GetFlatAlignedCFrame
+local GetRotationOnly = PlacementHelpers.GetRotation
+local GetPivotRotation = PlacementHelpers.GetPivotRotation
+local GetLiftAlongDirection = PlacementHelpers.GetLiftAlongDirection
 
 local function AnyCellOverlap(firstCells: { number }, secondCells: { number }): boolean
 	-- Cell footprints are tiny, so a nested loop is sufficient here.
@@ -448,14 +451,19 @@ local function PreviewCellObject(
 	facing: Facing,
 	widthCells: number,
 	depthCells: number,
-	lift: number
+	lift: number,
+	pivotRotation: CFrame
 )
 	-- Anchor the preview at the geometric center of the rotated footprint so meshes cover all highlighted cells.
 	local center = grid:FootprintCenterCFrame(cellX, cellZ, widthCells, depthCells, facing)
-	local aligned = AlignToSurface(center, surface)
+	local flatAligned = GetFlatAlignedCFrame(surface, center.Position)
+	local baseRotation = GetRotationOnly(flatAligned)
 	local yaw = CFrame.Angles(0, YawFromFacing(facing), 0)
+	local orientation = baseRotation * yaw * pivotRotation
+	local surfaceUp = surface.CFrame.UpVector
+	local liftedPosition = center.Position + surfaceUp * lift
 
-	model:PivotTo(aligned * yaw * CFrame.new(0, lift, 0))
+	model:PivotTo(CFrame.new(liftedPosition) * orientation)
 end
 
 function ObjectPreview.Init()
@@ -486,11 +494,8 @@ end
 function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 	ObjectPreview.ClearPreview()
 
-	objectPreviewEnabled.Value = true
-	PreviewContext.CancelPreview.Enabled = true
-
-	local itemModel = ItemFinder.ResolveItemModel(itemId)
-	if not itemModel then
+	local sourceModel = ItemFinder.ResolveItemModel(itemId)
+	if not sourceModel then
 		warn("Item model not found for ID: " .. itemId)
 		return
 	end
@@ -510,18 +515,40 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 		return
 	end
 
+	local plotParent = surface.Parent
+	if not plotParent or not plotParent:IsA("Model") then
+		warn("Plot surface parent is missing or not a Model.")
+		return
+	end
+
+	local plotModel = plotParent :: Model
+	local containerFolder = plotModel:FindFirstChild("Container") :: Folder?
+	if not containerFolder then
+		warn("Plot container not found for preview.")
+		return
+	end
+
 	-- Prepare a simple, safe preview clone.
-	itemModel = itemModel:Clone()
+	local itemModel = sourceModel:Clone()
 
-	local lift = GetLiftFromPivotToBottom(itemModel)
+	CurrentPivotRotation = GetPivotRotation(itemModel)
+	local surfaceUp = surface.CFrame.UpVector
+	local extraLift = 0
+	if typeof(CurrentItemSpec) == "table" then
+		local offset = CurrentItemSpec.SurfaceOffsetStuds
+		if typeof(offset) == "number" then
+			extraLift = offset
+		end
+	end
+	local lift = GetLiftAlongDirection(itemModel, surfaceUp) + extraLift
 	local chunkSize = PlotStateStore.GetStateSnapshot().ChunkInfo.ChunkSizeInCells
-	local plotModel = surface.Parent :: Model
-	local containerFolder = plotModel:FindFirstChild("Container") :: Folder
-
 	PreviewHighlight.Adornee = itemModel
 
 	itemModel.Parent = containerFolder
 	SelectedItem = itemModel
+
+	objectPreviewEnabled.Value = true
+	PreviewContext.CancelPreview.Enabled = true
 
 	for _, part in itemModel:GetDescendants() do
 		if part:IsA("BasePart") then
@@ -678,7 +705,18 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 			local height = itemSpec and itemSpec.HeightStuds or 12
 			PreviewRoof(model, grid, surface, cellX, cellZ, CurrentFacing, height)
 		else
-			PreviewCellObject(model, grid, surface, cellX, cellZ, CurrentFacing, baseWidthCells, baseDepthCells, lift)
+			PreviewCellObject(
+				model,
+				grid,
+				surface,
+				cellX,
+				cellZ,
+				CurrentFacing,
+				baseWidthCells,
+				baseDepthCells,
+				lift,
+				CurrentPivotRotation
+			)
 		end
 
 		local requiresFloor = false
@@ -804,6 +842,7 @@ function ObjectPreview.ClearPreview()
 	LastCellX, LastCellZ = nil, nil
 	CurrentItemId = nil
 	CurrentItemSpec = nil
+	CurrentPivotRotation = CFrame.identity
 	MoveOriginSignature = nil
 	MoveHoldActive = false
 	MoveHoldMousePosition = nil
