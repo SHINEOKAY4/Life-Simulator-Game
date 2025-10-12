@@ -5,6 +5,7 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 local ResidentState = require(ServerScriptService.Server.Classes.ResidentState)
 local ResidentPlacer = require(ServerScriptService.Server.Utilities.ResidentPlacer)
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
@@ -16,6 +17,8 @@ type ResidentData = ResidentState.ResidentData
 local ResidentService = {}
 local PlayersResidents: { [number]: any } = {} -- [userId] = {residentData}
 local NameToIndexMap: { [number]: { [string]: number } } = {} -- [userId][name] = index
+
+ResidentService.PlayerResidentsChanged = GoodSignal.new()
 
 local Config = {
 	MaxResidentsPerHousehold = 8,
@@ -62,6 +65,7 @@ function ResidentService.Load(player: Player)
 		ResidentPlacer.Spawn(player, PlayersResidents[userId][mapKey])
 	end
 
+	ResidentService.PlayerResidentsChanged:Fire(player)
 	ResidentsPackets.PlayersResidentsSync:Fire(payload)
 end
 
@@ -118,6 +122,7 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 	NameToIndexMap[player.UserId][newResidentData.Name] = #data.Residents
 
 	ResidentPlacer.Spawn(player, PlayersResidents[player.UserId][newResidentData.Name])
+	ResidentService.PlayerResidentsChanged:Fire(player)
 	ResidentsPackets.PlayerResidentDelta:Fire(payload)
 	return true, "Resident created successfully."
 end
@@ -154,6 +159,7 @@ function ResidentService.DeleteResident(player: Player, residentName: string)
 	}
 
 	resident:Destroy()
+	ResidentService.PlayerResidentsChanged:Fire(player)
 	ResidentsPackets.PlayerResidentDelta:Fire(payload)
 	return true, "Resident deleted successfully."
 end

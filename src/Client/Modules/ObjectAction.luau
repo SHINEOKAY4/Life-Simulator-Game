@@ -16,8 +16,8 @@ local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
-local ObjectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled")
-local RadialBillboardButtonEnabled = ActiveQueryFolder:WaitForChild("RadialBillboardButtonEnabled") :: BoolValue
+local ObjectPreviewEnabled = ActiveQueryFolder.ObjectPreviewEnabled :: BoolValue
+local RadialBillboardButtonEnabled = ActiveQueryFolder.RadialBillboardButtonEnabled :: BoolValue
 
 local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
 local ObjectActionContext = InputContextsFolder:WaitForChild("ObjectActionContext")

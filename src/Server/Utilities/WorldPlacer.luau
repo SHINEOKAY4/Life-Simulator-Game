@@ -89,8 +89,13 @@ function WorldPlacer.Spawn(
 		-- Rule: a roof is placed above the surface by a catalog-defined roof height, then seated by pivot-bottom.
 		local center = grid:FootprintCenterCFrame(cellX, cellZ, footprintWidth, footprintDepth, facing)
 		local yaw = CFrame.Angles(0, GetYawFromFacing(facing), 0)
-		local roofY = spec.HeightStuds -- studs above the plot surface plane
-		base = (center * yaw) * CFrame.new(0, roofY, 0)
+		local roofLift = 0
+		if typeof(spec.HeightStuds) == "number" then
+			roofLift = spec.HeightStuds
+		elseif typeof(extraLift) == "number" and extraLift ~= 0 then
+			roofLift = extraLift
+		end
+		base = (center * yaw) * CFrame.new(0, roofLift, 0)
 	end
 
 	if target then

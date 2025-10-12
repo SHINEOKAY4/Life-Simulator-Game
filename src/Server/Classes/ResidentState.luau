@@ -17,7 +17,7 @@ local ActionQueue = require(ServerScriptService.Server.Classes.ActionQueue)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
 -- This is not set in stone (figuring out how things will play out in this module)
-local function WaitOnSignalWithTimeout<A...>(signal, timeoutSeconds: number?): (boolean, A...)
+local function _WaitOnSignalWithTimeout<A...>(signal, timeoutSeconds: number?): (boolean, A...)
 	-- Fast path: no timeout requested
 	if timeoutSeconds == nil or timeoutSeconds == math.huge then
 		return true, signal:Wait()
@@ -82,6 +82,7 @@ function ResidentState.new(save: ResidentData)
 	self.DestinationCompleted = GoodSignal.new()
 	self.ActionChanged = GoodSignal.new()
 	self.ActionCompleted = GoodSignal.new()
+	self.NeedsChanged = GoodSignal.new() -- Fired when any need changes
 	self.Model = ResidentsTemplateFolder:FindFirstChild(self.Save.Gender):Clone() :: Model
 	self.Model.Name = self.Save.Name
 	self.Connections = self:BindConnections()
@@ -131,6 +132,27 @@ function ResidentState:BindConnections()
 	return connections
 end
 
+function ResidentState:GetNeed(needName: string): number
+	return self.Save.Needs[needName] or 0
+end
+
+function ResidentState:SetNeed(needName: string, value: number)
+	local old = self.Save.Needs[needName] or 0
+	if value == old then
+		return
+	end
+	self.Save.Needs[needName] = value
+	self.NeedsChanged:Fire(needName, value, old)
+end
+
+function ResidentState:SetAutoActionEnabled(enabled: boolean)
+	self.AutoActionsEnabled = enabled
+end
+
+function ResidentState:SetAutoJobEnabled(enabled: boolean)
+	self.AutoJobEnabled = enabled
+end
+
 function ResidentState:Destroy()
 	-- Disconnect external connections first
 	if self.Connections then
@@ -162,7 +184,10 @@ function ResidentState:Destroy()
 		self.ActionCompleted:DisconnectAll()
 		self.ActionCompleted = nil
 	end
-
+	if self.NeedsChanged then
+		self.NeedsChanged:DisconnectAll()
+		self.NeedsChanged = nil
+	end
 	-- Destroy model last
 	if self.Model then
 		self.Model:Destroy()

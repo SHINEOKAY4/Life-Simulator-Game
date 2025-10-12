@@ -104,7 +104,6 @@ function BillboardRadialUI.Init()
 			return
 		end
 		ObjectAction.Rotate(AdorneeModel, Vector3.new(0, 0, 0))
-		--#TODO: You can add functionality here to handle the rotate action
 	end)
 
 	ObjectSelectorContext.DeleteObject.Pressed:Connect(function()
@@ -115,7 +114,6 @@ function BillboardRadialUI.Init()
 			return
 		end
 		ObjectAction.Delete(AdorneeModel)
-		--#TODO: You can add functionality here to handle the delete action
 	end)
 
 	ObjectSelectorContext.CopyObject.Pressed:Connect(function()

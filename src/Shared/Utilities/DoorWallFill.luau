@@ -72,7 +72,13 @@ local function ensureDoorAttributes(model: Model)
 		return
 	end
 
-	local pivotCF = model:GetPivot()
+	local ok, pivotCF = pcall(function()
+		return model:GetPivot()
+	end)
+	if not ok then
+		return
+	end
+
 	local bboxCF, bboxSize = model:GetBoundingBox()
 	local offset = pivotCF:PointToObjectSpace(bboxCF.Position)
 
@@ -82,8 +88,13 @@ local function ensureDoorAttributes(model: Model)
 	model:SetAttribute("DoorWallFillDoorHeight", bboxSize.Y)
 end
 
-local function computeDoorCenterWorld(model: Model): CFrame
-	local pivotCF = model:GetPivot()
+local function computeDoorCenterWorld(model: Model): CFrame?
+	local ok, pivotCF = pcall(function()
+		return model:GetPivot()
+	end)
+	if not ok then
+		return nil
+	end
 
 	local rawX = model:GetAttribute("DoorWallFillCenterOffsetX")
 	local rawY = model:GetAttribute("DoorWallFillCenterOffsetY")
@@ -180,6 +191,10 @@ function DoorWallFill.Apply(model: Model, spec: DoorSpec?, options: ApplyOptions
 	filler.Size = Vector3.new(info.Size.X, gapHeight, info.Size.Z)
 
 	local doorCenterCF = computeDoorCenterWorld(model)
+	if not doorCenterCF then
+		removeExistingFill(model)
+		return
+	end
 	local fillerOffsetY = (doorHeight * 0.5) + (gapHeight * 0.5)
 	filler.CFrame = doorCenterCF * CFrame.new(0, fillerOffsetY, 0)
 

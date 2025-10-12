@@ -171,15 +171,17 @@ function BuildService.Init()
 			local waitSeconds = PlaceBucket:SecondsUntilNextToken(player)
 			return false, ("Too fast. Try again in %.2fs"):format(waitSeconds)
 		end
-		print(payload.ItemId)
 		return BuildService.Build(player, payload)
 	end
 
-	Packets.DestroyRequest.OnServerInvoke = function( -- ADDED
+	Packets.DestroyRequest.OnServerInvoke = function(
 		player: Player,
 		payload: { ItemId: string, CellX: number, CellZ: number, Facing: string }
 	): (boolean, string)
-		print(payload.ItemId)
+		if not PlaceBucket:Allow(player, 1) then
+			local waitSeconds = PlaceBucket:SecondsUntilNextToken(player)
+			return false, ("Too fast. Try again in %.2fs"):format(waitSeconds)
+		end
 		return BuildService.Destroy(player, payload)
 	end
 	-- MoveRequest packet handler can be added here
@@ -245,7 +247,7 @@ function BuildService.Build(
 	local placementType = itemData.PlacementType or itemData.Type or "CellObject"
 
 	local allowedFacing = itemData.Facing :: { Facing }?
-	if placementType ~= "Floor" and allowedFacing and #allowedFacing > 0 then -- Changed
+	if placementType ~= "Floor" and allowedFacing and #allowedFacing > 0 then
 		if not table.find(allowedFacing, facing) then
 			return false, "Invalid facing for this item"
 		end
@@ -279,8 +281,7 @@ function BuildService.Build(
 			end
 		end
 
-		local success, uniqueId =
-			state:Place(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, facing)
+		local success = state:Place(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, facing)
 
 		if not success then
 			return false, "Failed to place cell object"
@@ -288,7 +289,8 @@ function BuildService.Build(
 
 		local stationType = if itemData.StationType then itemData.StationType else nil
 		if stationType then
-			PlotService.AddStationForPlayer(player, stationType, uniqueId, payload.ItemId)
+			local placementKey = state:PlacementKeyForType(payload.CellX, payload.CellZ, facing, placementType)
+			PlotService.AddStationForPlayer(player, stationType, placementKey, payload.ItemId)
 		end
 		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing)
 
@@ -419,8 +421,10 @@ function BuildService.Destroy(
 			and savedFromIdentifier.cellX == payload.CellX
 			and savedFromIdentifier.cellZ == payload.CellZ
 		then
-			saved = savedFromIdentifier
-			keyFacing = PlacementKey.NormalizeFacing(savedFromIdentifier.facing)
+			local fallbackSaved = savedFromIdentifier
+			saved = fallbackSaved
+			keyFacing = PlacementKey.NormalizeFacing(fallbackSaved.facing)
+			key = state:PlacementKeyForType(fallbackSaved.cellX, fallbackSaved.cellZ, keyFacing, placementType)
 		end
 	end
 	if not saved or saved.id ~= resolvedId then
@@ -449,8 +453,9 @@ function BuildService.Destroy(
 		state:RemoveRoof(payload.CellX, payload.CellZ, w, d, f)
 	else -- CellObject
 		state:RemoveCellObject(payload.CellX, payload.CellZ, w, d, f)
-		print(spec.StationType, payload.ItemId)
-		PlotService.RemoveStationForPlayer(player, spec.StationType, key) -- Passed payload.ItemId instead of resolvedId (the itemId is the unique identifier for stations which was sent by client)
+		if spec.StationType then
+			PlotService.RemoveStationForPlayer(player, spec.StationType, key)
+		end
 	end
 
 	-- world + client delta
@@ -511,6 +516,8 @@ function BuildService.Move(
 	local moveError: string?
 	local removedFacing: Facing = fromF
 	local placedFacing: Facing = toF
+	local fromKey = state:PlacementKeyForType(payload.FromCellX, payload.FromCellZ, fromF, placementType)
+	local toKey = state:PlacementKeyForType(payload.ToCellX, payload.ToCellZ, toF, placementType)
 
 	if placementType == "CellObject" then
 		if spec.Rules and spec.Rules.RequiresFloorUnderAllCells then
@@ -586,6 +593,11 @@ function BuildService.Move(
 
 	if not moveSucceeded then
 		return false, moveError or "Move failed"
+	end
+
+	if spec.StationType and fromKey ~= toKey then
+		PlotService.RemoveStationForPlayer(player, spec.StationType, fromKey)
+		PlotService.AddStationForPlayer(player, spec.StationType, toKey, resolvedId)
 	end
 
 	WorldPlacer.Despawn(player, resolvedId, payload.FromCellX, payload.FromCellZ, removedFacing)
@@ -702,6 +714,15 @@ function BuildService.Rotate(
 
 	if not rotated then
 		return false, rotateErr or "Rotation failed"
+	end
+
+	if spec.StationType then
+		local fromKeyNormalized = state:PlacementKeyForType(cellX, cellZ, currentFacing, placementType)
+		local toKey = state:PlacementKeyForType(cellX, cellZ, targetFacing, placementType)
+		if fromKeyNormalized ~= toKey then
+			PlotService.RemoveStationForPlayer(player, spec.StationType, fromKeyNormalized)
+			PlotService.AddStationForPlayer(player, spec.StationType, toKey, resolvedId)
+		end
 	end
 
 	WorldPlacer.Despawn(player, resolvedId, cellX, cellZ, currentFacing)
