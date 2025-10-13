@@ -14,44 +14,78 @@ ResidentsStore.ResidentAdded = GoodSignal.new()
 ResidentsStore.ResidentRemoved = GoodSignal.new()
 
 function ResidentsStore.Init()
-	-- Future implementation for managing resident data on the client side
 	ResidentsPackets.PlayersResidentsSync.OnClientEvent:Connect(function(payload)
 		local userId = payload.UserId
-		if not PlayersResidents[userId] then
-			PlayersResidents[userId] = {}
+		local current = PlayersResidents[userId]
+		if not current then
+			current = {}
+			PlayersResidents[userId] = current
 		end
 
-		for _, resident in ipairs(payload.Residents) do -- Rebuild the keyed table
-			PlayersResidents[userId][resident.Name] = resident
-			ResidentsStore.ResidentAdded:Fire(userId, resident)
+		local seen: { [string]: boolean } = {}
+		local residentsPayload = payload.Residents :: { any }?
+		if type(residentsPayload) ~= "table" then
+			return
 		end
-		print("Residents state synchronized for all players.", PlayersResidents)
+
+		for _, resident in ipairs(residentsPayload) do
+			if typeof(resident) == "table" and type(resident.Name) == "string" then
+				local residentName = resident.Name
+				seen[residentName] = true
+				local existing = current[residentName]
+				current[residentName] = resident
+				if existing then
+					ResidentsStore.ResidentsUpdated:Fire(userId, resident)
+				else
+					ResidentsStore.ResidentAdded:Fire(userId, resident)
+				end
+			end
+		end
+
+		local toRemove = {}
+		for residentName in pairs(current) do
+			if not seen[residentName] then
+				table.insert(toRemove, residentName)
+			end
+		end
+		for _, residentName in ipairs(toRemove) do
+			current[residentName] = nil
+			ResidentsStore.ResidentRemoved:Fire(userId, residentName)
+		end
 	end)
 
 	ResidentsPackets.PlayerResidentDelta.OnClientEvent:Connect(function(payload)
 		local userId = payload.UserId
-
-		if not PlayersResidents[userId] then
-			PlayersResidents[userId] = {}
+		local residents = PlayersResidents[userId]
+		if not residents then
+			residents = {}
+			PlayersResidents[userId] = residents
 		end
-		local delta = payload.ResidentDelta[1]
 
-		if delta then
-			if not PlayersResidents[userId][payload.ResidentName] then
-				-- New resident added
-				ResidentsStore.ResidentAdded:Fire(userId, delta)
-			else
-				-- Existing resident updated
-				ResidentsStore.ResidentsUpdated:Fire(userId, delta)
+		local deltas = (payload.ResidentDelta :: { any }?) or {}
+		if #deltas > 0 then
+			for _, resident in ipairs(deltas) do
+				if typeof(resident) == "table" and type(resident.Name) == "string" then
+					local residentName = resident.Name
+					local existing = residents[residentName]
+					residents[residentName] = resident
+					if existing then
+						ResidentsStore.ResidentsUpdated:Fire(userId, resident)
+					else
+						ResidentsStore.ResidentAdded:Fire(userId, resident)
+					end
+				end
 			end
-			-- Update existing resident
-			PlayersResidents[userId][payload.ResidentName] = delta
 		else
-			-- Remove existing resident
-			PlayersResidents[userId][payload.ResidentName] = nil
-			ResidentsStore.ResidentRemoved:Fire(userId, payload.ResidentName)
+			local residentName = payload.ResidentName
+			if type(residentName) == "string" then
+				local previous = residents[residentName]
+				if previous then
+					residents[residentName] = nil
+					ResidentsStore.ResidentRemoved:Fire(userId, residentName)
+				end
+			end
 		end
-		print("Resident delta received for user:", PlayersResidents)
 	end)
 end
 

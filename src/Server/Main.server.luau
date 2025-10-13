@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local ServerFolder = ServerScriptService.Server
 local ServicesFolder = ServerFolder.Services
+local ModulesFolder = ServerFolder.Modules
 
 local PlayerSession = require(ServicesFolder.PlayerSession)
 local PlotService = require(ServicesFolder.PlotService)
@@ -12,11 +13,15 @@ local BuildService = require(ServicesFolder.BuildService)
 local ResidentService = require(ServicesFolder.ResidentService)
 local ResidentAutonomyService = require(ServicesFolder.ResidentAutonomyService)
 local ResidentNeedService = require(ServicesFolder.ResidentNeedService)
+local DirectActionService = require(ServicesFolder.DirectActionService)
+
+local _ResidentActionHandlers = require(ModulesFolder.ResidentActionHandlers)
 
 ResidentService.Init()
 PlotService.Init()
 BuildService.Init()
 ResidentAutonomyService.Init()
+DirectActionService.Init()
 ResidentNeedService.Init()
 
 ResidentNeedService.UpdateRegisteredResidentsNeeds()
@@ -42,3 +47,9 @@ end
 
 Players.PlayerAdded:Connect(OnPlayerAdded)
 Players.PlayerRemoving:Connect(OnPlayerRemoving)
+
+local ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
+
+ResidentDebug.SetChannelEnabled("Movement", true)
+ResidentDebug.SetChannelEnabled("Action", true)
+ResidentDebug.SetChannelEnabled("Effects", true)

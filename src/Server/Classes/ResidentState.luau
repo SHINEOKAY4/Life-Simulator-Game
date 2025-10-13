@@ -10,6 +10,11 @@ export type ResidentData = {
 	Occupation: string,
 }
 
+type MoodletRuntime = {
+	ExpiresAt: number,
+	NeedBias: { [string]: number },
+}
+
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -71,22 +76,89 @@ function ResidentState.new(save: ResidentData)
 	local self = setmetatable({}, ResidentState)
 
 	self.Save = save
-	self.ActionQueue = ActionQueue.new(self) -- Queue of actions to perform
+	self.ActionContext = {
+		Resident = self,
+		CancelToken = {
+			Cancelled = false,
+			Reason = nil,
+		},
+	}
+	self.ActionQueue = ActionQueue.new(self.ActionContext) -- Queue of actions to perform
 	self.CurrentAction = nil -- The current action being performed
 	self.Destination = nil -- Current movement destination
 	self.IsMoving = false -- Whether the resident is currently moving
 	self.IsBusy = false -- Whether the resident is currently busy (performing an action)
 	self.AutoActionsEnabled = true -- Whether the resident can perform auto actions
 	self.AutoJobEnabled = true -- Whether the resident can perform auto job actions
+	self.CurrentOverride = nil
 	self.DestinationChanged = GoodSignal.new()
 	self.DestinationCompleted = GoodSignal.new()
 	self.ActionChanged = GoodSignal.new()
 	self.ActionCompleted = GoodSignal.new()
 	self.NeedsChanged = GoodSignal.new() -- Fired when any need changes
+	self.ActiveMoodlets = {} :: { [string]: MoodletRuntime }
 	self.Model = ResidentsTemplateFolder:FindFirstChild(self.Save.Gender):Clone() :: Model
 	self.Model.Name = self.Save.Name
 	self.Connections = self:BindConnections()
 	return self
+end
+
+function ResidentState:GetCancelToken()
+	return self.ActionContext and self.ActionContext.CancelToken or { Cancelled = false, Reason = nil }
+end
+
+function ResidentState:CancelCurrentAction(reason: string?)
+	local actionContext = self.ActionContext
+	if not actionContext then
+		return
+	end
+	local token = actionContext.CancelToken
+	token.Cancelled = true
+	token.Reason = reason
+end
+
+function ResidentState:ResetCancelToken()
+	local actionContext = self.ActionContext
+	if not actionContext then
+		return
+	end
+	local token = actionContext.CancelToken
+	token.Cancelled = false
+	token.Reason = nil
+end
+
+function ResidentState:WaitUntilIdle(timeoutSeconds: number?)
+	if not self.IsBusy and self.ActionQueue:IsEmpty() then
+		return true
+	end
+	local deadline = if timeoutSeconds ~= nil then os.clock() + math.max(timeoutSeconds, 0) else nil
+	while true do
+		local waitTime = if deadline ~= nil then math.max(deadline - os.clock(), 0) else nil
+		local success = _WaitOnSignalWithTimeout(self.ActionCompleted, waitTime)
+		if not success then
+			return false
+		end
+		if not self.IsBusy and self.ActionQueue:IsEmpty() then
+			return true
+		end
+		if deadline ~= nil and os.clock() >= deadline then
+			return not self.IsBusy and self.ActionQueue:IsEmpty()
+		end
+	end
+end
+
+function ResidentState:ClearQueuedActions()
+	if self.ActionQueue then
+		self.ActionQueue:Clear()
+	end
+end
+
+function ResidentState:SetManualOverrideState(state: { [string]: any }?)
+	self.CurrentOverride = state
+end
+
+function ResidentState:ClearManualOverrideState()
+	self.CurrentOverride = nil
 end
 
 function ResidentState:SetDestination(destination)
@@ -107,6 +179,7 @@ function ResidentState:BindConnections()
 	table.insert(
 		connections,
 		self.ActionQueue.ActionStarted:Connect(function(actionName: string)
+			self:ResetCancelToken()
 			self.CurrentAction = actionName
 			self.IsBusy = true
 			self.ActionChanged:Fire(actionName)
@@ -119,6 +192,7 @@ function ResidentState:BindConnections()
 			self.IsBusy = false
 			self.ActionCompleted:Fire(actionName, succeeded, errorMessage)
 			self.CurrentAction = nil
+			self:ResetCancelToken()
 		end)
 	)
 	table.insert(
@@ -151,6 +225,66 @@ end
 
 function ResidentState:SetAutoJobEnabled(enabled: boolean)
 	self.AutoJobEnabled = enabled
+end
+
+function ResidentState:GetTraits(): { string }
+	local traits = self.Save.Traits
+	if typeof(traits) ~= "table" then
+		return {}
+	end
+	return traits
+end
+
+type MoodletDefinition = { Name: string, DurationSeconds: number, NeedBias: { [string]: number }? }
+
+function ResidentState:AddMoodlet(moodlet: MoodletDefinition)
+	local name = moodlet.Name
+	local duration = moodlet.DurationSeconds
+	if type(name) ~= "string" or name == "" or type(duration) ~= "number" or duration <= 0 then
+		return
+	end
+	if not self.ActiveMoodlets then
+		return
+	end
+	local expiresAt = os.clock() + duration
+	local bias = moodlet.NeedBias or {}
+	self.ActiveMoodlets[name] = {
+		ExpiresAt = expiresAt,
+		NeedBias = bias,
+	}
+end
+
+function ResidentState:GetMoodBias(needName: string, nowClock: number?): number
+	local now = nowClock or os.clock()
+	local total = 0
+	for name, entry in pairs(self.ActiveMoodlets or {}) do
+		if entry.ExpiresAt <= now then
+			if self.ActiveMoodlets then
+				self.ActiveMoodlets[name] = nil
+			end
+		else
+			local bias = entry.NeedBias
+			local value = bias and bias[needName]
+			if value then
+				total += value
+			end
+		end
+	end
+	return total
+end
+
+function ResidentState:ClearMoodlets()
+	self.ActiveMoodlets = {} :: { [string]: MoodletRuntime }
+end
+
+function ResidentState:DisableAutomation()
+	self:SetAutoActionEnabled(false)
+	self:SetAutoJobEnabled(false)
+end
+
+function ResidentState:EnableAutomation()
+	self:SetAutoActionEnabled(true)
+	self:SetAutoJobEnabled(true)
 end
 
 function ResidentState:Destroy()
@@ -188,6 +322,7 @@ function ResidentState:Destroy()
 		self.NeedsChanged:DisconnectAll()
 		self.NeedsChanged = nil
 	end
+	self.ActiveMoodlets = nil
 	-- Destroy model last
 	if self.Model then
 		self.Model:Destroy()
@@ -196,6 +331,7 @@ function ResidentState:Destroy()
 
 	self.CurrentAction = nil
 	self.Destination = nil
+	self.ActionContext = nil
 end
 
 return ResidentState

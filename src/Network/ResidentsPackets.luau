@@ -56,4 +56,7 @@ ResidentsPackets.PlayersResidentsSync = Packet("ResidentStateSync", {
 	},
 })
 
+ResidentsPackets.RequestAssignStation =
+	Packet("RequestAssignStation", Packet.String, Packet.String):Response(Packet.Boolean8, Packet.StringLong)
+
 return ResidentsPackets

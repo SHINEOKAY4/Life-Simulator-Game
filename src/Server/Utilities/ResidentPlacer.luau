@@ -15,12 +15,19 @@ function ResidentPlacer.Spawn(player, residentState)
 	end
 
 	local plotModel = PlotFinder.FindPlot(plotIndex)
+	local humanoidRootPart = residentState.Model:FindFirstChild("HumanoidRootPart") :: BasePart
+	if not humanoidRootPart then
+		warn("Resident model is missing HumanoidRootPart:", residentState.Name)
+		return
+	end
 	local plotResidentsFolder = plotModel:FindFirstChild("Residents") :: Folder
 	local spawnLocation = plotModel:FindFirstChild("Spawn") :: BasePart
 	local residentModel = residentState.Model :: Model
 
 	residentModel:PivotTo(spawnLocation.CFrame)
 	residentModel.Parent = plotResidentsFolder
+
+	humanoidRootPart:SetNetworkOwner(nil)
 end
 
 function ResidentPlacer.Despawn(residentState) -- Only moves parent to nil, does not destroy

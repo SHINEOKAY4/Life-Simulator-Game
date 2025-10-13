@@ -17,7 +17,13 @@ type PlotRuntimeState = PlotState.PlotState
 type PlacedObjectMap = PlotState.PlacedObjectMap
 type PlacedObjectSnapshot = { id: string, cellX: number, cellZ: number, facing: string }
 type Facing = WorldPlacer.Facing
-type StationOccupancy = { Id: string, Residents: { [number]: string }, Occupied: boolean }
+type StationOccupancy = {
+	Id: string,
+	Residents: { [number]: string },
+	Occupied: boolean,
+	Model: Model?,
+	ActiveOverride: string?,
+}
 type StationInstanceMap = { [string]: StationOccupancy }
 type PlayerStationCache = { [string]: StationInstanceMap }
 
@@ -26,9 +32,20 @@ local PlotModels: { [number]: Model } = PlotFinder.GetOrderedPlots()
 local PlotGrids: { [number]: any } = {} -- [plotIndex] = Grid
 local PlayerRuntime: { [number]: PlotRuntimeState } = {}
 local PlayerStations: { [number]: PlayerStationCache } = {} -- [playerId] = { stationName = {uid}, ... }
+local StationScopeVersions: { [number]: { [string]: number } } = {}
+
+local function bumpStationVersion(userId: number, stationType: string)
+	local versionMap = StationScopeVersions[userId]
+	if not versionMap then
+		versionMap = {}
+		StationScopeVersions[userId] = versionMap
+	end
+	versionMap[stationType] = (versionMap[stationType] or 0) + 1
+end
 
 PlotService.PlotClaimed = GoodSignal.new()
 PlotService.PlotUnclaimed = GoodSignal.new()
+PlotService.StationRemoved = GoodSignal.new()
 
 local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapshot }
 	local keys = {}
@@ -147,6 +164,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 
 	PlayerRuntime[userId] = runtimeState
 	PlayerStations[userId] = {}
+	StationScopeVersions[userId] = StationScopeVersions[userId] or {}
 
 	-- Station names are the object IDs of the stations and the key is the unique id for easier reference
 	for uniqueKey, obj in pairs(data.PlacedObjects) do
@@ -161,8 +179,19 @@ function PlotService.Load(player: Player, plotModel: Model)
 			continue
 		end
 		local stationCache = PlayerStations[userId]
-		stationCache[stationType] = stationCache[stationType] or {}
-		stationCache[stationType][uniqueKey] = { Id = obj.id, Residents = {}, Occupied = false } -- Initialize with empty resident list and not occupied  -- Add uniqueKey to the list for this station id
+		local stationScope = stationCache[stationType]
+		if not stationScope then
+			stationScope = {}
+			stationCache[stationType] = stationScope
+		end
+		stationScope[uniqueKey] = {
+			Id = obj.id,
+			Residents = {},
+			Occupied = false,
+			Model = nil,
+			ActiveOverride = nil,
+		} -- Initialize with empty resident list and not occupied
+		bumpStationVersion(userId, stationType)
 		-- e.g ["RestStation"] = {object1, object2, ...} -- this is to support multiple instances of the same station
 		-- Helpful for finding another pathing option, weighing options by stats, checking if a station is occupied, etc
 	end
@@ -215,6 +244,7 @@ function PlotService.Unclaim(player: Player)
 	player:SetAttribute("OwnedPlotIndex", nil)
 	PlayerRuntime[player.UserId] = nil
 	PlayerStations[player.UserId] = nil
+	StationScopeVersions[player.UserId] = nil
 
 	PlotService.PlotUnclaimed:Fire(player, plotIndex)
 	return true, "Plot unclaimed"
@@ -277,6 +307,9 @@ function PlotService.GetStationsForPlayer(player: Player): PlayerStationCache
 		stations = {}
 		PlayerStations[userId] = stations
 	end
+	if not StationScopeVersions[userId] then
+		StationScopeVersions[userId] = {}
+	end
 	return stations
 end
 
@@ -287,9 +320,23 @@ function PlotService.AddStationForPlayer(player: Player, stationName: string, un
 		stationCache = {}
 		PlayerStations[userId] = stationCache
 	end
+	if not StationScopeVersions[userId] then
+		StationScopeVersions[userId] = {}
+	end
 
-	stationCache[stationName] = stationCache[stationName] or {}
-	stationCache[stationName][uniqueId] = { Id = itemId, Residents = {}, Occupied = false }
+	local stationScope = stationCache[stationName]
+	if not stationScope then
+		stationScope = {}
+		stationCache[stationName] = stationScope
+	end
+	stationScope[uniqueId] = {
+		Id = itemId,
+		Residents = {},
+		Occupied = false,
+		Model = nil,
+		ActiveOverride = nil,
+	}
+	bumpStationVersion(userId, stationName)
 end
 
 function PlotService.RemoveStationForPlayer(player: Player, stationName: string, uniqueId: string)
@@ -304,10 +351,33 @@ function PlotService.RemoveStationForPlayer(player: Player, stationName: string,
 		return
 	end
 
+	local removed = stationInstances[uniqueId]
+	local occupants: { string } = {}
+	if removed and typeof(removed.Residents) == "table" then
+		for _, residentName in ipairs(removed.Residents) do
+			if typeof(residentName) == "string" then
+				occupants[#occupants + 1] = residentName
+			end
+		end
+	end
+
 	stationInstances[uniqueId] = nil
+	bumpStationVersion(userId, stationName)
 
 	if next(stationInstances) == nil then
 		stationCache[stationName] = nil
 	end
+
+	if removed then
+		PlotService.StationRemoved:Fire(player, stationName, uniqueId, occupants)
+	end
+end
+
+function PlotService.GetStationVersion(player: Player, stationType: string): number
+	local versionMap = StationScopeVersions[player.UserId]
+	if not versionMap then
+		return 0
+	end
+	return versionMap[stationType] or 0
 end
 return PlotService

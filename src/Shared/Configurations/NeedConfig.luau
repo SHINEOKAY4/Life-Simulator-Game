@@ -15,14 +15,12 @@ export type NeedDef = {
 export type NeedConfig = { [string]: NeedDef }
 
 local Needs: NeedConfig = {
-	Hunger = { Min = 0, Max = 100, DecayPerHour = 15, Low = 45, Critical = 20, Hysteresis = 8, CooldownMinutes = 3 },
-	Energy = { Min = 0, Max = 100, DecayPerHour = 8, Low = 40, Critical = 15, Hysteresis = 10, CooldownMinutes = 5 },
-	Hygiene = { Min = 0, Max = 100, DecayPerHour = 6, Low = 35, Critical = 10, Hysteresis = 12, CooldownMinutes = 6 },
-	Fun = { Min = 0, Max = 100, DecayPerHour = 10, Low = 50, Critical = 25, Hysteresis = 10, CooldownMinutes = 4 },
-	Social = { Min = 0, Max = 100, DecayPerHour = 6, Low = 40, Critical = 15, Hysteresis = 8, CooldownMinutes = 4 },
+	Hunger = { Min = 0, Max = 100, DecayPerHour = 14, Low = 45, Critical = 18, Hysteresis = 10, CooldownMinutes = 60 },
+	Energy = { Min = 0, Max = 100, DecayPerHour = 5, Low = 35, Critical = 12, Hysteresis = 12, CooldownMinutes = 240 },
+	Hygiene = { Min = 0, Max = 100, DecayPerHour = 5, Low = 35, Critical = 12, Hysteresis = 12, CooldownMinutes = 75 },
+	Fun = { Min = 0, Max = 100, DecayPerHour = 9, Low = 45, Critical = 20, Hysteresis = 12, CooldownMinutes = 90 },
 }
 
--- Circadian hints (used by PriorityPolicy)
 export type Circadian = {
 	NightStart: number, -- 22.0
 	DayStart: number, -- 6.0
@@ -31,7 +29,7 @@ export type Circadian = {
 local Circadian: Circadian = {
 	NightStart = 22.0,
 	DayStart = 6.0,
-	SleepBias = 0.20, -- +20% urgency for Energy during night
+	SleepBias = 0.9, -- encourage stronger bias toward nighttime sleep
 }
 
 return {

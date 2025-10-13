@@ -15,11 +15,14 @@ local Furnitures = {
 		Rules = { RequiresFloorUnderAllCells = false },
 		Tags = { "Basic", "Seating" },
 		ModelPath = { "Furnitures", "WoodenChair" },
+		StationEffects = {
+			RestMode = "Nap",
+		},
 	},
 	WoodenTable = {
 		Name = "Wooden Table",
 		PlacementType = "CellObject",
-		StationType = "SocialStation",
+		StationType = "FunStation",
 		Station = true,
 		maxOccupancy = 4,
 		WidthCells = 2,
@@ -29,6 +32,12 @@ local Furnitures = {
 		Rules = { RequiresFloorUnderAllCells = false },
 		Tags = { "Basic", "Table" },
 		ModelPath = { "Furnitures", "WoodenTable" },
+		StationEffects = {
+			DurationSeconds = 150,
+			Effects = {
+				{ Need = "Fun", RatePerHour = 12 },
+			},
+		},
 	},
 
 	Refridgerator = {
@@ -36,7 +45,7 @@ local Furnitures = {
 		PlacementType = "CellObject",
 		StationType = "CookStation",
 		Station = true,
-		maxOccupancy = 0,
+		maxOccupancy = 1,
 		WidthCells = 1,
 		DepthCells = 1,
 		Facing = { "North", "East", "South", "West" },
@@ -44,6 +53,12 @@ local Furnitures = {
 		Rules = { RequiresFloorUnderAllCells = false },
 		Tags = { "Comfort", "Appliance" },
 		ModelPath = { "Furnitures", "Refridgerator" },
+		StationEffects = {
+			DurationSeconds = 16,
+			Effects = {
+				{ Need = "Hunger", RatePerHour = 420 },
+			},
+		},
 	},
 
 	Stove = {
@@ -51,7 +66,7 @@ local Furnitures = {
 		PlacementType = "CellObject",
 		StationType = "CookStation",
 		Station = true,
-		maxOccupancy = 0,
+		maxOccupancy = 1,
 		WidthCells = 1,
 		DepthCells = 1,
 		Facing = { "North", "East", "South", "West" },
@@ -59,12 +74,18 @@ local Furnitures = {
 		Rules = { RequiresFloorUnderAllCells = false },
 		Tags = { "Comfort", "Appliance" },
 		ModelPath = { "Furnitures", "Stove" },
+		StationEffects = {
+			DurationSeconds = 22,
+			Effects = {
+				{ Need = "Hunger", RatePerHour = 500 },
+			},
+		},
 	},
 
 	BigWoodenTable = {
 		Name = "Big Wooden Table",
 		PlacementType = "CellObject",
-		StationType = "SocialStation",
+		StationType = "FunStation",
 		Station = true,
 		maxOccupancy = 8,
 		WidthCells = 2,
@@ -74,6 +95,12 @@ local Furnitures = {
 		Rules = { RequiresFloorUnderAllCells = false },
 		Tags = { "Comfort", "Table" },
 		ModelPath = { "Furnitures", "BigWoodenTable" },
+		StationEffects = {
+			DurationSeconds = 210,
+			Effects = {
+				{ Need = "Fun", RatePerHour = 14 },
+			},
+		},
 	},
 
 	OldMattress = {
@@ -89,6 +116,9 @@ local Furnitures = {
 		Rules = { RequiresFloorUnderAllCells = false },
 		Tags = { "Basic", "Bed" },
 		ModelPath = { "Furnitures", "OldMattress" },
+		StationEffects = {
+			RestMode = "Sleep",
+		},
 	},
 
 	Campfire = {
@@ -104,6 +134,12 @@ local Furnitures = {
 		Rules = { RequiresFloorUnderAllCells = false },
 		Tags = { "Basic", "Fire" },
 		ModelPath = { "Furnitures", "Campfire" },
+		StationEffects = {
+			DurationSeconds = 20,
+			Effects = {
+				{ Need = "Hunger", RatePerHour = 380 },
+			},
+		},
 	},
 
 	StandardBed = {
@@ -111,7 +147,7 @@ local Furnitures = {
 		PlacementType = "CellObject",
 		StationType = "RestStation",
 		Station = true,
-		maxOccupancy = 1,
+		maxOccupancy = 2,
 		WidthCells = 3,
 		DepthCells = 2,
 		Facing = { "North", "East", "South", "West" },
@@ -119,6 +155,9 @@ local Furnitures = {
 		Rules = { RequiresFloorUnderAllCells = false },
 		Tags = { "Comfort", "Bed" },
 		ModelPath = { "Furnitures", "StandardBed" },
+		StationEffects = {
+			RestMode = "Sleep",
+		},
 	},
 
 	Lamp = {
