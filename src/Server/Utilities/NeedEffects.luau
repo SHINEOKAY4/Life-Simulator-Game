@@ -26,6 +26,7 @@ type Behavior = {
 	Moodlets: { { Name: string, DurationSeconds: number, NeedBias: { [string]: number }? } }?,
 	ChatIntervalSeconds: number?,
 	ChatPhrases: { ResidentChat.ChatOption }?,
+	EndReasonProvider: ((residentState: any) -> string?)?,
 }
 
 local NeedEffects = {}
@@ -61,12 +62,19 @@ local function applyMoodlets(
 		return
 	end
 	for _, moodlet in ipairs(moodlets) do
-		residentState:AddMoodlet(moodlet)
-		ResidentChat.ShowMoodlet(residentState, moodlet.Name)
+		local added = residentState:AddMoodlet(moodlet)
+		if added then
+			ResidentChat.ShowMoodlet(residentState, moodlet.Name)
+		end
 	end
 end
 
-function NeedEffects.Run(residentState: any, token: CancelToken?, behavior: Behavior): boolean
+function NeedEffects.Run(
+	residentState: any,
+	token: CancelToken?,
+	behavior: Behavior,
+	interruptContext: ResidentChat.InterruptContext?
+): boolean
 	local effects = behavior.Effects
 	if not effects or #effects == 0 then
 		applyMoodlets(residentState, behavior.Moodlets)
@@ -107,11 +115,20 @@ function NeedEffects.Run(residentState: any, token: CancelToken?, behavior: Beha
 	end
 	while elapsed < duration do
 		if token and token.Cancelled then
+			local cancelReason = if token.Reason and token.Reason ~= "" then token.Reason else "Cancelled"
+			ResidentChat.ShowInterrupt(residentState, cancelReason, interruptContext)
 			applyMoodlets(residentState, behavior.Moodlets)
 			ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects cancelled: %s", residentName))
 			return false
 		end
 		if shouldEnd and shouldEnd(residentState) then
+			local reasonResolver = behavior.EndReasonProvider
+			if reasonResolver then
+				local reason = reasonResolver(residentState)
+				if reason and reason ~= "" then
+					ResidentChat.ShowInterrupt(residentState, reason, interruptContext)
+				end
+			end
 			applyMoodlets(residentState, behavior.Moodlets)
 			ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects early exit: %s", residentName), {
 				Elapsed = elapsed,

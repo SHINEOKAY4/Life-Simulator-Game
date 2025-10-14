@@ -29,6 +29,7 @@ type StationAssignment = {
 	ItemSpec: { [string]: any },
 	StationRecord: StationRecord,
 	StationModel: Model,
+	NeedName: string?,
 	RestModeOverride: string?,
 }
 
@@ -215,6 +216,7 @@ function DirectActionService.AssignStationToResident(player: Player, residentNam
 		ItemSpec = itemSpec,
 		StationRecord = resolvedStation,
 		StationModel = itemModel,
+		NeedName = nil,
 		RestModeOverride = nil,
 	}
 

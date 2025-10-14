@@ -19,6 +19,15 @@ export type ChatOption = {
 	MaxNeeds: { [string]: number }?,
 }
 
+export type InterruptContext = {
+	StationType: string?,
+	StationName: string?,
+	StationId: string?,
+	ActionName: string?,
+	NeedName: string?,
+	PartnerName: string?,
+}
+
 local MoodletPhrases: { [string]: string } = {
 	WellRested = "That nap felt amazing!",
 	Satisfied = "Yum, that hit the spot!",
@@ -26,6 +35,207 @@ local MoodletPhrases: { [string]: string } = {
 	Fresh = "Squeaky clean!",
 	Entertained = "That was so much fun!",
 }
+
+local StationFriendlyNames: { [string]: string } = {
+	RestStation = "my bed",
+	CookStation = "the kitchen",
+	SocialStation = "the hangout",
+	HygieneStation = "the sink",
+	FunStation = "the fun spot",
+	GroundRest = "this spot",
+}
+
+local NeedFriendlyNames: { [string]: string } = {
+	Hunger = "I'm starving",
+	Hygiene = "I really need to clean up",
+	Fun = "I need something fun first",
+	Energy = "I'm running on empty",
+	Social = "I need to talk to someone",
+}
+
+local GenericInterrupts: { string } = {
+	"I got pulled away unexpectedly...",
+	"Something came up, so I had to stop.",
+	"Can't keep going right now.",
+}
+
+local function selectRandom(entries: { string }): string
+	return entries[rng:NextInteger(1, #entries)]
+end
+
+local function humanizeReason(raw: string): string
+	local spaced = raw:gsub("(%l)(%u)", "%1 %2")
+	spaced = spaced:gsub("(%u)(%u%l)", "%1 %2")
+	spaced = spaced:gsub("[_%-]", " ")
+	return spaced:lower()
+end
+
+local function resolveStationLabel(context: InterruptContext?): string?
+	if not context then
+		return nil
+	end
+	local explicitName = context.StationName
+	if typeof(explicitName) == "string" and explicitName ~= "" then
+		return explicitName
+	end
+	local stationType = context.StationType
+	if stationType then
+		local friendly = StationFriendlyNames[stationType]
+		if friendly then
+			return friendly
+		end
+	end
+	local actionName = context.ActionName
+	if typeof(actionName) == "string" and actionName ~= "" then
+		return actionName
+	end
+	return nil
+end
+
+local function resolvePartnerName(context: InterruptContext?): string?
+	if not context then
+		return nil
+	end
+	local partner = context.PartnerName
+	if typeof(partner) == "string" and partner ~= "" then
+		return partner
+	end
+	return nil
+end
+
+local function resolveNeedName(context: InterruptContext?): string?
+	if not context then
+		return nil
+	end
+	local needName = context.NeedName
+	if typeof(needName) == "string" and needName ~= "" then
+		return needName
+	end
+	return nil
+end
+
+local function buildUrgentNeedText(reasonNeed: string, context: InterruptContext?): string
+	local base = NeedFriendlyNames[reasonNeed]
+	local stationLabel = resolveStationLabel(context)
+	if base and stationLabel then
+		return string.format("%s—leaving %s.", base, stationLabel)
+	elseif base then
+		return base .. "."
+	elseif stationLabel then
+		return string.format("Leaving %s to deal with something urgent.", stationLabel)
+	end
+	local friendlyNeed = humanizeReason(reasonNeed)
+	return string.format("Need to handle %s right away.", friendlyNeed)
+end
+
+local InterruptHandlers: { [string]: (InterruptContext?) -> string? } = {
+	ManualOverride = function(context)
+		local stationLabel = resolveStationLabel(context)
+		if stationLabel then
+			return string.format("I'll pause at %s so you can take over.", stationLabel)
+		end
+		return "Okay, handing things back to you."
+	end,
+	DirectSocialPartnerFailed = function(context)
+		local partner = resolvePartnerName(context)
+		if partner then
+			return string.format("%s bailed on me mid-chat...", partner)
+		end
+		return "My chat partner walked off on me."
+	end,
+	DirectSocialCancelled = function(context)
+		local partner = resolvePartnerName(context)
+		if partner then
+			return string.format("Our chat with %s got cut short.", partner)
+		end
+		return "That conversation just got cancelled."
+	end,
+	StationRemoved = function(context)
+		local stationLabel = resolveStationLabel(context)
+		if stationLabel then
+			return string.format("My %s vanished!", stationLabel)
+		end
+		return "The thing I was using disappeared!"
+	end,
+	MovementFailed = function(context)
+		local stationLabel = resolveStationLabel(context)
+		if stationLabel then
+			return string.format("I can't reach %s.", stationLabel)
+		end
+		return "Couldn't get there."
+	end,
+	Cancelled = function(_context)
+		return "That got cancelled."
+	end,
+	EnergySatisfied = function(context)
+		local stationLabel = resolveStationLabel(context)
+		if stationLabel then
+			return string.format("Feeling rested—done at %s.", stationLabel)
+		end
+		return "Feeling rested and ready."
+	end,
+}
+
+local InterruptColorMap: { [string]: Enum.ChatColor } = {
+	ManualOverride = Enum.ChatColor.Blue,
+	DirectSocialPartnerFailed = Enum.ChatColor.Blue,
+	DirectSocialCancelled = Enum.ChatColor.Blue,
+	EnergySatisfied = Enum.ChatColor.Blue,
+}
+
+local function resolveInterruptColor(reason: string?): Enum.ChatColor
+	if not reason or reason == "" then
+		return Enum.ChatColor.Red
+	end
+	local normalized = reason
+	local urgentNeed = string.match(reason, "^NeedUrgent:(.+)$")
+	if urgentNeed then
+		return Enum.ChatColor.Red
+	end
+	local mapped = InterruptColorMap[normalized]
+	if mapped then
+		return mapped
+	end
+	return Enum.ChatColor.Red
+end
+
+function ResidentChat.ResolveInterruptText(reason: string?, context: InterruptContext?): string?
+	if reason == nil or reason == "" then
+		local stationLabel = resolveStationLabel(context)
+		if stationLabel then
+			return string.format("Had to stop at %s.", stationLabel)
+		end
+		return selectRandom(GenericInterrupts)
+	end
+	local handler = InterruptHandlers[reason]
+	if handler then
+		local result = handler(context)
+		if result and result ~= "" then
+			return result
+		end
+	end
+	local urgentNeed = string.match(reason, "^NeedUrgent:(.+)$")
+	if urgentNeed then
+		local parsedNeed = urgentNeed
+		local contextNeed = resolveNeedName(context)
+		if not parsedNeed and contextNeed then
+			parsedNeed = contextNeed
+		end
+		if parsedNeed then
+			return buildUrgentNeedText(parsedNeed, context)
+		end
+	end
+	local stationLabel = resolveStationLabel(context)
+	local friendlyReason = humanizeReason(reason)
+	if stationLabel then
+		return string.format("Stopped at %s because %s.", stationLabel, friendlyReason)
+	end
+	return string.format("Stopped because %s.", friendlyReason)
+end
+
+function ResidentChat.ResolveInterruptColor(reason: string?): Enum.ChatColor
+	return resolveInterruptColor(reason)
+end
 
 local function resolveHead(residentState): BasePart?
 	if not residentState then
@@ -187,6 +397,19 @@ function ResidentChat.ShowAction(residentState, phrases: { string } | { ChatOpti
 		return
 	end
 	ChatService:Chat(head, text, Enum.ChatColor.White)
+end
+
+function ResidentChat.ShowInterrupt(residentState, reason: string?, context: InterruptContext?)
+	local text = ResidentChat.ResolveInterruptText(reason, context)
+	if not text or text == "" then
+		return
+	end
+	local head = resolveHead(residentState)
+	if not head then
+		return
+	end
+	local color = ResidentChat.ResolveInterruptColor(reason)
+	ChatService:Chat(head, text, color)
 end
 
 function ResidentChat.ShowMoodlet(residentState, moodletName: string)

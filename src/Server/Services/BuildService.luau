@@ -21,6 +21,44 @@ local BuildService = {}
 local Limiter = RateLimiter.new()
 local PlaceBucket = Limiter:Bucket("place", { ratePerSecond = 4, burst = 6 })
 
+local function resolveFootprintDimensions(itemId: string, metadata: { [string]: any }?): (number, number)
+	local spec = ItemFinder.FindItemById(itemId)
+	local widthOverride = metadata and (metadata.WidthCells or metadata.widthCells or metadata.Width or metadata.width)
+	local depthOverride = metadata and (metadata.DepthCells or metadata.depthCells or metadata.Depth or metadata.depth)
+	local width = if typeof(widthOverride) == "number" and widthOverride > 0 then widthOverride else nil
+	local depth = if typeof(depthOverride) == "number" and depthOverride > 0 then depthOverride else nil
+	if not width then
+		width = spec and (spec.WidthCells or spec.Width) or 1
+	end
+	if not depth then
+		depth = spec and (spec.DepthCells or spec.Depth) or 1
+	end
+	return width or 1, depth or 1
+end
+
+local function sendPlacementDelta(
+	player: Player,
+	action: string,
+	itemId: string,
+	cellX: number,
+	cellZ: number,
+	facing: Facing,
+	metadata: { [string]: any }?
+)
+	local width, depth = resolveFootprintDimensions(itemId, metadata)
+	Packets.PlacementDelta:FireClient(player, {
+		Action = action,
+		Item = {
+			ItemId = itemId,
+			CellX = cellX,
+			CellZ = cellZ,
+			Facing = facing,
+			WidthCells = width,
+			DepthCells = depth,
+		},
+	})
+end
+
 local function moveDoorSegment(
 	player: Player,
 	state: PlotRuntimeState,
@@ -62,53 +100,21 @@ local function moveDoorSegment(
 	local restoredId = removeResult.restoredId
 
 	WorldPlacer.Despawn(player, removedId, fromX, fromZ, fromF)
-	Packets.PlacementDelta:FireClient(player, {
-		Action = "Removed",
-		Item = {
-			ItemId = removedId,
-			CellX = fromX,
-			CellZ = fromZ,
-			Facing = fromF,
-		},
-	})
+	sendPlacementDelta(player, "Removed", removedId, fromX, fromZ, fromF, nil)
 
 	if restoredId then
 		WorldPlacer.Spawn(player, state.Grid, restoredId, fromX, fromZ, fromF)
-		Packets.PlacementDelta:FireClient(player, {
-			Action = "Placed",
-			Item = {
-				ItemId = restoredId,
-				CellX = fromX,
-				CellZ = fromZ,
-				Facing = fromF,
-			},
-		})
+		sendPlacementDelta(player, "Placed", restoredId, fromX, fromZ, fromF, nil)
 	end
 
 	WorldPlacer.Despawn(player, replacedId, toX, toZ, toF)
-	Packets.PlacementDelta:FireClient(player, {
-		Action = "Removed",
-		Item = {
-			ItemId = replacedId,
-			CellX = toX,
-			CellZ = toZ,
-			Facing = toF,
-		},
-	})
+	sendPlacementDelta(player, "Removed", replacedId, toX, toZ, toF, nil)
 
 	WorldPlacer.Spawn(player, state.Grid, resolvedId, toX, toZ, toF, {
 		previousWallId = replacedId,
 		metadata = savedDoor and savedDoor.Metadata,
 	})
-	Packets.PlacementDelta:FireClient(player, {
-		Action = "Placed",
-		Item = {
-			ItemId = resolvedId,
-			CellX = toX,
-			CellZ = toZ,
-			Facing = toF,
-		},
-	})
+	sendPlacementDelta(player, "Placed", resolvedId, toX, toZ, toF, savedDoor and savedDoor.Metadata)
 
 	return true, nil
 end
@@ -174,6 +180,23 @@ function BuildService.Init()
 		return BuildService.Build(player, payload)
 	end
 
+	Packets.PlaceFloorAreaRequest.OnServerInvoke = function(
+		player: Player,
+		payload: {
+			ItemId: string,
+			StartCellX: number,
+			StartCellZ: number,
+			EndCellX: number,
+			EndCellZ: number,
+		}
+	): (boolean, string)
+		if not PlaceBucket:Allow(player, 1) then
+			local waitSeconds = PlaceBucket:SecondsUntilNextToken(player)
+			return false, ("Too fast. Try again in %.2fs"):format(waitSeconds)
+		end
+		return BuildService.PlaceFloorArea(player, payload)
+	end
+
 	Packets.DestroyRequest.OnServerInvoke = function(
 		player: Player,
 		payload: { ItemId: string, CellX: number, CellZ: number, Facing: string }
@@ -215,6 +238,91 @@ function BuildService.Init()
 		end
 		return BuildService.Rotate(player, payload)
 	end
+end
+
+local MAX_FLOOR_AREA_CELLS = 256
+
+function BuildService.PlaceFloorArea(
+	player: Player,
+	payload: {
+		ItemId: string,
+		StartCellX: number,
+		StartCellZ: number,
+		EndCellX: number,
+		EndCellZ: number,
+	}
+): (boolean, string)
+	local state = PlotService.GetState(player)
+	if not state then
+		return false, "No plot runtime state"
+	end
+
+	local itemId = payload.ItemId
+	local itemData = itemId and ItemFinder.FindItemById(itemId) or nil
+	if not itemData then
+		return false, "Invalid item ID"
+	end
+
+	if itemData.PlacementType ~= "Floor" then
+		return false, "Box placement only supports floor items"
+	end
+
+	local startX = math.floor(payload.StartCellX)
+	local startZ = math.floor(payload.StartCellZ)
+	local endX = math.floor(payload.EndCellX)
+	local endZ = math.floor(payload.EndCellZ)
+
+	local minCellX = math.min(startX, endX)
+	local minCellZ = math.min(startZ, endZ)
+	local maxCellX = math.max(startX, endX)
+	local maxCellZ = math.max(startZ, endZ)
+
+	if maxCellX < 1 or maxCellZ < 1 then
+		return false, "Selection outside plot"
+	end
+
+	local grid = state.Grid
+	local columns = grid.Columns
+	local rows = grid.Rows
+	if minCellX < 1 or minCellZ < 1 or maxCellX > columns or maxCellZ > rows then
+		return false, "Selection outside plot bounds"
+	end
+
+	local widthCells = maxCellX - minCellX + 1
+	local depthCells = maxCellZ - minCellZ + 1
+	local facing: Facing = "North"
+
+	local totalCells = widthCells * depthCells
+	if totalCells < 1 then
+		return false, "Nothing to place"
+	end
+
+	if totalCells > MAX_FLOOR_AREA_CELLS then
+		return false, "Selection too large"
+	end
+
+	if not state:CanPlaceFloor(minCellX, minCellZ, widthCells, depthCells, facing) then
+		return false, "Selection blocked"
+	end
+
+	local success = state:PlaceFloor(itemId, minCellX, minCellZ, widthCells, depthCells, facing)
+	if not success then
+		return false, "Failed to place floor"
+	end
+
+	local metadata = {
+		WidthCells = widthCells,
+		DepthCells = depthCells,
+	}
+
+	WorldPlacer.Spawn(player, grid, itemId, minCellX, minCellZ, facing, {
+		metadata = metadata,
+		sizeCells = metadata,
+	})
+
+	sendPlacementDelta(player, "Placed", itemId, minCellX, minCellZ, facing, metadata)
+
+	return true, "Floors placed"
 end
 
 function BuildService.Build(
@@ -263,12 +371,16 @@ function BuildService.Build(
 			return false, "Failed to place floor"
 		end
 
-		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, floorFacing)
-
-		Packets.PlacementDelta:FireClient(player, {
-			Action = "Placed", -- Added
-			Item = { ItemId = payload.ItemId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = floorFacing }, -- Added
+		local metadata = {
+			WidthCells = widthCells,
+			DepthCells = depthCells,
+		}
+		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, floorFacing, {
+			metadata = metadata,
+			sizeCells = metadata,
 		})
+
+		sendPlacementDelta(player, "Placed", payload.ItemId, payload.CellX, payload.CellZ, floorFacing, metadata)
 
 		return true, "Floor placed"
 	elseif itemData.PlacementType == "CellObject" then
@@ -294,10 +406,7 @@ function BuildService.Build(
 		end
 		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing)
 
-		Packets.PlacementDelta:FireClient(player, {
-			Action = "Placed", -- Added
-			Item = { ItemId = payload.ItemId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = facing },
-		})
+		sendPlacementDelta(player, "Placed", payload.ItemId, payload.CellX, payload.CellZ, facing, nil)
 		return true, "Cell object placed"
 	elseif itemData.PlacementType == "Wall" then
 		local requiresFloorOnBothSides = itemData.RequiresFloorOnBothSides or false
@@ -322,14 +431,16 @@ function BuildService.Build(
 				metadata = savedDoor and savedDoor.Metadata,
 			})
 
-			Packets.PlacementDelta:FireClient(player, {
-				Action = "Removed",
-				Item = { ItemId = replacedId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = facing },
-			})
-			Packets.PlacementDelta:FireClient(player, {
-				Action = "Placed",
-				Item = { ItemId = payload.ItemId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = facing },
-			})
+			sendPlacementDelta(player, "Removed", replacedId, payload.CellX, payload.CellZ, facing, nil)
+			sendPlacementDelta(
+				player,
+				"Placed",
+				payload.ItemId,
+				payload.CellX,
+				payload.CellZ,
+				facing,
+				savedDoor and savedDoor.Metadata
+			)
 
 			return true, "Door installed"
 		end
@@ -342,10 +453,7 @@ function BuildService.Build(
 
 		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing)
 
-		Packets.PlacementDelta:FireClient(player, {
-			Action = "Placed", -- Added
-			Item = { ItemId = payload.ItemId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = facing },
-		})
+		sendPlacementDelta(player, "Placed", payload.ItemId, payload.CellX, payload.CellZ, facing, nil)
 
 		return true, "Wall placed"
 	elseif itemData.PlacementType == "Roof" then
@@ -378,10 +486,7 @@ function BuildService.Build(
 
 		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing)
 
-		Packets.PlacementDelta:FireClient(player, {
-			Action = "Placed",
-			Item = { ItemId = payload.ItemId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = facing },
-		})
+		sendPlacementDelta(player, "Placed", payload.ItemId, payload.CellX, payload.CellZ, facing, nil)
 
 		return true, "Roof placed"
 	else
@@ -431,8 +536,15 @@ function BuildService.Destroy(
 		return false, "Item not found at location"
 	end
 
-	local w = spec.WidthCells or 1
-	local d = spec.DepthCells or 1
+	local savedMetadata = saved.Metadata
+	local w = savedMetadata and (savedMetadata.WidthCells or savedMetadata.widthCells)
+		or spec.WidthCells
+		or spec.Width
+		or 1
+	local d = savedMetadata and (savedMetadata.DepthCells or savedMetadata.depthCells)
+		or spec.DepthCells
+		or spec.Depth
+		or 1
 	local placementFacing: Facing = PlacementKey.NormalizeFacing(saved.facing)
 	local f: Facing = placementFacing
 
@@ -460,17 +572,13 @@ function BuildService.Destroy(
 
 	-- world + client delta
 	WorldPlacer.Despawn(player, removedId, payload.CellX, payload.CellZ, f)
-	Packets.PlacementDelta:FireClient(player, {
-		Action = "Removed",
-		Item = { ItemId = removedId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = f },
-	})
+	sendPlacementDelta(player, "Removed", removedId, payload.CellX, payload.CellZ, f, savedMetadata)
 
 	if restoredId then
+		local restoredSaved = state.Save.PlacedObjects[key]
+		local restoredMetadata = restoredSaved and restoredSaved.Metadata
 		WorldPlacer.Spawn(player, state.Grid, restoredId, payload.CellX, payload.CellZ, f)
-		Packets.PlacementDelta:FireClient(player, {
-			Action = "Placed",
-			Item = { ItemId = restoredId, CellX = payload.CellX, CellZ = payload.CellZ, Facing = f },
-		})
+		sendPlacementDelta(player, "Placed", restoredId, payload.CellX, payload.CellZ, f, restoredMetadata)
 	end
 
 	return true, "Removed"
@@ -518,6 +626,8 @@ function BuildService.Move(
 	local placedFacing: Facing = toF
 	local fromKey = state:PlacementKeyForType(payload.FromCellX, payload.FromCellZ, fromF, placementType)
 	local toKey = state:PlacementKeyForType(payload.ToCellX, payload.ToCellZ, toF, placementType)
+	local sourceSaved = state.Save.PlacedObjects[fromKey]
+	local sourceMetadata = sourceSaved and sourceSaved.Metadata
 
 	if placementType == "CellObject" then
 		if spec.Rules and spec.Rules.RequiresFloorUnderAllCells then
@@ -601,26 +711,23 @@ function BuildService.Move(
 	end
 
 	WorldPlacer.Despawn(player, resolvedId, payload.FromCellX, payload.FromCellZ, removedFacing)
-	WorldPlacer.Spawn(player, state.Grid, resolvedId, payload.ToCellX, payload.ToCellZ, placedFacing)
+	local destSaved = state.Save.PlacedObjects[toKey]
+	local destMetadata = destSaved and destSaved.Metadata
+	WorldPlacer.Spawn(player, state.Grid, resolvedId, payload.ToCellX, payload.ToCellZ, placedFacing, {
+		metadata = destMetadata,
+		sizeCells = destMetadata,
+	})
 
-	Packets.PlacementDelta:FireClient(player, {
-		Action = "Removed",
-		Item = {
-			ItemId = resolvedId,
-			CellX = payload.FromCellX,
-			CellZ = payload.FromCellZ,
-			Facing = removedFacing,
-		},
-	})
-	Packets.PlacementDelta:FireClient(player, {
-		Action = "Placed",
-		Item = {
-			ItemId = resolvedId,
-			CellX = payload.ToCellX,
-			CellZ = payload.ToCellZ,
-			Facing = placedFacing,
-		},
-	})
+	sendPlacementDelta(
+		player,
+		"Removed",
+		resolvedId,
+		payload.FromCellX,
+		payload.FromCellZ,
+		removedFacing,
+		sourceMetadata
+	)
+	sendPlacementDelta(player, "Placed", resolvedId, payload.ToCellX, payload.ToCellZ, placedFacing, destMetadata)
 
 	return true, "Moved"
 end
@@ -725,27 +832,16 @@ function BuildService.Rotate(
 		end
 	end
 
+	local metadata = saved.Metadata
 	WorldPlacer.Despawn(player, resolvedId, cellX, cellZ, currentFacing)
-	WorldPlacer.Spawn(player, state.Grid, resolvedId, cellX, cellZ, targetFacing)
+	WorldPlacer.Spawn(player, state.Grid, resolvedId, cellX, cellZ, targetFacing, {
+		metadata = metadata,
+		-- footprint size is inferred from metadata when present
+		sizeCells = metadata,
+	})
 
-	Packets.PlacementDelta:FireClient(player, {
-		Action = "Removed",
-		Item = {
-			ItemId = resolvedId,
-			CellX = cellX,
-			CellZ = cellZ,
-			Facing = currentFacing,
-		},
-	})
-	Packets.PlacementDelta:FireClient(player, {
-		Action = "Placed",
-		Item = {
-			ItemId = resolvedId,
-			CellX = cellX,
-			CellZ = cellZ,
-			Facing = targetFacing,
-		},
-	})
+	sendPlacementDelta(player, "Removed", resolvedId, cellX, cellZ, currentFacing, metadata)
+	sendPlacementDelta(player, "Placed", resolvedId, cellX, cellZ, targetFacing, metadata)
 
 	return true, "Rotated"
 end

@@ -15,7 +15,14 @@ local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
 type PlotRuntimeState = PlotState.PlotState
 type PlacedObjectMap = PlotState.PlacedObjectMap
-type PlacedObjectSnapshot = { id: string, cellX: number, cellZ: number, facing: string }
+type PlacedObjectSnapshot = {
+	id: string,
+	cellX: number,
+	cellZ: number,
+	facing: string,
+	WidthCells: number,
+	DepthCells: number,
+}
 type Facing = WorldPlacer.Facing
 type StationOccupancy = {
 	Id: string,
@@ -58,11 +65,23 @@ local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapsho
 	for index = 1, #keys do
 		local saved = map[keys[index]]
 		if saved then
+			local spec = saved.id and ItemFinder.FindItemById(saved.id) or nil
+			local metadata = saved.Metadata
+			local widthCells = metadata and (metadata.WidthCells or metadata.widthCells)
+			if not widthCells or widthCells <= 0 then
+				widthCells = spec and (spec.WidthCells or spec.Width) or 1
+			end
+			local depthCells = metadata and (metadata.DepthCells or metadata.depthCells)
+			if not depthCells or depthCells <= 0 then
+				depthCells = spec and (spec.DepthCells or spec.Depth) or 1
+			end
 			result[index] = {
 				id = saved.id,
 				cellX = saved.cellX,
 				cellZ = saved.cellZ,
 				facing = (saved.facing or "North") :: string,
+				WidthCells = widthCells,
+				DepthCells = depthCells,
 			}
 		end
 	end

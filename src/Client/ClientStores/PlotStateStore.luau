@@ -29,13 +29,23 @@ function PlotStateStore.Init()
 		if placedItems then
 			for _, entry in ipairs(placedItems) do
 				local facing = entry.facing or "North"
+				local spec = entry.id and ItemFinder.FindItemById(entry.id) or nil
+				local widthCells = entry.WidthCells or entry.widthCells
+				local depthCells = entry.DepthCells or entry.depthCells
+				if not widthCells or widthCells <= 0 then
+					widthCells = spec and (spec.WidthCells or spec.Width) or 1
+				end
+				if not depthCells or depthCells <= 0 then
+					depthCells = spec and (spec.DepthCells or spec.Depth) or 1
+				end
 				local itemSnapshot = {
 					id = entry.id,
 					cellX = entry.cellX,
 					cellZ = entry.cellZ,
 					facing = facing,
+					WidthCells = widthCells,
+					DepthCells = depthCells,
 				}
-				local spec = itemSnapshot.id and ItemFinder.FindItemById(itemSnapshot.id) or nil
 				local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
 				local key = PlacementKey.ForPlacementType(itemSnapshot.cellX, itemSnapshot.cellZ, facing, placementType)
 				placedMap[key] = itemSnapshot
@@ -91,6 +101,14 @@ function PlotStateStore.Init()
 		local facing = delta.Item.Facing or "North"
 		local spec = itemId and ItemFinder.FindItemById(itemId) or nil
 		local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
+		local widthCells = delta.Item.WidthCells or delta.Item.widthCells
+		local depthCells = delta.Item.DepthCells or delta.Item.depthCells
+		if not widthCells or widthCells <= 0 then
+			widthCells = spec and (spec.WidthCells or spec.Width) or 1
+		end
+		if not depthCells or depthCells <= 0 then
+			depthCells = spec and (spec.DepthCells or spec.Depth) or 1
+		end
 		local key = PlacementKey.ForPlacementType(delta.Item.CellX, delta.Item.CellZ, facing, placementType)
 		if delta.Action == "Removed" then
 			StateSnapshot.PlacedItems[key] = nil
@@ -106,6 +124,8 @@ function PlotStateStore.Init()
 			cellX = delta.Item.CellX,
 			cellZ = delta.Item.CellZ,
 			facing = facing,
+			WidthCells = widthCells,
+			DepthCells = depthCells,
 		}
 	end)
 end

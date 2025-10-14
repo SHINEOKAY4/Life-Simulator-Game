@@ -24,6 +24,7 @@ local GetLiftAlongDirection = PlacementHelpers.GetLiftAlongDirection
 export type SpawnOptions = {
 	metadata: { [string]: any }?,
 	previousWallId: string?,
+	sizeCells: { [string]: number }?,
 }
 
 -- Spawn a physical model for a saved/placed item.
@@ -42,11 +43,33 @@ function WorldPlacer.Spawn(
 	end
 
 	local placementType = spec.PlacementType or "CellObject"
-	local footprintWidth = spec.WidthCells or spec.Width or 1
-	local footprintDepth = spec.DepthCells or spec.Depth or 1
+	local catalogWidth = spec.WidthCells or spec.Width or 1
+	local catalogDepth = spec.DepthCells or spec.Depth or 1
+	local footprintWidth = catalogWidth
+	local footprintDepth = catalogDepth
 	local extraLift = 0
 	if typeof(spec.SurfaceOffsetStuds) == "number" then
 		extraLift = spec.SurfaceOffsetStuds
+	end
+
+	local metadata = options and options.metadata or nil
+	local sizeOverride = options and (options :: any).sizeCells or nil
+	local widthOverride = nil
+	local depthOverride = nil
+	if sizeOverride then
+		widthOverride = sizeOverride.WidthCells or sizeOverride.widthCells or sizeOverride.Width or sizeOverride.width
+		depthOverride = sizeOverride.DepthCells or sizeOverride.depthCells or sizeOverride.Depth or sizeOverride.depth
+	end
+	if metadata then
+		widthOverride = widthOverride or metadata.WidthCells or metadata.widthCells or metadata.Width or metadata.width
+		depthOverride = depthOverride or metadata.DepthCells or metadata.depthCells or metadata.Depth or metadata.depth
+	end
+
+	if typeof(widthOverride) == "number" and widthOverride > 0 then
+		footprintWidth = widthOverride
+	end
+	if typeof(depthOverride) == "number" and depthOverride > 0 then
+		footprintDepth = depthOverride
 	end
 
 	local model = ItemFinder.CloneModel(itemId)
@@ -57,12 +80,24 @@ function WorldPlacer.Spawn(
 	model:SetAttribute("CellX", cellX)
 	model:SetAttribute("CellZ", cellZ)
 	model:SetAttribute("Facing", tostring(facing))
+	model:SetAttribute("WidthCells", footprintWidth)
+	model:SetAttribute("DepthCells", footprintDepth)
 	if options and options.previousWallId then
 		model:SetAttribute("PreviousWallId", options.previousWallId)
 	elseif options and options.metadata then
 		local metaPrev = options.metadata.PreviousId
 		if typeof(metaPrev) == "string" and metaPrev ~= "" then
 			model:SetAttribute("PreviousWallId", metaPrev)
+		end
+	end
+
+	if placementType == "Floor" then
+		local floorPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+		if floorPart then
+			local baseSize = floorPart.Size
+			local widthScale = footprintWidth / math.max(catalogWidth, 1)
+			local depthScale = footprintDepth / math.max(catalogDepth, 1)
+			floorPart.Size = Vector3.new(baseSize.X * widthScale, baseSize.Y, baseSize.Z * depthScale)
 		end
 	end
 

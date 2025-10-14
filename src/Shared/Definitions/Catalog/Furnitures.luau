@@ -85,7 +85,7 @@ local Furnitures = {
 	BigWoodenTable = {
 		Name = "Big Wooden Table",
 		PlacementType = "CellObject",
-		StationType = "FunStation",
+		StationType = "SocialStation",
 		Station = true,
 		maxOccupancy = 8,
 		WidthCells = 2,
@@ -98,7 +98,8 @@ local Furnitures = {
 		StationEffects = {
 			DurationSeconds = 210,
 			Effects = {
-				{ Need = "Fun", RatePerHour = 14 },
+				{ Need = "Social", RatePerHour = 28 },
+				{ Need = "Fun", RatePerHour = 10 },
 			},
 		},
 	},

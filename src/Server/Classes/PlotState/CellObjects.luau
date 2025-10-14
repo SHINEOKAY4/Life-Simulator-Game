@@ -14,6 +14,57 @@ local function normalizeDimension(value: number?): number
 end
 
 function CellObjects.attach(PlotState)
+	local function setInteriorEdgesFree(
+		self,
+		anchorX: number,
+		anchorZ: number,
+		widthCells: number,
+		depthCells: number,
+		facing: Facing,
+		isFree: boolean
+	)
+		local normalizedWidth = normalizeDimension(widthCells)
+		local normalizedDepth = normalizeDimension(depthCells)
+		local minCellX: number, minCellZ: number, maxCellX: number, maxCellZ: number =
+			self.Grid:FootprintBounds(anchorX, anchorZ, normalizedWidth, normalizedDepth, facing)
+		local rotatedWidth = maxCellX - minCellX
+		local rotatedDepth = maxCellZ - minCellZ
+
+		if rotatedWidth >= 1 then
+			for cellZ = minCellZ, maxCellZ do
+				for cellX = minCellX, maxCellX - 1 do
+					local alignment, edgeX, edgeZ = self:EdgeOfCell(cellX, cellZ, "East")
+					if alignment == "Vertical" then
+						self.EdgeFreeVertical[self:VerticalEdgeIndex(edgeX, edgeZ)] = isFree
+					end
+				end
+			end
+		end
+
+		if rotatedDepth >= 1 then
+			for cellZ = minCellZ, maxCellZ - 1 do
+				for cellX = minCellX, maxCellX do
+					local alignment, edgeX, edgeZ = self:EdgeOfCell(cellX, cellZ, "South")
+					if alignment == "Horizontal" then
+						self.EdgeFreeHorizontal[self:HorizontalEdgeIndex(edgeX, edgeZ)] = isFree
+					end
+				end
+			end
+		end
+	end
+
+	-- Tracks edges covered by multi-cell objects so walls cannot slice through them.
+	function PlotState:SetFootprintInteriorEdgesFree(
+		anchorX: number,
+		anchorZ: number,
+		widthCells: number,
+		depthCells: number,
+		facing: Facing,
+		isFree: boolean
+	)
+		setInteriorEdgesFree(self, anchorX, anchorZ, widthCells, depthCells, facing, isFree)
+	end
+
 	function PlotState:IsCellBuildable(cellX: number, cellZ: number): boolean
 		if not self.Grid:IsCellInBounds(cellX, cellZ) then
 			return false
@@ -103,6 +154,8 @@ function CellObjects.attach(PlotState)
 			self.CellFree[cellIndices[i]] = false
 		end
 
+		self:SetFootprintInteriorEdgesFree(anchorX, anchorZ, widthCells, depthCells, facing, false)
+
 		return true
 	end
 
@@ -117,6 +170,8 @@ function CellObjects.attach(PlotState)
 		for i = 1, #cellIndices do
 			self.CellFree[cellIndices[i]] = true
 		end
+
+		self:SetFootprintInteriorEdgesFree(anchorX, anchorZ, widthCells, depthCells, facing, true)
 	end
 
 	function PlotState:Place(
@@ -153,6 +208,7 @@ function CellObjects.attach(PlotState)
 		for i = 1, #indices do
 			self.CellFree[indices[i]] = true
 		end
+		self:SetFootprintInteriorEdgesFree(cellX, cellZ, normalizedWidth, normalizedDepth, facing, true)
 
 		local key = self:PlacementKeyForType(cellX, cellZ, facing, "CellObject")
 		local saved = self.Save.PlacedObjects[key]

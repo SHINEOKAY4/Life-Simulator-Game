@@ -104,6 +104,10 @@ function Floors.attach(PlotState)
 			cellX = cellX,
 			cellZ = cellZ,
 			facing = f,
+			Metadata = {
+				WidthCells = w,
+				DepthCells = d,
+			},
 		}
 		return true
 	end
@@ -122,8 +126,15 @@ function Floors.attach(PlotState)
 		local placementKey = self:PlacementKeyForType(cellX, cellZ, f, "Floor")
 		local saved = self.Save.PlacedObjects[placementKey]
 		local spec = saved and ItemFinder.FindItemById(saved.id) or nil
+		local metadata = saved and saved.Metadata or nil
 
 		if spec then
+			if metadata and typeof(metadata.WidthCells) == "number" then
+				resolvedWidth = resolvedWidth or metadata.WidthCells
+			end
+			if metadata and typeof(metadata.DepthCells) == "number" then
+				resolvedDepth = resolvedDepth or metadata.DepthCells
+			end
 			resolvedWidth = resolvedWidth or spec.WidthCells or spec.Width or 1
 			resolvedDepth = resolvedDepth or spec.DepthCells or spec.Depth or 1
 		end
@@ -136,14 +147,7 @@ function Floors.attach(PlotState)
 		end
 
 		if saved then
-			assert(spec, ("Unknown catalog item '%s'"):format(saved.id))
-			local placementType = spec.PlacementType
-			local specWidth = spec.WidthCells or spec.Width or 1
-			local specDepth = spec.DepthCells or spec.Depth or 1
-			local objFacing = saved.facing or "North"
-			if placementType == "Floor" and specWidth == w and specDepth == d and objFacing == f then
-				self.Save.PlacedObjects[placementKey] = nil
-			end
+			self.Save.PlacedObjects[placementKey] = nil
 		end
 	end
 
@@ -164,15 +168,16 @@ function Floors.attach(PlotState)
 				("Item '%s' of type '%s' cannot be moved as floor"):format(itemId, tostring(spec.PlacementType))
 		end
 
-		local width = spec.WidthCells or spec.Width or 1
-		local depth = spec.DepthCells or spec.Depth or 1
 		local facing: Facing = "North"
-
 		local fromKey = self:PlacementKeyForType(fromX, fromZ, facing, "Floor")
 		local saved = self.Save.PlacedObjects[fromKey]
 		if not saved or saved.id ~= itemId then
 			return false, ("Floor '%s' not found at (%d, %d)"):format(itemId, fromX, fromZ)
 		end
+
+		local metadata = saved.Metadata
+		local width = metadata and metadata.WidthCells or spec.WidthCells or spec.Width or 1
+		local depth = metadata and metadata.DepthCells or spec.DepthCells or spec.Depth or 1
 
 		local toKey = self:PlacementKeyForType(toX, toZ, facing, "Floor")
 		if fromKey == toKey then
@@ -242,6 +247,16 @@ function Floors.attach(PlotState)
 		saved.cellX = toX
 		saved.cellZ = toZ
 		saved.facing = facing
+		local savedMetadata = saved.Metadata
+		if savedMetadata then
+			savedMetadata.WidthCells = width
+			savedMetadata.DepthCells = depth
+		else
+			saved.Metadata = {
+				WidthCells = width,
+				DepthCells = depth,
+			}
+		end
 		self.Save.PlacedObjects[toKey] = saved
 
 		return true, nil

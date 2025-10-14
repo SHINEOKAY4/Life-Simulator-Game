@@ -26,6 +26,7 @@ export type HandlerAssignment = {
 	ItemSpec: { [string]: any },
 	StationRecord: any,
 	StationModel: Model,
+	NeedName: string?,
 	RestModeOverride: string?,
 }
 
@@ -42,6 +43,7 @@ type Behavior = {
 	ChatPhrases: { ChatOption }?,
 	ChatIntervalSeconds: number?,
 	RestProfileKey: string?,
+	EndReasonProvider: ((residentState: any) -> string?)?,
 }
 
 export type BehaviorSpec = {
@@ -55,11 +57,28 @@ export type BehaviorSpec = {
 	ChatPhrases: { any }?,
 	ChatIntervalSeconds: number?,
 	RestProfileKey: string?,
+	EndReasonProvider: ((residentState: any) -> string?)?,
 }
 
 local Needs = NeedConfig.Needs
 local Circadian = NeedConfig.Circadian
 local ACTION_CHANNEL = "Action"
+
+local StationActionLabels: { [string]: string } = {
+	RestStation = "rest",
+	CookStation = "cook",
+	SocialStation = "chat",
+	HygieneStation = "wash up",
+	FunStation = "have fun",
+}
+
+local StationKindLabels: { [string]: string } = {
+	RestStation = "bed",
+	CookStation = "kitchen",
+	SocialStation = "hangout",
+	HygieneStation = "sink",
+	FunStation = "fun spot",
+}
 
 type RawEffect = { [string]: any }
 type Effect = { Need: string, InstantAmount: number?, RatePerHour: number? }
@@ -67,6 +86,42 @@ type RawMoodlet = { [string]: any }
 type Moodlet = { Name: string, DurationSeconds: number, NeedBias: { [string]: number }? }
 
 type ChatOption = ResidentChat.ChatOption
+
+local function humanizeIdentifier(raw: string): string
+	local spaced = raw:gsub("(%l)(%u)", "%1 %2")
+	spaced = spaced:gsub("[_%-%s]+", " ")
+	return spaced:lower()
+end
+
+local function resolveStationDisplayName(assignment: HandlerAssignment, stationType: string): string?
+	local spec = assignment.ItemSpec
+	if spec then
+		local displayName = spec.DisplayName
+		if typeof(displayName) == "string" and displayName ~= "" then
+			return displayName
+		end
+		local name = spec.Name
+		if typeof(name) == "string" and name ~= "" then
+			return name
+		end
+		local tags = spec.Tags
+		if typeof(tags) == "table" then
+			for _, tag in ipairs(tags) do
+				if typeof(tag) == "string" and tag ~= "" then
+					return humanizeIdentifier(tag)
+				end
+			end
+		end
+	end
+	local fallback = StationKindLabels[stationType]
+	if fallback then
+		return fallback
+	end
+	if typeof(stationType) == "string" and stationType ~= "" then
+		return humanizeIdentifier(stationType)
+	end
+	return nil
+end
 
 local function normalizeClock(clock: number): number
 	local result = clock % 24
@@ -239,10 +294,11 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 		MoveTimeoutSeconds = 25,
 		DurationSeconds = 180,
 		Effects = {
-			{ Need = "Fun", RatePerHour = 12 },
+			{ Need = "Social", RatePerHour = 24 },
+			{ Need = "Fun", RatePerHour = 8 },
 		},
 		Moodlets = {
-			{ Name = "Entertained", DurationSeconds = 180, NeedBias = { Fun = -0.25 } },
+			{ Name = "Chatty", DurationSeconds = 200, NeedBias = { Social = -0.3, Fun = -0.15 } },
 		},
 		ChatIntervalSeconds = 6,
 		ChatPhrases = {
@@ -256,12 +312,20 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 			"Got any good gossip?",
 		},
 		ShouldEnd = function(residentState)
-			local def = Needs.Fun
-			if not def then
+			local socialDef = Needs.Social
+			if not socialDef then
 				return false
 			end
-			local threshold = math.min(def.Max, def.Low + def.Hysteresis)
-			return residentState:GetNeed("Fun") >= threshold
+			for needName, needDef in pairs(Needs) do
+				if needName ~= "Social" then
+					local value = residentState:GetNeed(needName)
+					if value <= needDef.Critical then
+						return true
+					end
+				end
+			end
+			local threshold = math.min(socialDef.Max, socialDef.Low + socialDef.Hysteresis)
+			return residentState:GetNeed("Social") >= threshold
 		end,
 	},
 	HygieneStation = {
@@ -445,12 +509,21 @@ local RestProfiles: { [string]: RestProfile } = {
 	},
 }
 
-local function createRestShouldEnd(mode: string, targetEnergy: number?): (any) -> boolean
+local function createRestShouldEnd(mode: string, targetEnergy: number?): ((any) -> boolean, (any) -> string?)
 	local hungerDef = Needs.Hunger
 	local energyDefLocal = Needs.Energy
-	return function(residentState)
-		if hungerDef and residentState:GetNeed("Hunger") <= hungerDef.Critical then
-			return true
+	local function computeExitReason(residentState): string?
+		if hungerDef then
+			local hunger = residentState:GetNeed("Hunger")
+			if hunger <= hungerDef.Critical then
+				if not energyDefLocal then
+					return "NeedUrgent:Hunger"
+				end
+				local energy = residentState:GetNeed("Energy")
+				if energy > energyDefLocal.Critical then
+					return "NeedUrgent:Hunger"
+				end
+			end
 		end
 		if targetEnergy then
 			local energy = residentState:GetNeed("Energy")
@@ -458,20 +531,24 @@ local function createRestShouldEnd(mode: string, targetEnergy: number?): (any) -
 				if mode == "Sleep" then
 					local clockTime = TimeScale.GetClockTime()
 					if isNight(clockTime) then
-						return false
+						return nil
 					end
 				end
-				return true
+				return "EnergySatisfied"
 			end
 		end
 		if mode ~= "Sleep" and energyDefLocal then
 			local energy = residentState:GetNeed("Energy")
 			if energy >= energyDefLocal.Low then
-				return true
+				return "EnergySatisfied"
 			end
 		end
-		return false
+		return nil
 	end
+	local function shouldEnd(residentState)
+		return computeExitReason(residentState) ~= nil
+	end
+	return shouldEnd, computeExitReason
 end
 
 local function applyRestProfile(behavior: Behavior, mode: string?)
@@ -482,7 +559,9 @@ local function applyRestProfile(behavior: Behavior, mode: string?)
 	behavior.Effects = {
 		{ Need = "Energy", RatePerHour = profile.RatePerHour },
 	}
-	behavior.ShouldEnd = createRestShouldEnd(activeMode, profile.TargetEnergy)
+	local shouldEnd, reasonProvider = createRestShouldEnd(activeMode, profile.TargetEnergy)
+	behavior.ShouldEnd = shouldEnd
+	behavior.EndReasonProvider = reasonProvider
 	behavior.Moodlets = if profile.Moodlets then copyMoodlets(profile.Moodlets) else nil
 	behavior.ChatPhrases = if profile.ChatPhrases then copyChatPhrases(profile.ChatPhrases) else nil
 	behavior.RestProfileKey = activeMode
@@ -522,6 +601,8 @@ local function executeStationAction(stationType: string, context: HandlerContext
 	if context.CancelToken.Cancelled then
 		return
 	end
+	local actionLabel = StationActionLabels[stationType]
+	local stationName = resolveStationDisplayName(assignment, stationType)
 	ResidentDebug.Trace(
 		ACTION_CHANNEL,
 		string.format("Handler start: %s -> %s", assignment.ResidentName, stationType),
@@ -576,6 +657,18 @@ local function executeStationAction(stationType: string, context: HandlerContext
 		OccupantCount = occupantCount,
 	})
 	if not arrived or context.CancelToken.Cancelled then
+		local cancelToken = context.CancelToken
+		local reason = "MovementFailed"
+		if cancelToken.Cancelled then
+			reason = cancelToken.Reason or "Cancelled"
+		end
+		ResidentChat.ShowInterrupt(assignment.ResidentState, reason, {
+			StationType = stationType,
+			StationId = assignment.StationId,
+			StationName = stationName,
+			NeedName = assignment.NeedName,
+			ActionName = actionLabel,
+		})
 		ResidentDebug.Trace(ACTION_CHANNEL, string.format("Movement failed in handler: %s", assignment.ResidentName), {
 			Resident = assignment.ResidentName,
 			StationType = stationType,
@@ -599,7 +692,13 @@ local function executeStationAction(stationType: string, context: HandlerContext
 		StationType = stationType,
 		Behavior = behavior,
 	})
-	NeedEffects.Run(assignment.ResidentState, context.CancelToken, behavior)
+	NeedEffects.Run(assignment.ResidentState, context.CancelToken, behavior, {
+		StationType = stationType,
+		StationId = assignment.StationId,
+		StationName = stationName,
+		NeedName = assignment.NeedName,
+		ActionName = actionLabel,
+	})
 	if arrival and behavior.UseSeat then
 		ResidentMovement.LeaveSeat(assignment.ResidentState, arrival.Seat)
 	end

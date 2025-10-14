@@ -237,21 +237,29 @@ end
 
 type MoodletDefinition = { Name: string, DurationSeconds: number, NeedBias: { [string]: number }? }
 
-function ResidentState:AddMoodlet(moodlet: MoodletDefinition)
+function ResidentState:AddMoodlet(moodlet: MoodletDefinition): boolean
 	local name = moodlet.Name
 	local duration = moodlet.DurationSeconds
 	if type(name) ~= "string" or name == "" or type(duration) ~= "number" or duration <= 0 then
-		return
+		return false
 	end
 	if not self.ActiveMoodlets then
-		return
+		return false
 	end
-	local expiresAt = os.clock() + duration
+	local now = os.clock()
+	local expiresAt = now + duration
 	local bias = moodlet.NeedBias or {}
+	local existing = self.ActiveMoodlets[name]
+	if existing and existing.ExpiresAt > now then
+		existing.ExpiresAt = expiresAt
+		existing.NeedBias = bias
+		return false
+	end
 	self.ActiveMoodlets[name] = {
 		ExpiresAt = expiresAt,
 		NeedBias = bias,
 	}
+	return true
 end
 
 function ResidentState:GetMoodBias(needName: string, nowClock: number?): number

@@ -43,11 +43,13 @@ type NeedDecision = {
 
 local AUTONOMY_TASK = "ResidentAutonomy"
 local AUTONOMY_INTERVAL = 1.0 -- seconds
+local ROAM_ACTION_NAME = "Auto:Roam" -- keeps roaming preemptible when higher value actions appear
 
 local NeedToStationType = {
 	Hunger = "CookStation",
 	Energy = "RestStation",
 	Hygiene = "HygieneStation",
+	Social = "SocialStation",
 	Fun = "FunStation",
 }
 
@@ -55,6 +57,9 @@ local roamRandom = Random.new()
 
 local Needs = NeedConfig.Needs
 local Circadian = NeedConfig.Circadian
+
+local NeedPrioritySeed = { "Hunger", "Energy", "Hygiene", "Social", "Fun" }
+local NeedEvaluationOrder = {} :: { string }
 
 local ResidentCooldowns = setmetatable({} :: { [ResidentState]: { [string]: number } }, { __mode = "k" })
 local ResidentPending = setmetatable({} :: { [ResidentState]: string? }, { __mode = "k" })
@@ -67,6 +72,29 @@ local StationIteratorState: { [number]: { [string]: { version: number, order: { 
 local ItemSpecCache: { [string]: { [string]: any }? } = {}
 
 local ResidentAutonomyService = {}
+
+local function rebuildNeedEvaluationOrder()
+	table.clear(NeedEvaluationOrder)
+	local seen = {} :: { [string]: boolean }
+	for _, needName in ipairs(NeedPrioritySeed) do
+		if Needs[needName] and NeedToStationType[needName] then
+			NeedEvaluationOrder[#NeedEvaluationOrder + 1] = needName
+			seen[needName] = true
+		end
+	end
+	local extras = {} :: { string }
+	for needName in pairs(Needs) do
+		if NeedToStationType[needName] and not seen[needName] then
+			extras[#extras + 1] = needName
+		end
+	end
+	table.sort(extras)
+	for _, needName in ipairs(extras) do
+		NeedEvaluationOrder[#NeedEvaluationOrder + 1] = needName
+	end
+end
+
+rebuildNeedEvaluationOrder()
 
 local function getPlayerByUserId(userId: number): Player?
 	return Players:GetPlayerByUserId(userId)
@@ -100,6 +128,7 @@ local function refreshNeedCooldowns()
 	for needName, def in pairs(Needs) do
 		NeedCooldownSeconds[needName] = convertMinutesToSeconds(def.CooldownMinutes)
 	end
+	rebuildNeedEvaluationOrder()
 end
 
 local function refreshTimeScaleCaches()
@@ -230,6 +259,18 @@ local function isNeedOnCooldown(
 		return false
 	end
 	return nowClock - last < cooldownSeconds
+end
+
+local function hasCriticalNeed(resident: ResidentState, ignoreNeed: string?): boolean
+	for needName, def in pairs(Needs) do
+		if needName ~= ignoreNeed then
+			local value = resident:GetNeed(needName)
+			if value <= def.Critical then
+				return true
+			end
+		end
+	end
+	return false
 end
 
 local function isNight(clockTime: number): boolean
@@ -429,8 +470,8 @@ local function enqueueDirectSocialPair(
 		Ready = {} :: { [string]: boolean },
 		Cancelled = false,
 	}
-	ResidentPending[primaryResident] = "Fun"
-	ResidentPending[partnerResident] = "Fun"
+	ResidentPending[primaryResident] = "Social"
+	ResidentPending[partnerResident] = "Social"
 	ResidentNextEvaluation[primaryResident] = nil
 	ResidentNextEvaluation[partnerResident] = nil
 
@@ -479,9 +520,14 @@ local function enqueueDirectSocialPair(
 			end
 			local partnerPositionCurrent = getResidentRootPosition(partnerState) or targetPosition
 			faceWorldPosition(residentState, partnerPositionCurrent)
-			local succeeded = NeedEffects.Run(residentState, cancelToken, behavior)
+			local succeeded = NeedEffects.Run(residentState, cancelToken, behavior, {
+				StationType = "SocialStation",
+				ActionName = "chat",
+				NeedName = "Social",
+				PartnerName = partnerNameInner,
+			})
 			if succeeded then
-				setNeedCooldown(residentState, "Fun")
+				setNeedCooldown(residentState, "Social")
 			else
 				if not session.Cancelled then
 					session.Cancelled = true
@@ -498,6 +544,15 @@ local function enqueueDirectSocialPair(
 	runDirectSocialAction(primaryName, primaryResident, primaryBehavior, targetPrimary, partnerName, partnerResident)
 	runDirectSocialAction(partnerName, partnerResident, partnerBehavior, targetPartner, primaryName, primaryResident)
 	return true
+end
+
+local function preemptRoamForDirectSocial(resident: ResidentState)
+	if ResidentPending[resident] ~= ROAM_ACTION_NAME then
+		return
+	end
+	resident:CancelCurrentAction("DirectSocialInvite")
+	resident:ClearQueuedActions()
+	ResidentPending[resident] = nil
 end
 
 local function shouldEvaluate(resident: ResidentState): boolean
@@ -602,7 +657,11 @@ local function attemptGroundRest(
 		if initialLine then
 			ResidentChat.ShowAction(resident, initialLine)
 		end
-		local succeeded = NeedEffects.Run(resident, cancelToken, behavior)
+		local succeeded = NeedEffects.Run(resident, cancelToken, behavior, {
+			StationType = "GroundRest",
+			ActionName = "rest",
+			NeedName = "Energy",
+		})
 		ResidentPending[resident] = nil
 		if succeeded then
 			setNeedCooldown(resident, "Energy")
@@ -622,13 +681,21 @@ local function chooseRestMode(def: NeedConfig.NeedDef, energyValue: number, cloc
 end
 
 local function attemptDirectSocial(player: Player, residentName: string, resident: ResidentState): boolean
-	local funDef = Needs.Fun
-	if not funDef then
+	local socialDef = Needs.Social
+	if not socialDef then
 		return false
 	end
-	local value = resident:GetNeed("Fun")
-	local deficit = funDef.Max - value
-	if deficit <= funDef.Hysteresis then
+	local nowClock = os.clock()
+	local value = resident:GetNeed("Social")
+	if hasCriticalNeed(resident, "Social") then
+		return false
+	end
+	local deficit = socialDef.Low - value
+	if deficit <= 0 then
+		return false
+	end
+	local moodMultiplier = math.max(0, 1 + resident:GetMoodBias("Social", nowClock))
+	if deficit * moodMultiplier <= 0 then
 		return false
 	end
 	local residents = ResidentService.GetResidents(player)
@@ -638,16 +705,29 @@ local function attemptDirectSocial(player: Player, residentName: string, residen
 	local bestName: string? = nil
 	local bestState: ResidentState? = nil
 	local bestDeficit = 0
+	local bestScore = 0
 	for candidateName, candidateState in pairs(residents) do
 		if candidateName ~= residentName and candidateState ~= nil then
-			if shouldEvaluate(candidateState) and ResidentPending[candidateState] == nil then
-				local candidateValue = candidateState:GetNeed("Fun")
-				local candidateDeficit = funDef.Max - candidateValue
-				if candidateDeficit > funDef.Hysteresis then
-					if candidateDeficit > bestDeficit then
-						bestDeficit = candidateDeficit
-						bestName = candidateName
-						bestState = candidateState
+			local candidatePending = ResidentPending[candidateState]
+			local candidateAvailable = shouldEvaluate(candidateState)
+			if not candidateAvailable and candidatePending == ROAM_ACTION_NAME then
+				preemptRoamForDirectSocial(candidateState)
+				candidatePending = ResidentPending[candidateState]
+				candidateAvailable = true
+			end
+			if candidateAvailable and candidatePending == nil then
+				if not hasCriticalNeed(candidateState, "Social") then
+					local candidateValue = candidateState:GetNeed("Social")
+					local candidateDeficit = socialDef.Low - candidateValue
+					if candidateDeficit > 0 then
+						local candidateMoodMultiplier = math.max(0, 1 + candidateState:GetMoodBias("Social", nowClock))
+						local candidateScore = candidateDeficit * candidateMoodMultiplier
+						if candidateScore > bestScore then
+							bestScore = candidateScore
+							bestDeficit = candidateDeficit
+							bestName = candidateName
+							bestState = candidateState
+						end
 					end
 				end
 			end
@@ -670,6 +750,7 @@ local function buildAssignment(player: Player, residentName: string, resident: R
 		ItemSpec = decision.ItemSpec,
 		StationRecord = decision.StationRecord,
 		StationModel = decision.StationModel,
+		NeedName = decision.NeedName,
 		RestModeOverride = decision.RestModeOverride,
 	}
 end
@@ -709,7 +790,7 @@ end
 
 -- Idle fallback: send residents to a random unlocked cell on their plot.
 local function enqueueRoamAction(player: Player, residentName: string, resident: ResidentState): boolean
-	local actionName = "Auto:Roam"
+	local actionName = ROAM_ACTION_NAME
 	ResidentPending[resident] = actionName
 	resident:EnqueueAction(actionName, function(context)
 		local cancelToken = context.CancelToken
@@ -745,42 +826,45 @@ function ResidentAutonomyService.EvaluateResidentNeeds(
 ): NeedDecision?
 	local bestDecision: NeedDecision? = nil
 	local bestScore = 0
-	for needName, def in pairs(Needs) do
-		local stationType = NeedToStationType[needName]
-		if stationType and DirectActionService.HasHandler(stationType) then
-			local value = resident:GetNeed(needName)
-			local score = computeNeedScore(resident, needName, def, value, clockTime, nowClock)
-			if score > 0 then
-				local cooldownSeconds = getNeedCooldownSeconds(needName, def)
-				local onCooldown = isNeedOnCooldown(resident, needName, cooldownSeconds, nowClock)
-				if onCooldown and needName == "Energy" then
-					local bypass = value <= def.Critical
-					if not bypass and value < def.Low and isNight(clockTime) then
-						bypass = true
+	for _, needName in ipairs(NeedEvaluationOrder) do
+		local def = Needs[needName]
+		if def then
+			local stationType = NeedToStationType[needName]
+			if stationType and DirectActionService.HasHandler(stationType) then
+				local value = resident:GetNeed(needName)
+				local score = computeNeedScore(resident, needName, def, value, clockTime, nowClock)
+				if score > 0 then
+					local cooldownSeconds = getNeedCooldownSeconds(needName, def)
+					local onCooldown = isNeedOnCooldown(resident, needName, cooldownSeconds, nowClock)
+					if onCooldown and needName == "Energy" then
+						local bypass = value <= def.Critical
+						if not bypass and value < def.Low and isNight(clockTime) then
+							bypass = true
+						end
+						if bypass then
+							onCooldown = false
+						end
 					end
-					if bypass then
-						onCooldown = false
-					end
-				end
-				if not onCooldown then
-					local uniqueId, stationRecord, itemSpec, stationModel =
-						findAvailableStation(player, stationType, residentName)
-					if uniqueId and stationRecord and itemSpec and stationModel then
-						if score > bestScore then
-							bestScore = score
-							local restModeOverride = if needName == "Energy"
-								then chooseRestMode(def, value, clockTime)
-								else nil
-							local nextDecision: NeedDecision = {
-								StationType = stationType,
-								UniqueId = uniqueId :: string,
-								StationRecord = stationRecord,
-								ItemSpec = itemSpec,
-								StationModel = stationModel :: Model,
-								NeedName = needName,
-								RestModeOverride = restModeOverride,
-							}
-							bestDecision = nextDecision
+					if not onCooldown then
+						local uniqueId, stationRecord, itemSpec, stationModel =
+							findAvailableStation(player, stationType, residentName)
+						if uniqueId and stationRecord and itemSpec and stationModel then
+							if score > bestScore then
+								bestScore = score
+								local restModeOverride = if needName == "Energy"
+									then chooseRestMode(def, value, clockTime)
+									else nil
+								local nextDecision: NeedDecision = {
+									StationType = stationType,
+									UniqueId = uniqueId :: string,
+									StationRecord = stationRecord,
+									ItemSpec = itemSpec,
+									StationModel = stationModel :: Model,
+									NeedName = needName,
+									RestModeOverride = restModeOverride,
+								}
+								bestDecision = nextDecision
+							end
 						end
 					end
 				end
@@ -849,8 +933,11 @@ function ResidentAutonomyService.TrySatisfyNeedsForResident(
 		if attemptGroundRest(player, residentName, residentState, evaluationClock, evaluationTime) then
 			return true
 		end
-		if attemptDirectSocial(player, residentName, residentState) then
-			return true
+		local otherCriticalNeeds = hasCriticalNeed(residentState, "Social")
+		if not otherCriticalNeeds then
+			if attemptDirectSocial(player, residentName, residentState) then
+				return true
+			end
 		end
 		local jobQueued = ResidentAutonomyService.EvaluateResidentJob(player, residentName, residentState)
 		if not jobQueued then

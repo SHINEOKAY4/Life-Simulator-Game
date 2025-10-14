@@ -76,15 +76,8 @@ local function restoreDetachedPreview(): boolean
 	return true
 end
 
-type Facing = "North" | "East" | "South" | "West"
-type PreviewKind = "CellObject" | "Floor" | "Wall" | "Roof"
-type PreviewPose = {
-	ItemId: string,
-	CellX: number,
-	CellZ: number,
-	Facing: Facing,
-	Kind: PreviewKind,
-}
+type Facing = ObjectPreview.Facing
+type PreviewPose = ObjectPreview.PreviewPose
 
 local function sanitizeFacing(value: any): Facing
 	if value == "North" or value == "East" or value == "South" or value == "West" then
@@ -339,8 +332,8 @@ function ObjectAction.Rotate(object: Model, rotation: Vector3)
 		return
 	end
 
-	local normalizedFacing: Facing = PlacementKey.NormalizeFacing(currentFacing)
-	local fromKey = PlacementKey.ForPlacementType(cellXAttr, cellZAttr, normalizedFacing, placementType)
+	local normalizedFacing = PlacementKey.NormalizeFacing(currentFacing :: any)
+	local fromKey = PlacementKey.ForPlacementType(cellXAttr, cellZAttr, normalizedFacing :: any, placementType)
 
 	local success, message = Packets.RotateRequest:Fire({
 		ItemId = itemId,

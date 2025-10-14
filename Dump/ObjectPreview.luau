@@ -71,6 +71,114 @@ local ActiveMarkerCount = 0
 local MARKER_Y = 0.08 -- Lift markers slightly above the surface to avoid z-fighting for tall previews.
 local FLOOR_MARKER_Y = -0.02 -- Sink floor markers slightly so thin floor meshes stay visible.
 
+type FloorSelectionInfo = {
+	ItemId: string?,
+	AnchorCellX: number,
+	AnchorCellZ: number,
+	CurrentCellX: number,
+	CurrentCellZ: number,
+	MinCellX: number,
+	MinCellZ: number,
+	MaxCellX: number,
+	MaxCellZ: number,
+	CellCount: number,
+	WidthCells: number,
+	DepthCells: number,
+	CanPlace: boolean,
+}
+
+local MAX_FLOOR_SELECTION_CELLS = 256
+local FloorSelectionActive = false
+local FloorSelectionAnchorX: number? = nil
+local FloorSelectionAnchorZ: number? = nil
+local CurrentFloorSelection: FloorSelectionInfo? = nil
+local FloorPlacementHandler: ((FloorSelectionInfo) -> ())? = nil
+local FloorPreviewPart: BasePart? = nil
+local FloorPreviewBaseSize: Vector3? = nil
+local FloorPreviewBaseWidthCells = 1
+local FloorPreviewBaseDepthCells = 1
+type EdgeKind = "Wall" | "Interior"
+
+local EDGE_KIND_WALL: EdgeKind = "Wall"
+local EDGE_KIND_INTERIOR: EdgeKind = "Interior"
+
+local HorizontalWallEdges: { [string]: EdgeKind } = {}
+local VerticalWallEdges: { [string]: EdgeKind } = {}
+
+local function EdgeKey(edgeX: number, edgeZ: number): string
+	return string.format("%d:%d", edgeX, edgeZ)
+end
+
+local function setEdgeOccupied(alignment: "Horizontal" | "Vertical", key: string, kind: EdgeKind)
+	if alignment == "Horizontal" then
+		HorizontalWallEdges[key] = kind
+	else
+		VerticalWallEdges[key] = kind
+	end
+end
+
+local function clearFloorSelectionState(keepSummary: boolean?)
+	FloorSelectionActive = false
+	FloorSelectionAnchorX = nil
+	FloorSelectionAnchorZ = nil
+	if not keepSummary then
+		CurrentFloorSelection = nil
+	end
+	local part = FloorPreviewPart
+	local baseSize = FloorPreviewBaseSize
+	if part and baseSize then
+		part.Size = baseSize
+	end
+end
+
+local function computeFloorSelectionCells(
+	grid,
+	anchorX: number,
+	anchorZ: number,
+	currentX: number,
+	currentZ: number
+): ({ number }, number, number, number, number, number)
+	local minCellX = math.min(anchorX, currentX)
+	local minCellZ = math.min(anchorZ, currentZ)
+	local maxCellX = math.max(anchorX, currentX)
+	local maxCellZ = math.max(anchorZ, currentZ)
+	local width = maxCellX - minCellX + 1
+	local depth = maxCellZ - minCellZ + 1
+	local totalCells = width * depth
+	local indices = table.create(totalCells)
+	local index = 0
+	for cellZ = minCellZ, maxCellZ do
+		local rowOffset = (cellZ - 1) * grid.Columns
+		for cellX = minCellX, maxCellX do
+			index += 1
+			indices[index] = rowOffset + cellX
+		end
+	end
+	return indices, minCellX, minCellZ, maxCellX, maxCellZ, totalCells
+end
+
+local function isSelectionUnlocked(
+	grid,
+	chunkSize: number,
+	minCellX: number,
+	minCellZ: number,
+	maxCellX: number,
+	maxCellZ: number
+): boolean
+	local selectionWidth = maxCellX - minCellX + 1
+	local selectionDepth = maxCellZ - minCellZ + 1
+	local minChunkX, minChunkZ, maxChunkX, maxChunkZ =
+		grid:FootprintChunkRange(minCellX, minCellZ, selectionWidth, selectionDepth, "North", chunkSize)
+	for chunkZ = minChunkZ, maxChunkZ do
+		for chunkX = minChunkX, maxChunkX do
+			if not PlotStateStore.IsChunkUnlocked(chunkX, chunkZ) then
+				return false
+			end
+		end
+	end
+	return true
+end
+
 local function BuildMarker(cellSize: number, parent: Instance): BasePart
 	local markerPart = Instance.new("Part")
 	markerPart.Name = "CellPreviewMarker"
@@ -180,19 +288,34 @@ local function ResolvePlacementEntry(entry: any): (any?, string, number, number,
 	local itemId = entry.id or entry.Id or entry.ItemId
 	local itemSpec = if itemId then ItemFinder.FindItemById(itemId) else nil
 	local placementType = (itemSpec and (itemSpec.PlacementType or itemSpec.Type)) or "CellObject"
-	local width = entry.width or entry.Width or (itemSpec and itemSpec.WidthCells) or 1
-	local depth = entry.depth or entry.Depth or (itemSpec and itemSpec.DepthCells) or 1
+	local metadata = entry.Metadata
+	local width = entry.width or entry.Width or entry.widthCells or entry.WidthCells
+	if metadata then
+		width = width or metadata.WidthCells or metadata.widthCells or metadata.Width or metadata.width
+	end
+	local depth = entry.depth or entry.Depth or entry.depthCells or entry.DepthCells
+	if metadata then
+		depth = depth or metadata.DepthCells or metadata.depthCells or metadata.Depth or metadata.depth
+	end
 	local facing = entry.facing or entry.Facing or "North"
 
 	if placementType == "Floor" then
 		local specWidth = itemSpec and (itemSpec.WidthCells or itemSpec.Width)
 		local specDepth = itemSpec and (itemSpec.DepthCells or itemSpec.Depth)
-		width = specWidth or width
-		depth = specDepth or depth
+		width = width or specWidth
+		depth = depth or specDepth
 		facing = "North"
 	elseif placementType == "Wall" then
 		width, depth = 1, 1
+	else
+		local specWidth = itemSpec and (itemSpec.WidthCells or itemSpec.Width)
+		local specDepth = itemSpec and (itemSpec.DepthCells or itemSpec.Depth)
+		width = width or specWidth
+		depth = depth or specDepth
 	end
+
+	width = width or 1
+	depth = depth or 1
 
 	return itemSpec, placementType, width, depth, facing :: Facing
 end
@@ -230,30 +353,79 @@ local function EdgeOfCell(cellX: number, cellZ: number, facing: Facing): ("Horiz
 	end
 end
 
-local function EdgeKey(edgeX: number, edgeZ: number): string
-	return (`%d:%d`):format(edgeX, edgeZ)
+local function matchesIgnorePlacement(entry, placementType: string, facing: Facing, ignorePlacement: MoveOriginInfo?)
+	if not ignorePlacement then
+		return false
+	end
+
+	if placementType ~= ignorePlacement.PlacementType then
+		return false
+	end
+
+	local normalizedFacing = PlacementKey.NormalizeFacing(facing)
+	local ignoreFacing = PlacementKey.NormalizeFacing(ignorePlacement.Facing)
+	if normalizedFacing ~= ignoreFacing then
+		return false
+	end
+
+	if entry.cellX ~= ignorePlacement.CellX or entry.cellZ ~= ignorePlacement.CellZ then
+		return false
+	end
+
+	local entryId = entry.id or entry.Id or entry.ItemId
+	return entryId == ignorePlacement.ItemId
 end
 
-local HorizontalWallEdges: { [string]: boolean } = {}
-local VerticalWallEdges: { [string]: boolean } = {}
-
-local function PopulateWallEdgeMaps(placed)
+local function PopulateWallEdgeMaps(grid, placed, ignorePlacement: MoveOriginInfo?)
 	table.clear(HorizontalWallEdges)
 	table.clear(VerticalWallEdges)
 	if not placed then
 		return
 	end
 
+	if not grid then
+		return
+	end
+
 	for _, entry in pairs(placed) do
-		local _, placementType, _width, _depth, facing = ResolvePlacementEntry(entry)
+		local _, placementType, width, depth, facing = ResolvePlacementEntry(entry)
+		local entryFacing: Facing = facing :: Facing
+		if matchesIgnorePlacement(entry, placementType, entryFacing, ignorePlacement) then
+			continue
+		end
 		if placementType == "Wall" then
-			local normalizedFacing: Facing = PlacementKey.NormalizeFacing(facing :: Facing)
+			local normalizedFacing: Facing = PlacementKey.NormalizeFacing(entryFacing)
 			local alignment, edgeX, edgeZ = EdgeOfCell(entry.cellX, entry.cellZ, normalizedFacing)
 			local key = EdgeKey(edgeX, edgeZ)
-			if alignment == "Horizontal" then
-				HorizontalWallEdges[key] = true
-			else
-				VerticalWallEdges[key] = true
+			setEdgeOccupied(alignment :: "Horizontal" | "Vertical", key, EDGE_KIND_WALL)
+		elseif placementType == "CellObject" then
+			local minCellX: number, minCellZ: number, maxCellX: number, maxCellZ: number =
+				grid:FootprintBounds(entry.cellX, entry.cellZ, width, depth, facing)
+			local rotatedWidth = maxCellX - minCellX
+			local rotatedDepth = maxCellZ - minCellZ
+
+			if rotatedWidth >= 1 then
+				for cellZ = minCellZ, maxCellZ do
+					for cellX = minCellX, maxCellX - 1 do
+						local alignment, edgeX, edgeZ = EdgeOfCell(cellX, cellZ, "East")
+						if alignment == "Vertical" then
+							local key = EdgeKey(edgeX, edgeZ)
+							setEdgeOccupied("Vertical", key, EDGE_KIND_INTERIOR)
+						end
+					end
+				end
+			end
+
+			if rotatedDepth >= 1 then
+				for cellZ = minCellZ, maxCellZ - 1 do
+					for cellX = minCellX, maxCellX do
+						local alignment, edgeX, edgeZ = EdgeOfCell(cellX, cellZ, "South")
+						if alignment == "Horizontal" then
+							local key = EdgeKey(edgeX, edgeZ)
+							setEdgeOccupied("Horizontal", key, EDGE_KIND_INTERIOR)
+						end
+					end
+				end
 			end
 		end
 	end
@@ -489,6 +661,23 @@ function ObjectPreview.Init()
 	PreviewContext.CancelPreview.Pressed:Connect(function()
 		ObjectPreview.ClearPreview()
 	end)
+
+	UserInputService.InputEnded:Connect(function(input: InputObject)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+			return
+		end
+		if not FloorSelectionActive then
+			return
+		end
+		local summary = CurrentFloorSelection
+		clearFloorSelectionState()
+		if not summary or not summary.ItemId then
+			return
+		end
+		if FloorPlacementHandler and summary.CanPlace then
+			FloorPlacementHandler(summary)
+		end
+	end)
 end
 
 function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
@@ -572,6 +761,22 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 	CurrentItemId = itemId
 	CurrentKind = previewKind
 
+	if previewKind == "Floor" then
+		FloorPreviewPart = itemModel.PrimaryPart or itemModel:FindFirstChildWhichIsA("BasePart", true)
+		if FloorPreviewPart then
+			FloorPreviewBaseSize = FloorPreviewPart.Size
+			FloorPreviewBaseWidthCells = baseWidthCells
+			FloorPreviewBaseDepthCells = baseDepthCells
+		else
+			FloorPreviewBaseSize = nil
+		end
+	else
+		FloorPreviewPart = nil
+		FloorPreviewBaseSize = nil
+		FloorPreviewBaseWidthCells = baseWidthCells
+		FloorPreviewBaseDepthCells = baseDepthCells
+	end
+
 	PreviewContext.RotateLeft.Enabled = (previewKind ~= "Floor")
 	PreviewContext.RotateRight.Enabled = (previewKind ~= "Floor")
 
@@ -626,20 +831,75 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 		local snapshot = PlotStateStore.GetStateSnapshot()
 		local placed = snapshot.PlacedItems
 
-		local isUnlocked: boolean
-		if previewKind == "Wall" then
-			isUnlocked = IsFootprintUnlocked(grid, chunkSize, cellX, cellZ, 1, 1, CurrentFacing)
-		elseif previewKind == "Floor" then
-			isUnlocked = IsFootprintUnlocked(grid, chunkSize, cellX, cellZ, baseWidthCells, baseDepthCells, "North")
-		else
-			isUnlocked =
-				IsFootprintUnlocked(grid, chunkSize, cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
-		end
-
-		local ignorePlacement = nil
+		local ignorePlacement: MoveOriginInfo? = nil
 		if MoveOriginSignature ~= nil and CurrentItemId == MoveOriginSignature.ItemId then
 			ignorePlacement = MoveOriginSignature
 		end
+
+		if previewKind == "Floor" then
+			ActiveMarkerCount = 0
+
+			local anchorX = FloorSelectionAnchorX or cellX
+			local anchorZ = FloorSelectionAnchorZ or cellZ
+			local indices, minCellX, minCellZ, maxCellX, maxCellZ, cellCount =
+				computeFloorSelectionCells(grid, anchorX, anchorZ, cellX, cellZ)
+			local selectionWidthCells = maxCellX - minCellX + 1
+			local selectionDepthCells = maxCellZ - minCellZ + 1
+
+			PreviewFloor(model, grid, surface, minCellX, minCellZ, selectionWidthCells, selectionDepthCells, "North")
+
+			local areaUnlocked = isSelectionUnlocked(grid, chunkSize, minCellX, minCellZ, maxCellX, maxCellZ)
+			PopulateCellMapForType(grid, placed, "Floor", FloorCellMap)
+			if ignorePlacement and ignorePlacement.PlacementType == "Floor" then
+				local ignoreIndex = grid:CellToIndex(ignorePlacement.CellX, ignorePlacement.CellZ)
+				FloorCellMap[ignoreIndex] = nil
+			end
+
+			local occupied = false
+			for i = 1, #indices do
+				if FloorCellMap[indices[i]] then
+					occupied = true
+					break
+				end
+			end
+
+			local selectionTooLarge = cellCount > MAX_FLOOR_SELECTION_CELLS
+			local canPlaceFloor = areaUnlocked and not occupied and not selectionTooLarge
+
+			local part = FloorPreviewPart
+			local baseSize = FloorPreviewBaseSize
+			if part and baseSize then
+				local widthScale = selectionWidthCells / math.max(FloorPreviewBaseWidthCells, 1)
+				local depthScale = selectionDepthCells / math.max(FloorPreviewBaseDepthCells, 1)
+				part.Size = Vector3.new(baseSize.X * widthScale, baseSize.Y, baseSize.Z * depthScale)
+			end
+
+			CurrentFloorSelection = {
+				ItemId = CurrentItemId,
+				AnchorCellX = anchorX,
+				AnchorCellZ = anchorZ,
+				CurrentCellX = cellX,
+				CurrentCellZ = cellZ,
+				MinCellX = minCellX,
+				MinCellZ = minCellZ,
+				MaxCellX = maxCellX,
+				MaxCellZ = maxCellZ,
+				CellCount = cellCount,
+				CanPlace = canPlaceFloor,
+				WidthCells = selectionWidthCells,
+				DepthCells = selectionDepthCells,
+			}
+
+			PreviewHighlight.FillColor = canPlaceFloor and Color3.fromRGB(159, 234, 159)
+				or Color3.fromRGB(219, 136, 136)
+			PreviewHighlight.OutlineColor = canPlaceFloor and Color3.fromRGB(137, 255, 119)
+				or Color3.fromRGB(255, 85, 85)
+
+			return
+		end
+
+		local isUnlocked =
+			IsFootprintUnlocked(grid, chunkSize, cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
 
 		local blocked = isCellOccupiedForPreview(
 			grid,
@@ -652,6 +912,21 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 			placed,
 			ignorePlacement
 		)
+
+		local wallEdgeOccupant: EdgeKind? = nil
+		if previewKind == "Wall" then
+			PopulateWallEdgeMaps(grid, placed, ignorePlacement)
+			local alignment, edgeX, edgeZ = EdgeOfCell(cellX, cellZ, CurrentFacing)
+			local edgeKey = EdgeKey(edgeX, edgeZ)
+			if alignment == "Horizontal" then
+				wallEdgeOccupant = HorizontalWallEdges[edgeKey]
+			else
+				wallEdgeOccupant = VerticalWallEdges[edgeKey]
+			end
+			if wallEdgeOccupant == EDGE_KIND_INTERIOR then
+				blocked = true
+			end
+		end
 
 		if previewKind == "Wall" then
 			local spec = CurrentItemSpec
@@ -697,9 +972,14 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 		end
 
 		if previewKind == "Wall" then
+			local spec = CurrentItemSpec
+			if (not spec or spec.RequiresExistingWall ~= true) and wallEdgeOccupant == EDGE_KIND_WALL then
+				blocked = true
+			end
+		end
+
+		if previewKind == "Wall" then
 			PreviewWall(model, grid, cellX, cellZ, CurrentFacing, lift)
-		elseif previewKind == "Floor" then
-			PreviewFloor(model, grid, surface, cellX, cellZ, baseWidthCells, baseDepthCells, "North")
 		elseif previewKind == "Roof" then
 			local itemSpec = CurrentItemSpec
 			local height = itemSpec and itemSpec.HeightStuds or 12
@@ -736,9 +1016,6 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 		if previewKind == "Wall" then
 			-- Walls occupy a single anchor cell edge; treat as 1x1 for overlay markers and clamp to bounds.
 			cells = grid:ClippedFootprintCells(cellX, cellZ, 1, 1, CurrentFacing)
-		elseif previewKind == "Floor" then
-			-- Floors are rotated to face North.
-			cells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, "North")
 		else
 			-- CellObject uses its (possibly rotated) footprint.
 			cells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
@@ -751,7 +1028,7 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: Facing?)
 			local rotatedDepth = maxCellZ - minCellZ + 1
 
 			if rotatedWidth > 1 or rotatedDepth > 1 then
-				PopulateWallEdgeMaps(placed)
+				PopulateWallEdgeMaps(grid, placed, ignorePlacement)
 
 				if rotatedWidth > 1 then
 					for z = minCellZ, maxCellZ do
@@ -824,6 +1101,7 @@ function ObjectPreview.ClearPreview()
 	objectPreviewEnabled.Value = false
 	ActiveMarkerCount = 0
 	HideUnusedMarkers()
+	clearFloorSelectionState()
 
 	if SelectedItem then
 		if PreviewHighlight then
@@ -864,6 +1142,37 @@ function ObjectPreview.GetCurrentPose(): PreviewPose?
 		Facing = CurrentFacing,
 		Kind = CurrentKind,
 	}
+end
+
+function ObjectPreview.SetFloorPlacementHandler(handler: ((FloorSelectionInfo) -> ())?)
+	FloorPlacementHandler = handler
+end
+
+function ObjectPreview.TryBeginFloorDrag(): boolean
+	if CurrentKind ~= "Floor" then
+		return false
+	end
+	if FloorSelectionActive then
+		return true
+	end
+	if not CurrentItemId or not LastCellX or not LastCellZ then
+		return false
+	end
+	if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+		return false
+	end
+	FloorSelectionAnchorX = LastCellX
+	FloorSelectionAnchorZ = LastCellZ
+	FloorSelectionActive = true
+	return true
+end
+
+function ObjectPreview.IsFloorDragInProgress(): boolean
+	return FloorSelectionActive
+end
+
+function ObjectPreview.GetFloorSelectionSummary(): FloorSelectionInfo?
+	return CurrentFloorSelection
 end
 
 function ObjectPreview.SetMoveOrigin(originInfo: {

@@ -23,6 +23,8 @@ PlacementPackets.PlotStateSync = Packet("PlotStateSync", {
 		cellX = Packet.NumberU16,
 		cellZ = Packet.NumberU16,
 		facing = Packet.String,
+		WidthCells = Packet.NumberU16,
+		DepthCells = Packet.NumberU16,
 	},
 })
 
@@ -35,6 +37,16 @@ PlacementPackets.PlaceRequest = Packet("PlaceRequest", {
 	Facing = Packet.String,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
+PlacementPackets.PlaceFloorAreaRequest = Packet("PlaceFloorAreaRequest", {
+	ItemId = Packet.String,
+	StartCellX = Packet.NumberU16,
+	StartCellZ = Packet.NumberU16,
+	EndCellX = Packet.NumberU16,
+	EndCellZ = Packet.NumberU16,
+	WidthCells = Packet.NumberU16,
+	DepthCells = Packet.NumberU16,
+}):Response(Packet.Boolean8, Packet.StringLong)
+
 PlacementPackets.PlacementDelta = Packet("PlacementDelta", {
 	Action = Packet.String,
 	Item = {
@@ -42,6 +54,8 @@ PlacementPackets.PlacementDelta = Packet("PlacementDelta", {
 		CellX = Packet.NumberU8,
 		CellZ = Packet.NumberU8,
 		Facing = Packet.String,
+		WidthCells = Packet.NumberU16,
+		DepthCells = Packet.NumberU16,
 	},
 })
 

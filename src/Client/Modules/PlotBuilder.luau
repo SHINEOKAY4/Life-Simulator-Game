@@ -31,6 +31,10 @@ function PlotBuilder.Init()
 		end
 	end)
 
+	ObjectPreview.SetFloorPlacementHandler(function(selection)
+		PlotBuilder.PlaceFloorSelection(selection)
+	end)
+
 	ObjectSelectorEnabled.Changed:Connect(function()
 		if ObjectSelectorEnabled.Value and PlotBuilderEnabled.Value then
 			PlotBuilder.Hide()
@@ -61,6 +65,9 @@ function PlotBuilder.Init()
 	end)
 
 	BuildContext.PlacePreview.Pressed:Connect(function()
+		if ObjectPreview.TryBeginFloorDrag() then
+			return
+		end
 		PlotBuilder.PlaceSelectedPreview()
 	end)
 
@@ -104,6 +111,18 @@ function PlotBuilder.PlaceSelectedPreview()
 		return
 	end
 
+	if pose.Kind == "Floor" then
+		if ObjectPreview.IsFloorDragInProgress() then
+			return
+		end
+		local floorSelection = ObjectPreview.GetFloorSelectionSummary()
+		if not floorSelection or not floorSelection.CanPlace then
+			return
+		end
+		PlotBuilder.PlaceFloorSelection(floorSelection)
+		return
+	end
+
 	local success, message = Packets.PlaceRequest:Fire({
 		ItemId = pose.ItemId,
 		CellX = pose.CellX,
@@ -116,6 +135,64 @@ function PlotBuilder.PlaceSelectedPreview()
 	end
 
 	-- Optional: keep previewing for batch placement; or call RemovePreview()
+end
+
+function PlotBuilder.PlaceFloorSelection(selection: any)
+	if typeof(selection) ~= "table" then
+		return
+	end
+
+	local itemId = selection.ItemId
+	if typeof(itemId) ~= "string" or itemId == "" then
+		return
+	end
+
+	if selection.CanPlace ~= true then
+		return
+	end
+
+	local startX = selection.AnchorCellX
+	local startZ = selection.AnchorCellZ
+	local endX = selection.CurrentCellX
+	local endZ = selection.CurrentCellZ
+	local widthCells = selection.WidthCells
+	local depthCells = selection.DepthCells
+
+	if
+		typeof(startX) ~= "number"
+		or typeof(startZ) ~= "number"
+		or typeof(endX) ~= "number"
+		or typeof(endZ) ~= "number"
+	then
+		return
+	end
+
+	local minCellX = math.min(startX, endX)
+	local minCellZ = math.min(startZ, endZ)
+	local maxCellX = math.max(startX, endX)
+	local maxCellZ = math.max(startZ, endZ)
+
+	if typeof(widthCells) ~= "number" then
+		widthCells = maxCellX - minCellX + 1
+	end
+
+	if typeof(depthCells) ~= "number" then
+		depthCells = maxCellZ - minCellZ + 1
+	end
+
+	local success, message = Packets.PlaceFloorAreaRequest:Fire({
+		ItemId = itemId,
+		StartCellX = startX,
+		StartCellZ = startZ,
+		EndCellX = endX,
+		EndCellZ = endZ,
+		WidthCells = widthCells,
+		DepthCells = depthCells,
+	})
+
+	if not success then
+		warn("Placement failed: " .. message)
+	end
 end
 
 --#TODO: More functions for rotating, selecting already placed items, deleting placed items, etc.

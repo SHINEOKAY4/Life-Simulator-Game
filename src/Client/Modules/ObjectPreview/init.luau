@@ -1,0 +1,732 @@
+--!strict
+
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local PlotStateStore = require(script.Parent.Parent:WaitForChild("ClientStores"):WaitForChild("PlotStateStore"))
+
+local MarkerPool = require(script:WaitForChild("MarkerPool"))
+local PlacementUtils = require(script:WaitForChild("PlacementUtils"))
+local FloorPreview = require(script:WaitForChild("FloorPreview"))
+local WallConstraints = require(script:WaitForChild("WallConstraints"))
+local Renderer = require(script:WaitForChild("Renderer"))
+
+type PreviewFacing = string
+type PreviewKind = "CellObject" | "Floor" | "Wall" | "Roof"
+type MoveOriginInfo = PlacementUtils.MoveOriginInfo
+export type Facing = PreviewFacing
+export type PreviewPose = {
+	ItemId: string,
+	CellX: number,
+	CellZ: number,
+	Facing: PreviewFacing,
+	Kind: PreviewKind,
+}
+export type FloorSelectionInfo = FloorPreview.FloorSelectionInfo
+type FloorUpdateResult = FloorPreview.FloorUpdateResult
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
+local PreviewContext = InputContextsFolder:WaitForChild("PreviewContext")
+
+local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
+local PreviewHighlight = AssetsFolder.VisualTools:WaitForChild("PreviewHighlight") :: Highlight
+
+local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
+local objectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled") :: BoolValue
+
+local Camera = workspace.CurrentCamera
+
+local ObjectPreview = {}
+
+local Connection: RBXScriptConnection? = nil
+local SelectedItem: Model? = nil
+local CurrentItemId: string? = nil
+local CurrentItemSpec: any? = nil
+local CurrentKind: PreviewKind = "CellObject"
+local CurrentFacing: PreviewFacing = "North"
+local LastCellX: number? = nil
+local LastCellZ: number? = nil
+local LastFacing: PreviewFacing? = nil
+local CurrentPivotRotation: CFrame = CFrame.identity
+
+local MoveOriginSignature: MoveOriginInfo? = nil
+local MoveHoldActive = false
+local MoveHoldMousePosition: Vector2? = nil
+local MOUSE_MOVE_RELEASE_THRESHOLD = 2
+
+local FloorSupportMap: { [number]: boolean } = {}
+
+local PLACEABLE_FILL = Color3.fromRGB(159, 234, 159)
+local PLACEABLE_OUTLINE = Color3.fromRGB(137, 255, 119)
+local BLOCKED_FILL = Color3.fromRGB(219, 136, 136)
+local BLOCKED_OUTLINE = Color3.fromRGB(255, 85, 85)
+
+local function resetFloorState()
+	FloorPreview.Clear()
+	FloorPreview.ReleasePreviewPart()
+end
+
+local function computeIgnorePlacement(): MoveOriginInfo?
+	return MoveOriginSignature
+end
+
+local function updateFacing(newFacing: PreviewFacing)
+	CurrentFacing = newFacing
+	LastFacing = nil
+end
+
+local function applyModelPhysicsOverrides(model: Model)
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CanQuery = false
+		end
+	end
+end
+
+local function rotationOrder()
+	local order: { PreviewFacing } = { "North", "East", "South", "West" }
+	local indexOf: { [PreviewFacing]: number } = { North = 1, East = 2, South = 3, West = 4 }
+	return order, indexOf
+end
+
+local function isSamePlacementPose(cellX: number, cellZ: number, facing: PreviewFacing): boolean
+	return LastCellX == cellX and LastCellZ == cellZ and LastFacing == facing
+end
+
+local function updateLastPose(cellX: number, cellZ: number, facing: PreviewFacing)
+	LastCellX = cellX
+	LastCellZ = cellZ
+	LastFacing = facing
+end
+
+local function computeLift(spec: any?, model: Model, surface: BasePart): number
+	local surfaceUp = surface.CFrame.UpVector
+	local baseLift = Renderer.GetLiftAlongSurface(model, surfaceUp)
+	local extraLift = 0
+	if typeof(spec) == "table" then
+		local offset = spec.SurfaceOffsetStuds
+		if typeof(offset) == "number" then
+			extraLift = offset
+		end
+	end
+	return baseLift + extraLift
+end
+
+local function withMarkerPool(render: () -> ())
+	MarkerPool.BeginFrame()
+	render()
+end
+
+local function isMouseHoldBroken(currentPosition: Vector2): boolean
+	local origin = MoveHoldMousePosition
+	if not origin then
+		MoveHoldMousePosition = currentPosition
+		return false
+	end
+	return (currentPosition - origin).Magnitude > MOUSE_MOVE_RELEASE_THRESHOLD
+end
+
+function ObjectPreview.Init()
+	local order, indexOf = rotationOrder()
+
+	PreviewContext.RotateLeft.Pressed:Connect(function()
+		local i = indexOf[CurrentFacing] or 1
+		i = i % 4 + 1
+		updateFacing(order[i])
+	end)
+
+	PreviewContext.RotateRight.Pressed:Connect(function()
+		local i = indexOf[CurrentFacing] or 1
+		i = (i - 2) % 4 + 1
+		updateFacing(order[i])
+	end)
+
+	PreviewContext.CancelPreview.Pressed:Connect(function()
+		ObjectPreview.ClearPreview()
+	end)
+
+	UserInputService.InputEnded:Connect(function(input: InputObject)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+			return
+		end
+		if not FloorPreview.IsDragInProgress() then
+			return
+		end
+
+		local summary = FloorPreview.GetSelectionSummary()
+		resetFloorState()
+		if not summary or not summary.ItemId then
+			return
+		end
+
+		local handler = FloorPreview.GetPlacementHandler()
+		if handler and summary.CanPlace then
+			handler(summary)
+		end
+	end)
+end
+
+local function buildRaycastParams(surface: BasePart, container: Instance?): RaycastParams
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	if container then
+		params.FilterDescendantsInstances = { surface, container }
+	else
+		params.FilterDescendantsInstances = { surface }
+	end
+	params.IgnoreWater = true
+	return params
+end
+
+local function ensureFloorPreviewPrepared(kind: PreviewKind, model: Model, baseWidth: number, baseDepth: number)
+	if kind == "Floor" then
+		FloorPreview.Prepare(model, baseWidth, baseDepth)
+	else
+		resetFloorState()
+	end
+end
+
+local function renderFloorPreview(
+	model: Model,
+	grid: any,
+	surface: BasePart,
+	chunkSize: number,
+	cellX: number,
+	cellZ: number,
+	placed,
+	ignorePlacement: PlacementUtils.MoveOriginInfo?,
+	itemId: string?
+)
+	local result = FloorPreview.Update({
+		model = model,
+		grid = grid,
+		surface = surface,
+		chunkSize = chunkSize,
+		cellX = cellX,
+		cellZ = cellZ,
+		itemId = itemId,
+		placed = placed,
+		ignorePlacement = ignorePlacement,
+		isChunkUnlocked = PlotStateStore.IsChunkUnlocked,
+	}) :: FloorUpdateResult?
+	if result then
+		PreviewHighlight.FillColor = result.fillColor
+		PreviewHighlight.OutlineColor = result.outlineColor
+	end
+end
+
+local function previewWall(model: Model, grid: any, cellX: number, cellZ: number, facing: PreviewFacing, lift: number)
+	Renderer.PreviewWall(model, grid, cellX, cellZ, facing, lift)
+end
+
+local function previewRoof(
+	model: Model,
+	grid: any,
+	surface: BasePart,
+	cellX: number,
+	cellZ: number,
+	facing: PreviewFacing,
+	spec: any?
+)
+	local height = spec and spec.HeightStuds or 12
+	Renderer.PreviewRoof(model, grid, surface, cellX, cellZ, facing, height)
+end
+
+local function previewCellObject(
+	model: Model,
+	grid: any,
+	surface: BasePart,
+	cellX: number,
+	cellZ: number,
+	facing: PreviewFacing,
+	widthCells: number,
+	depthCells: number,
+	lift: number
+)
+	Renderer.PreviewCellObject(
+		model,
+		grid,
+		surface,
+		cellX,
+		cellZ,
+		facing,
+		widthCells,
+		depthCells,
+		lift,
+		CurrentPivotRotation
+	)
+end
+
+local function updateHighlightForResult(canPlace: boolean)
+	PreviewHighlight.FillColor = if canPlace then PLACEABLE_FILL else BLOCKED_FILL
+	PreviewHighlight.OutlineColor = if canPlace then PLACEABLE_OUTLINE else BLOCKED_OUTLINE
+end
+
+local function findWallModel(hit: Instance?): Model?
+	if not hit then
+		return nil
+	end
+
+	local ancestor = hit:FindFirstAncestorWhichIsA("Model")
+	while ancestor do
+		local itemIdAttr = ancestor:GetAttribute("ItemId")
+		if typeof(itemIdAttr) == "string" and itemIdAttr ~= "" then
+			local spec = ItemFinder.FindItemById(itemIdAttr)
+			if spec and (spec.PlacementType or spec.Type or "CellObject") == "Wall" then
+				return ancestor
+			end
+		end
+
+		local parent = ancestor.Parent
+		if not parent then
+			break
+		end
+		ancestor = parent:FindFirstAncestorWhichIsA("Model")
+	end
+
+	return nil
+end
+
+local function extractWallPose(model: Model?): (number?, number?, PreviewFacing?)
+	if not model then
+		return nil, nil, nil
+	end
+
+	local cellXAttr = model:GetAttribute("CellX")
+	local cellZAttr = model:GetAttribute("CellZ")
+	local facingAttr = model:GetAttribute("Facing")
+
+	local cellX = if typeof(cellXAttr) == "number" then cellXAttr else nil
+	local cellZ = if typeof(cellZAttr) == "number" then cellZAttr else nil
+	local facing = nil
+	if typeof(facingAttr) == "string" and facingAttr ~= "" then
+		local normalized = PlacementKey.NormalizeFacing(facingAttr :: any)
+		facing = normalized :: any
+	end
+
+	return cellX, cellZ, facing
+end
+
+function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacing?)
+	ObjectPreview.ClearPreview()
+
+	local sourceModel = ItemFinder.ResolveItemModel(itemId)
+	if not sourceModel then
+		warn("Item model not found for ID: " .. itemId)
+		return
+	end
+
+	CurrentItemSpec = ItemFinder.FindItemById(itemId)
+
+	if not PlotStateStore.IsReady() then
+		warn("PlotStateStore is not ready.")
+		return
+	end
+
+	local grid = PlotStateStore.GetGrid()
+	local surface = PlotStateStore.GetSurface()
+
+	if not grid or not surface then
+		warn("Plot grid or surface not available.")
+		return
+	end
+
+	local plotParent = surface.Parent
+	if not plotParent or not plotParent:IsA("Model") then
+		warn("Plot surface parent is missing or not a Model.")
+		return
+	end
+
+	local plotModel = plotParent :: Model
+	local containerFolder = plotModel:FindFirstChild("Container") :: Folder?
+	if not containerFolder then
+		warn("Plot container not found for preview.")
+		return
+	end
+
+	local itemModel = sourceModel:Clone()
+	CurrentPivotRotation = Renderer.GetPivotRotation(itemModel)
+	local lift = computeLift(CurrentItemSpec, itemModel, surface)
+	local chunkSize = PlotStateStore.GetStateSnapshot().ChunkInfo.ChunkSizeInCells
+
+	PreviewHighlight.Adornee = itemModel
+	itemModel.Parent = containerFolder
+	SelectedItem = itemModel
+
+	objectPreviewEnabled.Value = true
+	PreviewContext.CancelPreview.Enabled = true
+
+	applyModelPhysicsOverrides(itemModel)
+
+	local raycastParams = buildRaycastParams(surface, containerFolder)
+
+	CurrentFacing = initialFacing or "North"
+
+	local derivedPreviewKind = PlacementUtils.PreviewKindFromItem(itemId)
+	local previewKind: PreviewKind
+	if
+		derivedPreviewKind == "CellObject"
+		or derivedPreviewKind == "Floor"
+		or derivedPreviewKind == "Wall"
+		or derivedPreviewKind == "Roof"
+	then
+		previewKind = derivedPreviewKind
+	else
+		previewKind = "CellObject"
+	end
+	local baseWidthCells, baseDepthCells = PlacementUtils.GetItemFootprintCells(itemId)
+
+	CurrentItemId = itemId
+	CurrentKind = previewKind
+
+	ensureFloorPreviewPrepared(previewKind, itemModel, baseWidthCells, baseDepthCells)
+
+	PreviewContext.RotateLeft.Enabled = (previewKind ~= "Floor")
+	PreviewContext.RotateRight.Enabled = (previewKind ~= "Floor")
+
+	Connection = RunService.PreRender:Connect(function()
+		local model = SelectedItem
+		if not model then
+			return
+		end
+
+		local mouse = UserInputService:GetMouseLocation()
+		if MoveHoldActive then
+			if isMouseHoldBroken(mouse) then
+				MoveHoldActive = false
+				MoveHoldMousePosition = nil
+			end
+		else
+			MoveHoldMousePosition = nil
+		end
+
+		local ray = Camera:ViewportPointToRay(mouse.X, mouse.Y)
+		local result = Workspace:Raycast(ray.Origin, ray.Direction * 2048, raycastParams)
+		if not result then
+			return
+		end
+
+		local isInside, computedCellX, computedCellZ = grid:WorldPointToCell(result.Position)
+		local cellX: number
+		local cellZ: number
+		if isInside then
+			cellX = computedCellX
+			cellZ = computedCellZ
+		else
+			cellX, cellZ = grid:WorldPointToClampedCell(result.Position)
+		end
+
+		local resolvedFacing: PreviewFacing = CurrentFacing
+		local itemSpec = CurrentItemSpec
+		local requiresExistingWall = itemSpec
+			and (itemSpec.PlacementType or itemSpec.Type) == "Wall"
+			and itemSpec.RequiresExistingWall == true
+
+		if requiresExistingWall then
+			local wallModel = findWallModel(result.Instance)
+			if wallModel then
+				local wallCellX, wallCellZ, wallFacing = extractWallPose(wallModel)
+				if wallCellX and wallCellZ and wallFacing then
+					cellX = wallCellX
+					cellZ = wallCellZ
+					resolvedFacing = wallFacing
+				end
+			end
+		end
+
+		if MoveHoldActive and MoveOriginSignature then
+			cellX = MoveOriginSignature.CellX
+			cellZ = MoveOriginSignature.CellZ
+			if typeof(MoveOriginSignature.Facing) == "string" and MoveOriginSignature.Facing ~= "" then
+				resolvedFacing = MoveOriginSignature.Facing
+			end
+		end
+
+		resolvedFacing = PlacementKey.NormalizeFacing(resolvedFacing :: any)
+		if isSamePlacementPose(cellX, cellZ, resolvedFacing) then
+			return
+		end
+
+		updateLastPose(cellX, cellZ, resolvedFacing)
+		CurrentFacing = resolvedFacing
+
+		local snapshot = PlotStateStore.GetStateSnapshot()
+		local placed = snapshot.PlacedItems
+		local ignorePlacement = computeIgnorePlacement()
+
+		if previewKind == "Floor" then
+			renderFloorPreview(model, grid, surface, chunkSize, cellX, cellZ, placed, ignorePlacement, CurrentItemId)
+			return
+		end
+
+		withMarkerPool(function()
+			local previewFacing = CurrentFacing
+			local isUnlocked = PlacementUtils.IsFootprintUnlockedWithChecker(
+				grid,
+				chunkSize,
+				cellX,
+				cellZ,
+				baseWidthCells,
+				baseDepthCells,
+				previewFacing,
+				PlotStateStore.IsChunkUnlocked
+			)
+			local blocked = false
+			if previewKind == "CellObject" then
+				blocked = PlacementUtils.IsCellOccupiedForPreview(
+					grid,
+					"CellObject",
+					cellX,
+					cellZ,
+					baseWidthCells,
+					baseDepthCells,
+					previewFacing,
+					placed,
+					ignorePlacement
+				)
+			elseif previewKind == "Roof" then
+				blocked = PlacementUtils.IsCellOccupiedForPreview(
+					grid,
+					"Roof",
+					cellX,
+					cellZ,
+					baseWidthCells,
+					baseDepthCells,
+					previewFacing,
+					placed,
+					ignorePlacement
+				)
+			end
+			local wallEdgeOccupant: string? = nil
+
+			if previewKind == "Wall" or previewKind == "CellObject" then
+				WallConstraints.Populate(grid, placed, ignorePlacement)
+			end
+
+			if previewKind == "Wall" then
+				wallEdgeOccupant = WallConstraints.GetEdgeOccupant(cellX, cellZ, previewFacing)
+				if wallEdgeOccupant == WallConstraints.EdgeKind.Interior then
+					blocked = true
+				end
+
+				local spec = CurrentItemSpec
+				if spec and spec.RequiresExistingWall then
+					local placementKey = PlacementKey.ForPlacementType(cellX, cellZ, previewFacing :: any, "Wall")
+					local occupant = placed and placed[placementKey]
+					if not occupant then
+						blocked = true
+					else
+						local occupantMatchesOrigin = false
+						if ignorePlacement then
+							local sameId = occupant.id == ignorePlacement.ItemId
+							local sameCell = occupant.cellX == ignorePlacement.CellX
+								and occupant.cellZ == ignorePlacement.CellZ
+							local sameFacing = PlacementKey.NormalizeFacing(occupant.facing) == ignorePlacement.Facing
+							occupantMatchesOrigin = sameId and sameCell and sameFacing
+						end
+
+						if not occupantMatchesOrigin then
+							local occupantCheckId = occupant.id
+							local occupantSpec = occupantCheckId and ItemFinder.FindItemById(occupantCheckId) or nil
+							if occupantSpec and occupantSpec.RequiresExistingWall == true then
+								local previousId = occupant.Metadata and occupant.Metadata.PreviousId
+								if typeof(previousId) == "string" and previousId ~= "" then
+									occupantCheckId = previousId
+									occupantSpec = ItemFinder.FindItemById(previousId)
+								end
+							end
+
+							local canReplace = occupantSpec ~= nil and occupantSpec.PlacementType == "Wall"
+							if canReplace and spec.ReplaceableWallTag then
+								canReplace = ItemFinder.HasTag(occupantCheckId, spec.ReplaceableWallTag)
+							end
+							if not canReplace then
+								blocked = true
+							end
+						end
+					end
+				elseif wallEdgeOccupant == WallConstraints.EdgeKind.Wall then
+					blocked = true
+				end
+			end
+
+			if previewKind == "CellObject" then
+				local minCellX, minCellZ, maxCellX, maxCellZ =
+					grid:FootprintBounds(cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
+				if WallConstraints.HasInteriorEdgeBetweenCells(minCellX, minCellZ, maxCellX, maxCellZ) then
+					blocked = true
+				end
+			end
+
+			local missingFloorSupport = false
+			if previewKind == "Roof" then
+				local spec = CurrentItemSpec
+				local requiresFloor = spec ~= nil
+					and spec.Rules ~= nil
+					and spec.Rules.RequiresFloorUnderAllCells == true
+				if requiresFloor then
+					PlacementUtils.PopulateCellMapForType(grid, placed, "Floor", FloorSupportMap, ignorePlacement)
+					local cells =
+						grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
+					for _, index in cells do
+						if not FloorSupportMap[index] then
+							missingFloorSupport = true
+							break
+						end
+					end
+				end
+			end
+
+			local canPlace = isUnlocked and not blocked and not missingFloorSupport
+
+			if previewKind == "Wall" then
+				previewWall(model, grid, cellX, cellZ, previewFacing, lift)
+			elseif previewKind == "Roof" then
+				previewRoof(model, grid, surface, cellX, cellZ, previewFacing, CurrentItemSpec)
+			else
+				previewCellObject(
+					model,
+					grid,
+					surface,
+					cellX,
+					cellZ,
+					previewFacing,
+					baseWidthCells,
+					baseDepthCells,
+					lift
+				)
+			end
+
+			updateHighlightForResult(canPlace)
+
+			local cells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, previewFacing)
+			MarkerPool.RenderFootprintMarkers(grid, surface, cells, canPlace, previewKind)
+		end)
+	end)
+end
+
+function ObjectPreview.ClearPreview()
+	PreviewContext.RotateLeft.Enabled = false
+	PreviewContext.RotateRight.Enabled = false
+	PreviewContext.CancelPreview.Enabled = false
+	objectPreviewEnabled.Value = false
+	MarkerPool.Clear()
+	resetFloorState()
+
+	if SelectedItem then
+		PreviewHighlight.Adornee = nil
+		SelectedItem:Destroy()
+		SelectedItem = nil
+	end
+
+	if Connection then
+		Connection:Disconnect()
+		Connection = nil
+	end
+
+	LastCellX = nil
+	LastCellZ = nil
+	LastFacing = nil
+	CurrentItemId = nil
+	CurrentItemSpec = nil
+	CurrentPivotRotation = CFrame.identity
+	MoveOriginSignature = nil
+	MoveHoldActive = false
+	MoveHoldMousePosition = nil
+end
+
+function ObjectPreview.GetCurrentPose(): PreviewPose?
+	if not CurrentItemId or not LastCellX or not LastCellZ then
+		return nil
+	end
+
+	return {
+		ItemId = CurrentItemId,
+		CellX = LastCellX,
+		CellZ = LastCellZ,
+		Facing = CurrentFacing,
+		Kind = CurrentKind,
+	}
+end
+
+function ObjectPreview.SetFloorPlacementHandler(handler: ((FloorSelectionInfo) -> ())?)
+	FloorPreview.SetPlacementHandler(handler)
+end
+
+function ObjectPreview.TryBeginFloorDrag(): boolean
+	if CurrentKind ~= "Floor" then
+		return false
+	end
+	if FloorPreview.IsDragInProgress() then
+		return true
+	end
+	if not CurrentItemId or not LastCellX or not LastCellZ then
+		return false
+	end
+	if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+		return false
+	end
+	return FloorPreview.TryBeginDrag(CurrentKind, CurrentItemId, LastCellX, LastCellZ, true)
+end
+
+function ObjectPreview.IsFloorDragInProgress(): boolean
+	return FloorPreview.IsDragInProgress()
+end
+
+function ObjectPreview.GetFloorSelectionSummary(): FloorSelectionInfo?
+	return FloorPreview.GetSelectionSummary()
+end
+
+function ObjectPreview.SetMoveOrigin(originInfo: {
+	ItemId: string?,
+	CellX: number?,
+	CellZ: number?,
+	Facing: PreviewFacing?,
+}?)
+	if not originInfo then
+		MoveOriginSignature = nil
+		MoveHoldActive = false
+		MoveHoldMousePosition = nil
+		return
+	end
+
+	local itemId = originInfo.ItemId
+	local cellX = originInfo.CellX
+	local cellZ = originInfo.CellZ
+	if not itemId or cellX == nil or cellZ == nil then
+		MoveOriginSignature = nil
+		return
+	end
+
+	local entry = {
+		id = itemId,
+		cellX = cellX,
+		cellZ = cellZ,
+		facing = originInfo.Facing,
+	}
+
+	local _, placementType, _, _, resolvedFacing = PlacementUtils.ResolvePlacementEntry(entry)
+
+	MoveOriginSignature = {
+		ItemId = itemId,
+		CellX = cellX,
+		CellZ = cellZ,
+		Facing = tostring(PlacementKey.NormalizeFacing(resolvedFacing :: any)),
+		PlacementType = placementType,
+	}
+
+	MoveHoldActive = true
+	MoveHoldMousePosition = UserInputService:GetMouseLocation()
+end
+
+return ObjectPreview

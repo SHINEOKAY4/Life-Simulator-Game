@@ -183,6 +183,15 @@ export type PlotState = {
 		depthCells: number,
 		facing: Facing
 	) -> (),
+	SetFootprintInteriorEdgesFree: (
+		self: PlotState,
+		anchorX: number,
+		anchorZ: number,
+		widthCells: number,
+		depthCells: number,
+		facing: Facing,
+		isFree: boolean
+	) -> (),
 	Place: (
 		self: PlotState,
 		objectId: string,
@@ -316,12 +325,18 @@ function PlotState:HydrateFromSave()
 		assert(spec, ("Unknown catalog item '%s'"):format(savedObject.id))
 		local placementType = spec.PlacementType
 		local facing = savedObject.facing or "North"
+ 		local metadata = savedObject.Metadata
+		local metaWidth = metadata and metadata.WidthCells or metadata and metadata.widthCells
+		local metaDepth = metadata and metadata.DepthCells or metadata and metadata.depthCells
+		local widthFallback = spec.WidthCells or spec.Width or 1
+		local depthFallback = spec.DepthCells or spec.Depth or 1
+		local resolvedWidth = metaWidth or widthFallback
+		local resolvedDepth = metaDepth or depthFallback
 
 		if placementType == "Floor" then
-			local width = spec.WidthCells
-			local depth = spec.DepthCells
 			local floorFacing: Facing = "North"
-			local indices = self.Grid:FootprintCells(savedObject.cellX, savedObject.cellZ, width, depth, floorFacing)
+			local indices =
+				self.Grid:FootprintCells(savedObject.cellX, savedObject.cellZ, resolvedWidth, resolvedDepth, floorFacing)
 			for j = 1, #indices do
 				self.FloorFilled[indices[j]] = true
 			end
@@ -333,18 +348,26 @@ function PlotState:HydrateFromSave()
 				self.EdgeFreeVertical[self:VerticalEdgeIndex(edgeX, edgeZ)] = false
 			end
 		elseif placementType == "Roof" then
-			local width = spec.WidthCells
-			local depth = spec.DepthCells
-			local indices = self.Grid:FootprintCells(savedObject.cellX, savedObject.cellZ, width, depth, facing)
+			local indices =
+				self.Grid:FootprintCells(savedObject.cellX, savedObject.cellZ, resolvedWidth, resolvedDepth, facing)
 			for j = 1, #indices do
 				self.RoofFilled[indices[j]] = true
 			end
 		else
-			local width = spec.WidthCells
-			local depth = spec.DepthCells
-			local cellIndices = self.Grid:FootprintCells(savedObject.cellX, savedObject.cellZ, width, depth, facing)
+			local cellIndices =
+				self.Grid:FootprintCells(savedObject.cellX, savedObject.cellZ, resolvedWidth, resolvedDepth, facing)
 			for j = 1, #cellIndices do
 				self.CellFree[cellIndices[j]] = false
+			end
+			if self.SetFootprintInteriorEdgesFree then
+				self:SetFootprintInteriorEdgesFree(
+					savedObject.cellX,
+					savedObject.cellZ,
+					resolvedWidth,
+					resolvedDepth,
+					facing,
+					false
+				)
 			end
 		end
 	end
