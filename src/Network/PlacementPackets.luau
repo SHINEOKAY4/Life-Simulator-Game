@@ -47,6 +47,16 @@ PlacementPackets.PlaceFloorAreaRequest = Packet("PlaceFloorAreaRequest", {
 	DepthCells = Packet.NumberU16,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
+PlacementPackets.PlaceWallStripRequest = Packet("PlaceWallStripRequest", {
+	ItemId = Packet.String,
+	Facing = Packet.String,
+	Orientation = Packet.String,
+	StartCellX = Packet.NumberU16,
+	StartCellZ = Packet.NumberU16,
+	EndCellX = Packet.NumberU16,
+	EndCellZ = Packet.NumberU16,
+}):Response(Packet.Boolean8, Packet.StringLong)
+
 PlacementPackets.PlacementDelta = Packet("PlacementDelta", {
 	Action = Packet.String,
 	Item = {

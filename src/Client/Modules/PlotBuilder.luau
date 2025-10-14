@@ -22,6 +22,7 @@ local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEn
 local ObjectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled")
 
 type Facing = ObjectPreview.Facing
+type WallStripSelectionInfo = ObjectPreview.WallStripSelectionInfo
 local PlotBuilder = {}
 
 function PlotBuilder.Init()
@@ -33,6 +34,10 @@ function PlotBuilder.Init()
 
 	ObjectPreview.SetFloorPlacementHandler(function(selection)
 		PlotBuilder.PlaceFloorSelection(selection)
+	end)
+
+	ObjectPreview.SetWallStripPlacementHandler(function(selection)
+		PlotBuilder.PlaceWallStrip(selection)
 	end)
 
 	ObjectSelectorEnabled.Changed:Connect(function()
@@ -66,6 +71,9 @@ function PlotBuilder.Init()
 
 	BuildContext.PlacePreview.Pressed:Connect(function()
 		if ObjectPreview.TryBeginFloorDrag() then
+			return
+		end
+		if ObjectPreview.TryBeginWallStripDrag() then
 			return
 		end
 		PlotBuilder.PlaceSelectedPreview()
@@ -121,6 +129,15 @@ function PlotBuilder.PlaceSelectedPreview()
 		end
 		PlotBuilder.PlaceFloorSelection(floorSelection)
 		return
+	elseif pose.Kind == "Wall" then
+		if ObjectPreview.IsWallStripDragInProgress() then
+			return
+		end
+		local wallSelection = ObjectPreview.GetWallStripSelectionSummary()
+		if wallSelection and wallSelection.CanPlace then
+			PlotBuilder.PlaceWallStrip(wallSelection)
+			return
+		end
 	end
 
 	local success, message = Packets.PlaceRequest:Fire({
@@ -188,6 +205,65 @@ function PlotBuilder.PlaceFloorSelection(selection: any)
 		EndCellZ = endZ,
 		WidthCells = widthCells,
 		DepthCells = depthCells,
+	})
+
+	if not success then
+		warn("Placement failed: " .. message)
+	end
+end
+
+function PlotBuilder.PlaceWallStrip(selection: WallStripSelectionInfo)
+	if typeof(selection) ~= "table" then
+		return
+	end
+
+	local itemId = selection.ItemId
+	if typeof(itemId) ~= "string" or itemId == "" then
+		return
+	end
+
+	if selection.CanPlace ~= true then
+		return
+	end
+
+	local startCellX = selection.StartCellX
+	local endCellX = selection.EndCellX
+	local startCellZ = selection.StartCellZ
+	local endCellZ = selection.EndCellZ
+	local facing = selection.Facing
+	local orientation = selection.Orientation
+
+	if typeof(startCellX) ~= "number" or typeof(endCellX) ~= "number" then
+		return
+	end
+	if typeof(startCellZ) ~= "number" or typeof(endCellZ) ~= "number" then
+		return
+	end
+	if typeof(facing) ~= "string" or facing == "" then
+		return
+	end
+	if orientation ~= "Horizontal" and orientation ~= "Vertical" then
+		return
+	end
+
+	if orientation == "Horizontal" then
+		if startCellZ ~= endCellZ then
+			return
+		end
+	else
+		if startCellX ~= endCellX then
+			return
+		end
+	end
+
+	local success, message = Packets.PlaceWallStripRequest:Fire({
+		ItemId = itemId,
+		Facing = facing,
+		Orientation = orientation,
+		StartCellX = startCellX,
+		StartCellZ = startCellZ,
+		EndCellX = endCellX,
+		EndCellZ = endCellZ,
 	})
 
 	if not success then

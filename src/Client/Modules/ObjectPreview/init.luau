@@ -13,6 +13,7 @@ local PlotStateStore = require(script.Parent.Parent:WaitForChild("ClientStores")
 local MarkerPool = require(script:WaitForChild("MarkerPool"))
 local PlacementUtils = require(script:WaitForChild("PlacementUtils"))
 local FloorPreview = require(script:WaitForChild("FloorPreview"))
+local WallStripPreview = require(script:WaitForChild("WallStripPreview"))
 local WallConstraints = require(script:WaitForChild("WallConstraints"))
 local Renderer = require(script:WaitForChild("Renderer"))
 
@@ -29,6 +30,7 @@ export type PreviewPose = {
 }
 export type FloorSelectionInfo = FloorPreview.FloorSelectionInfo
 type FloorUpdateResult = FloorPreview.FloorUpdateResult
+export type WallStripSelectionInfo = WallStripPreview.WallStripSelectionInfo
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -62,6 +64,7 @@ local MoveHoldMousePosition: Vector2? = nil
 local MOUSE_MOVE_RELEASE_THRESHOLD = 2
 
 local FloorSupportMap: { [number]: boolean } = {}
+local WallStripPlacementHandler: ((WallStripSelectionInfo) -> ())? = nil
 
 local PLACEABLE_FILL = Color3.fromRGB(159, 234, 159)
 local PLACEABLE_OUTLINE = Color3.fromRGB(137, 255, 119)
@@ -136,6 +139,41 @@ local function isMouseHoldBroken(currentPosition: Vector2): boolean
 	return (currentPosition - origin).Magnitude > MOUSE_MOVE_RELEASE_THRESHOLD
 end
 
+local function createWallPreviewModel(sourceModel: Model, cellSize: number): Model
+	local previewModel = Instance.new("Model")
+	previewModel.Name = sourceModel.Name .. "_Preview"
+
+	local primary = sourceModel.PrimaryPart or sourceModel:FindFirstChildWhichIsA("BasePart")
+	local extents = sourceModel:GetExtentsSize()
+
+	local baseHeight = if extents.Y > 0 then extents.Y else cellSize
+	local baseThicknessEstimate = math.min(math.max(extents.X, 0.01), math.max(extents.Z, 0.01))
+	if baseThicknessEstimate <= 0.01 then
+		baseThicknessEstimate = math.max(cellSize * 0.15, 0.5)
+	end
+
+	local part = Instance.new("Part")
+	part.Name = "WallPreviewPart"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Material = if primary then primary.Material else Enum.Material.Plastic
+	part.Color = if primary then primary.Color else Color3.fromRGB(255, 255, 255)
+	part.Transparency = if primary then primary.Transparency else 0
+	part.Size = Vector3.new(cellSize, baseHeight, baseThicknessEstimate)
+	part.Parent = previewModel
+
+	part:SetAttribute("PreviewLengthAxis", "X")
+	part:SetAttribute("PreviewBaseHeight", baseHeight)
+	part:SetAttribute("PreviewBaseThickness", baseThicknessEstimate)
+	part:SetAttribute("PreviewBaseLength", cellSize)
+
+	previewModel.PrimaryPart = part
+	return previewModel
+end
+
 function ObjectPreview.Init()
 	local order, indexOf = rotationOrder()
 
@@ -157,6 +195,18 @@ function ObjectPreview.Init()
 
 	UserInputService.InputEnded:Connect(function(input: InputObject)
 		if input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+			return
+		end
+		if WallStripPreview.IsDragInProgress() then
+			local summary = WallStripPreview.GetSelectionSummary()
+			if not summary then
+				summary = WallStripPreview.GetFallbackSummary()
+			end
+			local handler = WallStripPlacementHandler
+			WallStripPreview.Clear()
+			if summary and handler and summary.CanPlace then
+				handler(summary)
+			end
 			return
 		end
 		if not FloorPreview.IsDragInProgress() then
@@ -225,8 +275,16 @@ local function renderFloorPreview(
 	end
 end
 
-local function previewWall(model: Model, grid: any, cellX: number, cellZ: number, facing: PreviewFacing, lift: number)
-	Renderer.PreviewWall(model, grid, cellX, cellZ, facing, lift)
+local function previewWall(
+	model: Model,
+	grid: any,
+	cellX: number,
+	cellZ: number,
+	facing: PreviewFacing,
+	lift: number,
+	span: WallStripSelectionInfo?
+)
+	Renderer.PreviewWall(model, grid, cellX, cellZ, facing, lift, span)
 end
 
 local function previewRoof(
@@ -354,7 +412,14 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 		return
 	end
 
-	local itemModel = sourceModel:Clone()
+	local derivedPreviewKind = PlacementUtils.PreviewKindFromItem(itemId)
+	local itemModel: Model
+	if derivedPreviewKind == "Wall" then
+		itemModel = createWallPreviewModel(sourceModel, grid.CellSize)
+	else
+		itemModel = sourceModel:Clone()
+	end
+
 	CurrentPivotRotation = Renderer.GetPivotRotation(itemModel)
 	local lift = computeLift(CurrentItemSpec, itemModel, surface)
 	local chunkSize = PlotStateStore.GetStateSnapshot().ChunkInfo.ChunkSizeInCells
@@ -372,27 +437,26 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 
 	CurrentFacing = initialFacing or "North"
 
-	local derivedPreviewKind = PlacementUtils.PreviewKindFromItem(itemId)
-	local previewKind: PreviewKind
+	local resolvedPreviewKind: PreviewKind
 	if
 		derivedPreviewKind == "CellObject"
 		or derivedPreviewKind == "Floor"
 		or derivedPreviewKind == "Wall"
 		or derivedPreviewKind == "Roof"
 	then
-		previewKind = derivedPreviewKind
+		resolvedPreviewKind = derivedPreviewKind
 	else
-		previewKind = "CellObject"
+		resolvedPreviewKind = "CellObject"
 	end
 	local baseWidthCells, baseDepthCells = PlacementUtils.GetItemFootprintCells(itemId)
 
 	CurrentItemId = itemId
-	CurrentKind = previewKind
+	CurrentKind = resolvedPreviewKind
 
-	ensureFloorPreviewPrepared(previewKind, itemModel, baseWidthCells, baseDepthCells)
+	ensureFloorPreviewPrepared(resolvedPreviewKind, itemModel, baseWidthCells, baseDepthCells)
 
-	PreviewContext.RotateLeft.Enabled = (previewKind ~= "Floor")
-	PreviewContext.RotateRight.Enabled = (previewKind ~= "Floor")
+	PreviewContext.RotateLeft.Enabled = (resolvedPreviewKind ~= "Floor")
+	PreviewContext.RotateRight.Enabled = (resolvedPreviewKind ~= "Floor")
 
 	Connection = RunService.PreRender:Connect(function()
 		local model = SelectedItem
@@ -464,7 +528,7 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 		local placed = snapshot.PlacedItems
 		local ignorePlacement = computeIgnorePlacement()
 
-		if previewKind == "Floor" then
+		if resolvedPreviewKind == "Floor" then
 			renderFloorPreview(model, grid, surface, chunkSize, cellX, cellZ, placed, ignorePlacement, CurrentItemId)
 			return
 		end
@@ -482,7 +546,7 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 				PlotStateStore.IsChunkUnlocked
 			)
 			local blocked = false
-			if previewKind == "CellObject" then
+			if resolvedPreviewKind == "CellObject" then
 				blocked = PlacementUtils.IsCellOccupiedForPreview(
 					grid,
 					"CellObject",
@@ -494,7 +558,7 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 					placed,
 					ignorePlacement
 				)
-			elseif previewKind == "Roof" then
+			elseif resolvedPreviewKind == "Roof" then
 				blocked = PlacementUtils.IsCellOccupiedForPreview(
 					grid,
 					"Roof",
@@ -509,11 +573,45 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 			end
 			local wallEdgeOccupant: string? = nil
 
-			if previewKind == "Wall" or previewKind == "CellObject" then
+			if resolvedPreviewKind == "Wall" or resolvedPreviewKind == "CellObject" then
 				WallConstraints.Populate(grid, placed, ignorePlacement)
 			end
 
-			if previewKind == "Wall" then
+			if resolvedPreviewKind == "Wall" and WallStripPreview.IsDragInProgress() then
+				local stripResult = WallStripPreview.Update({
+					grid = grid,
+					chunkSize = chunkSize,
+					placed = placed,
+					itemId = CurrentItemId,
+					spec = CurrentItemSpec,
+					currentCellX = cellX,
+					currentCellZ = cellZ,
+					facing = previewFacing,
+					isChunkUnlocked = PlotStateStore.IsChunkUnlocked,
+				})
+				if stripResult then
+					updateHighlightForResult(stripResult.canPlace)
+					local highlightCells = stripResult.highlightCells
+					MarkerPool.RenderFootprintMarkers(grid, surface, highlightCells, stripResult.canPlace, "Wall")
+					local summary = stripResult.summary
+					if summary then
+						previewWall(
+							model,
+							grid,
+							summary.AnchorCellX,
+							summary.AnchorCellZ,
+							summary.Facing,
+							lift,
+							summary
+						)
+					else
+						previewWall(model, grid, cellX, cellZ, previewFacing, lift)
+					end
+					return
+				end
+			end
+
+			if resolvedPreviewKind == "Wall" then
 				wallEdgeOccupant = WallConstraints.GetEdgeOccupant(cellX, cellZ, previewFacing)
 				if wallEdgeOccupant == WallConstraints.EdgeKind.Interior then
 					blocked = true
@@ -560,7 +658,7 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 				end
 			end
 
-			if previewKind == "CellObject" then
+			if resolvedPreviewKind == "CellObject" then
 				local minCellX, minCellZ, maxCellX, maxCellZ =
 					grid:FootprintBounds(cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
 				if WallConstraints.HasInteriorEdgeBetweenCells(minCellX, minCellZ, maxCellX, maxCellZ) then
@@ -569,7 +667,7 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 			end
 
 			local missingFloorSupport = false
-			if previewKind == "Roof" then
+			if resolvedPreviewKind == "Roof" then
 				local spec = CurrentItemSpec
 				local requiresFloor = spec ~= nil
 					and spec.Rules ~= nil
@@ -589,9 +687,9 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 
 			local canPlace = isUnlocked and not blocked and not missingFloorSupport
 
-			if previewKind == "Wall" then
+			if resolvedPreviewKind == "Wall" then
 				previewWall(model, grid, cellX, cellZ, previewFacing, lift)
-			elseif previewKind == "Roof" then
+			elseif resolvedPreviewKind == "Roof" then
 				previewRoof(model, grid, surface, cellX, cellZ, previewFacing, CurrentItemSpec)
 			else
 				previewCellObject(
@@ -610,7 +708,7 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 			updateHighlightForResult(canPlace)
 
 			local cells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, previewFacing)
-			MarkerPool.RenderFootprintMarkers(grid, surface, cells, canPlace, previewKind)
+			MarkerPool.RenderFootprintMarkers(grid, surface, cells, canPlace, resolvedPreviewKind)
 		end)
 	end)
 end
@@ -622,6 +720,7 @@ function ObjectPreview.ClearPreview()
 	objectPreviewEnabled.Value = false
 	MarkerPool.Clear()
 	resetFloorState()
+	WallStripPreview.Clear()
 
 	if SelectedItem then
 		PreviewHighlight.Adornee = nil
@@ -663,6 +762,10 @@ function ObjectPreview.SetFloorPlacementHandler(handler: ((FloorSelectionInfo) -
 	FloorPreview.SetPlacementHandler(handler)
 end
 
+function ObjectPreview.SetWallStripPlacementHandler(handler: ((WallStripSelectionInfo) -> ())?)
+	WallStripPlacementHandler = handler
+end
+
 function ObjectPreview.TryBeginFloorDrag(): boolean
 	if CurrentKind ~= "Floor" then
 		return false
@@ -685,6 +788,45 @@ end
 
 function ObjectPreview.GetFloorSelectionSummary(): FloorSelectionInfo?
 	return FloorPreview.GetSelectionSummary()
+end
+
+function ObjectPreview.TryBeginWallStripDrag(): boolean
+	if CurrentKind ~= "Wall" then
+		return false
+	end
+	if WallStripPreview.IsDragInProgress() then
+		return true
+	end
+	if not CurrentItemId or not CurrentItemSpec then
+		return false
+	end
+	if CurrentItemSpec.RequiresExistingWall == true then
+		return false
+	end
+	if not LastCellX or not LastCellZ then
+		return false
+	end
+	local isPressed = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+	if not isPressed then
+		return false
+	end
+
+	return WallStripPreview.TryBeginDrag({
+		itemId = CurrentItemId,
+		anchorCellX = LastCellX,
+		anchorCellZ = LastCellZ,
+		facing = CurrentFacing,
+		spec = CurrentItemSpec,
+		isMousePressed = isPressed,
+	})
+end
+
+function ObjectPreview.IsWallStripDragInProgress(): boolean
+	return WallStripPreview.IsDragInProgress()
+end
+
+function ObjectPreview.GetWallStripSelectionSummary(): WallStripSelectionInfo?
+	return WallStripPreview.GetSelectionSummary()
 end
 
 function ObjectPreview.SetMoveOrigin(originInfo: {
