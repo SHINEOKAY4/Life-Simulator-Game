@@ -20,6 +20,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ActionQueue = require(ServerScriptService.Server.Classes.ActionQueue)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
+local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 
 -- This is not set in stone (figuring out how things will play out in this module)
 local function _WaitOnSignalWithTimeout<A...>(signal, timeoutSeconds: number?): (boolean, A...)
@@ -70,12 +71,32 @@ end
 local ResidentState = {}
 ResidentState.__index = ResidentState
 
+local function hydrateNeeds(save: ResidentData)
+	local needs = save.Needs
+	if typeof(needs) ~= "table" then
+		needs = {}
+		save.Needs = needs
+	end
+
+	for needName, definition in pairs(NeedConfig.Needs) do
+		local value = needs[needName]
+		if typeof(value) ~= "number" then
+			needs[needName] = definition.Max
+		else
+			needs[needName] = math.clamp(value, definition.Min, definition.Max)
+		end
+	end
+
+	return needs
+end
+
 function ResidentState.new(save: ResidentData)
 	local AssetsFolder = ReplicatedStorage.Assets
 	local ResidentsTemplateFolder = AssetsFolder.Residents
 	local self = setmetatable({}, ResidentState)
 
 	self.Save = save
+	local needs = hydrateNeeds(self.Save)
 	self.ActionContext = {
 		Resident = self,
 		CancelToken = {
@@ -91,6 +112,7 @@ function ResidentState.new(save: ResidentData)
 	self.AutoActionsEnabled = true -- Whether the resident can perform auto actions
 	self.AutoJobEnabled = true -- Whether the resident can perform auto job actions
 	self.CurrentOverride = nil
+	self.NeedDecayPauseCount = 0
 	self.DestinationChanged = GoodSignal.new()
 	self.DestinationCompleted = GoodSignal.new()
 	self.ActionChanged = GoodSignal.new()
@@ -99,6 +121,9 @@ function ResidentState.new(save: ResidentData)
 	self.ActiveMoodlets = {} :: { [string]: MoodletRuntime }
 	self.Model = ResidentsTemplateFolder:FindFirstChild(self.Save.Gender):Clone() :: Model
 	self.Model.Name = self.Save.Name
+	for needName, value in pairs(needs) do
+		self.Model:SetAttribute(needName, value)
+	end
 	self.Connections = self:BindConnections()
 	return self
 end
@@ -215,6 +240,7 @@ function ResidentState:SetNeed(needName: string, value: number)
 	if value == old then
 		return
 	end
+	self.Model:SetAttribute(needName, value)
 	self.Save.Needs[needName] = value
 	self.NeedsChanged:Fire(needName, value, old)
 end
@@ -293,6 +319,25 @@ end
 function ResidentState:EnableAutomation()
 	self:SetAutoActionEnabled(true)
 	self:SetAutoJobEnabled(true)
+end
+
+function ResidentState:PushNeedDecayPause()
+	if not self.NeedDecayPauseCount then
+		self.NeedDecayPauseCount = 0
+	end
+	self.NeedDecayPauseCount += 1
+end
+
+function ResidentState:PopNeedDecayPause()
+	if not self.NeedDecayPauseCount then
+		self.NeedDecayPauseCount = 0
+		return
+	end
+	self.NeedDecayPauseCount = math.max(0, self.NeedDecayPauseCount - 1)
+end
+
+function ResidentState:IsNeedDecayPaused(): boolean
+	return (self.NeedDecayPauseCount or 0) > 0
 end
 
 function ResidentState:Destroy()

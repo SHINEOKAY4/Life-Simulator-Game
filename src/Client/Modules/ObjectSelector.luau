@@ -32,15 +32,16 @@ local function ClearSelection()
 end
 
 local function OnWorldClick()
+	if ObjectPreviewEnabled.Value then -- if object preview is active, ignore selection input
+		return
+	end
+
 	local plotModel = PlotStateStore.GetPlotModel()
 	if not plotModel then
 		warn("No plot model found.")
 		return
 	end
 
-	if ObjectPreviewEnabled.Value then -- if object preview is active, ignore selection input
-		return
-	end
 	local containerFolder = plotModel:FindFirstChild("Container") :: Folder
 
 	local unitRay = Player:GetMouse().UnitRay
@@ -50,7 +51,7 @@ local function OnWorldClick()
 	raycastParams.FilterDescendantsInstances = { containerFolder }
 	raycastParams.IgnoreWater = true
 
-	local raycastResult = Workspace:Raycast(unitRay.Origin, unitRay.Direction * 40, raycastParams)
+	local raycastResult = Workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, raycastParams)
 
 	if raycastResult and raycastResult.Instance then
 		local hitPart = raycastResult.Instance

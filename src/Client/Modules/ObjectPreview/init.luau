@@ -65,15 +65,19 @@ local MOUSE_MOVE_RELEASE_THRESHOLD = 2
 
 local FloorSupportMap: { [number]: boolean } = {}
 local WallStripPlacementHandler: ((WallStripSelectionInfo) -> ())? = nil
+local LastPrimaryMouseDown = false
 
 local PLACEABLE_FILL = Color3.fromRGB(159, 234, 159)
 local PLACEABLE_OUTLINE = Color3.fromRGB(137, 255, 119)
 local BLOCKED_FILL = Color3.fromRGB(219, 136, 136)
 local BLOCKED_OUTLINE = Color3.fromRGB(255, 85, 85)
 
-local function resetFloorState()
+local function resetFloorState(shouldReleasePreviewPart: boolean?)
 	FloorPreview.Clear()
-	FloorPreview.ReleasePreviewPart()
+	if shouldReleasePreviewPart then
+		FloorPreview.ReleasePreviewPart()
+	end
+	LastPrimaryMouseDown = false
 end
 
 local function computeIgnorePlacement(): MoveOriginInfo?
@@ -139,41 +143,6 @@ local function isMouseHoldBroken(currentPosition: Vector2): boolean
 	return (currentPosition - origin).Magnitude > MOUSE_MOVE_RELEASE_THRESHOLD
 end
 
-local function createWallPreviewModel(sourceModel: Model, cellSize: number): Model
-	local previewModel = Instance.new("Model")
-	previewModel.Name = sourceModel.Name .. "_Preview"
-
-	local primary = sourceModel.PrimaryPart or sourceModel:FindFirstChildWhichIsA("BasePart")
-	local extents = sourceModel:GetExtentsSize()
-
-	local baseHeight = if extents.Y > 0 then extents.Y else cellSize
-	local baseThicknessEstimate = math.min(math.max(extents.X, 0.01), math.max(extents.Z, 0.01))
-	if baseThicknessEstimate <= 0.01 then
-		baseThicknessEstimate = math.max(cellSize * 0.15, 0.5)
-	end
-
-	local part = Instance.new("Part")
-	part.Name = "WallPreviewPart"
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanTouch = false
-	part.CanQuery = false
-	part.CastShadow = false
-	part.Material = if primary then primary.Material else Enum.Material.Plastic
-	part.Color = if primary then primary.Color else Color3.fromRGB(255, 255, 255)
-	part.Transparency = if primary then primary.Transparency else 0
-	part.Size = Vector3.new(cellSize, baseHeight, baseThicknessEstimate)
-	part.Parent = previewModel
-
-	part:SetAttribute("PreviewLengthAxis", "X")
-	part:SetAttribute("PreviewBaseHeight", baseHeight)
-	part:SetAttribute("PreviewBaseThickness", baseThicknessEstimate)
-	part:SetAttribute("PreviewBaseLength", cellSize)
-
-	previewModel.PrimaryPart = part
-	return previewModel
-end
-
 function ObjectPreview.Init()
 	local order, indexOf = rotationOrder()
 
@@ -197,6 +166,7 @@ function ObjectPreview.Init()
 		if input.UserInputType ~= Enum.UserInputType.MouseButton1 then
 			return
 		end
+		LastPrimaryMouseDown = false
 		if WallStripPreview.IsDragInProgress() then
 			local summary = WallStripPreview.GetSelectionSummary()
 			if not summary then
@@ -242,7 +212,7 @@ local function ensureFloorPreviewPrepared(kind: PreviewKind, model: Model, baseW
 	if kind == "Floor" then
 		FloorPreview.Prepare(model, baseWidth, baseDepth)
 	else
-		resetFloorState()
+		resetFloorState(true)
 	end
 end
 
@@ -413,11 +383,12 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 	end
 
 	local derivedPreviewKind = PlacementUtils.PreviewKindFromItem(itemId)
-	local itemModel: Model
+
+	local itemModel: Model = sourceModel:Clone()
 	if derivedPreviewKind == "Wall" then
-		itemModel = createWallPreviewModel(sourceModel, grid.CellSize)
-	else
-		itemModel = sourceModel:Clone()
+		if itemModel:GetAttribute("PreviewApplyWallScaling") == nil then
+			itemModel:SetAttribute("PreviewApplyWallScaling", true)
+		end
 	end
 
 	CurrentPivotRotation = Renderer.GetPivotRotation(itemModel)
@@ -517,6 +488,14 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 		end
 
 		resolvedFacing = PlacementKey.NormalizeFacing(resolvedFacing :: any)
+		local isMouseDown = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+		if CurrentKind == "Floor" and CurrentItemId then
+			if isMouseDown and not LastPrimaryMouseDown then
+				FloorPreview.TryBeginDrag(CurrentKind, CurrentItemId, cellX, cellZ, true)
+			end
+		end
+		LastPrimaryMouseDown = isMouseDown
+
 		if isSamePlacementPose(cellX, cellZ, resolvedFacing) then
 			return
 		end
@@ -719,7 +698,7 @@ function ObjectPreview.ClearPreview()
 	PreviewContext.CancelPreview.Enabled = false
 	objectPreviewEnabled.Value = false
 	MarkerPool.Clear()
-	resetFloorState()
+	resetFloorState(true)
 	WallStripPreview.Clear()
 
 	if SelectedItem then
@@ -742,6 +721,7 @@ function ObjectPreview.ClearPreview()
 	MoveOriginSignature = nil
 	MoveHoldActive = false
 	MoveHoldMousePosition = nil
+	LastPrimaryMouseDown = false
 end
 
 function ObjectPreview.GetCurrentPose(): PreviewPose?
@@ -834,6 +814,8 @@ function ObjectPreview.SetMoveOrigin(originInfo: {
 	CellX: number?,
 	CellZ: number?,
 	Facing: PreviewFacing?,
+	WidthCells: number?,
+	DepthCells: number?,
 }?)
 	if not originInfo then
 		MoveOriginSignature = nil
@@ -850,14 +832,31 @@ function ObjectPreview.SetMoveOrigin(originInfo: {
 		return
 	end
 
+	local widthCells = originInfo.WidthCells
+	local depthCells = originInfo.DepthCells
+	if typeof(widthCells) ~= "number" then
+		widthCells = tonumber(widthCells)
+	end
+	if typeof(depthCells) ~= "number" then
+		depthCells = tonumber(depthCells)
+	end
+
 	local entry = {
 		id = itemId,
 		cellX = cellX,
 		cellZ = cellZ,
 		facing = originInfo.Facing,
 	}
+	if typeof(widthCells) == "number" and widthCells > 0 then
+		entry.widthCells = widthCells
+		entry.WidthCells = widthCells
+	end
+	if typeof(depthCells) == "number" and depthCells > 0 then
+		entry.depthCells = depthCells
+		entry.DepthCells = depthCells
+	end
 
-	local _, placementType, _, _, resolvedFacing = PlacementUtils.ResolvePlacementEntry(entry)
+	local _, placementType, resolvedWidth, resolvedDepth, resolvedFacing = PlacementUtils.ResolvePlacementEntry(entry)
 
 	MoveOriginSignature = {
 		ItemId = itemId,
@@ -865,6 +864,8 @@ function ObjectPreview.SetMoveOrigin(originInfo: {
 		CellZ = cellZ,
 		Facing = tostring(PlacementKey.NormalizeFacing(resolvedFacing :: any)),
 		PlacementType = placementType,
+		WidthCells = if typeof(widthCells) == "number" and widthCells > 0 then widthCells else resolvedWidth,
+		DepthCells = if typeof(depthCells) == "number" and depthCells > 0 then depthCells else resolvedDepth,
 	}
 
 	MoveHoldActive = true

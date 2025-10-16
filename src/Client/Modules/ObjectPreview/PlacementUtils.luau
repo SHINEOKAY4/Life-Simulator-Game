@@ -13,6 +13,8 @@ export type MoveOriginInfo = {
 	CellZ: number,
 	Facing: Facing,
 	PlacementType: string,
+	WidthCells: number?,
+	DepthCells: number?,
 }
 
 local PlacementUtils = {}

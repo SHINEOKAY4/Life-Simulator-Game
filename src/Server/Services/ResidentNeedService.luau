@@ -116,6 +116,14 @@ function ResidentNeedService.Stop()
 end
 
 function ResidentNeedService.Decay(resident: ResidentState, gameHours: number)
+	if gameHours <= 0 then
+		return
+	end
+	if resident and typeof(resident.IsNeedDecayPaused) == "function" then
+		if resident:IsNeedDecayPaused() then
+			return
+		end
+	end
 	for needName, definition in pairs(NeedConfig.Needs) do
 		local value = resident:GetNeed(needName)
 		local traits = if resident.GetTraits then resident:GetTraits() else nil

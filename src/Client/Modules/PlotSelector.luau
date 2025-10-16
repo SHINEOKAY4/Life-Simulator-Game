@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 
+--local CameraModule = require(script.Parent.Camera)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 
@@ -145,6 +146,7 @@ function PlotSelector.Select()
 
 	SetPlayerMovement(true)
 	--#TODO: Toast notification for success
+	--CameraModule.EnableTopDownCamera()
 	print("Successfully claimed plot: " .. message)
 end
 

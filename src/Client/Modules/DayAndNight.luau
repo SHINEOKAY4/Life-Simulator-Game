@@ -45,7 +45,7 @@ Lighting.EnvironmentSpecularScale = 0.35
 Lighting.GeographicLatitude = 12
 
 local ColorCorrection = ensureEffect("ColorCorrectionEffect", Lighting) :: ColorCorrectionEffect
-local Bloom = ensureEffect("BloomEffect", Lighting) :: BloomEffect
+--local Bloom = ensureEffect("BloomEffect", Lighting) :: BloomEffect
 local DepthOfField = ensureEffect("DepthOfFieldEffect", Lighting) :: DepthOfFieldEffect
 local SunRays = ensureEffect("SunRaysEffect", Lighting) :: SunRaysEffect
 local Atmosphere = ensureEffect("Atmosphere", Lighting) :: Atmosphere
@@ -64,9 +64,9 @@ DepthOfField.FarIntensity = 0.35
 
 -- Static effect knobs (do not change every frame)
 ColorCorrection.Enabled = true
-Bloom.Enabled = true
-Bloom.Threshold = 0.8
-Bloom.Size = 24
+--Bloom.Enabled = true
+--Bloom.Threshold = 0.8
+--Bloom.Size = 24
 SunRays.Enabled = true
 SunRays.Spread = 0.15
 Atmosphere.Offset = 0.05
@@ -237,7 +237,7 @@ local function applyBlend(lower: Keyframe, upper: Keyframe, alpha: number)
 	setIfChanged(ColorCorrection, "Saturation", lerpNumber(lower.ccSaturation, upper.ccSaturation, alpha))
 	setIfChanged(ColorCorrection, "TintColor", lerpColor(lower.ccTint, upper.ccTint, alpha))
 
-	setIfChanged(Bloom, "Intensity", lerpNumber(lower.bloomIntensity, upper.bloomIntensity, alpha))
+	--setIfChanged(Bloom, "Intensity", lerpNumber(lower.bloomIntensity, upper.bloomIntensity, alpha))
 	setIfChanged(SunRays, "Intensity", lerpNumber(lower.sunRaysIntensity, upper.sunRaysIntensity, alpha))
 
 	setIfChanged(Atmosphere, "Density", lerpNumber(lower.atmoDensity, upper.atmoDensity, alpha))

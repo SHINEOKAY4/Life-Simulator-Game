@@ -48,8 +48,8 @@ end
 Players.PlayerAdded:Connect(OnPlayerAdded)
 Players.PlayerRemoving:Connect(OnPlayerRemoving)
 
-local ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
+local _ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
 
-ResidentDebug.SetChannelEnabled("Movement", true)
-ResidentDebug.SetChannelEnabled("Action", true)
-ResidentDebug.SetChannelEnabled("Effects", true)
+--_ResidentDebug.SetChannelEnabled("Movement", true)
+--_ResidentDebug.SetChannelEnabled("Action", true)
+--_ResidentDebug.SetChannelEnabled("Effects", true)

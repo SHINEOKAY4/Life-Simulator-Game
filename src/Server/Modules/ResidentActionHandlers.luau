@@ -698,6 +698,7 @@ local function executeStationAction(stationType: string, context: HandlerContext
 		StationName = stationName,
 		NeedName = assignment.NeedName,
 		ActionName = actionLabel,
+		Player = assignment.Player,
 	})
 	if arrival and behavior.UseSeat then
 		ResidentMovement.LeaveSeat(assignment.ResidentState, arrival.Seat)

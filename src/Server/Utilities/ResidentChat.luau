@@ -26,6 +26,7 @@ export type InterruptContext = {
 	ActionName: string?,
 	NeedName: string?,
 	PartnerName: string?,
+	Player: Player?,
 }
 
 local MoodletPhrases: { [string]: string } = {

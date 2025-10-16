@@ -105,8 +105,10 @@ function Renderer.PreviewWall(
 )
 	local rootPart: BasePart? = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
 	local span = computeWallSpan(spanInfo, cellX, cellZ)
+	local scalingAttribute = model:GetAttribute("PreviewApplyWallScaling")
+	local shouldApplyScaling = if scalingAttribute == nil then true else scalingAttribute == true
 
-	if rootPart then
+	if shouldApplyScaling and rootPart then
 		applyWallPreviewScaling(rootPart, grid.CellSize, span)
 	end
 

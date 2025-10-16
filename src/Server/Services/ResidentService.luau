@@ -156,6 +156,12 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 		Gender = residentData.Gender or "Unknown",
 		Traits = residentData.Traits or { "Balanced" },
 		Occupation = "Unemployed",
+		Statistics = {
+			Intelligence = 1,
+			Charisma = 1,
+			Creativity = 1,
+			Fitness = 1,
+		},
 		Needs = {
 			Hunger = 100,
 			Energy = 100,

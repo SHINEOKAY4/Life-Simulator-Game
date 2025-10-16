@@ -1,0 +1,166 @@
+--!strict
+
+local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PlotService = require(ServerScriptService.Server.Services.PlotService)
+local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
+local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local Helpers = require(ServerScriptService.Server.Services.BuildService.Helpers)
+
+type Facing = "North" | "East" | "South" | "West"
+
+type Payload = {
+	ItemId: string,
+	Facing: string,
+	Orientation: string,
+	StartCellX: number,
+	StartCellZ: number,
+	EndCellX: number,
+	EndCellZ: number,
+}
+
+type PlannedSegment = { cellX: number, cellZ: number }
+
+local function PlaceWallStrip(player: Player, payload: Payload): (boolean, string)
+	local state = PlotService.GetState(player)
+	if not state then
+		return false, "No plot runtime state"
+	end
+
+	if type(payload) ~= "table" then
+		return false, "Invalid payload"
+	end
+
+	local grid = state.Grid
+
+	local itemId = payload.ItemId
+	local spec = itemId and ItemFinder.FindItemById(itemId)
+	if not spec then
+		return false, "Invalid item ID"
+	end
+
+	local placementType = spec.PlacementType or spec.Type or "CellObject"
+	if placementType ~= "Wall" then
+		return false, "Item is not a wall"
+	end
+
+	if spec.RequiresExistingWall == true then
+		return false, "Cannot drag replace-only wall segments"
+	end
+
+	local facingString = payload.Facing
+	if facingString ~= "North" and facingString ~= "South" and facingString ~= "East" and facingString ~= "West" then
+		return false, "Invalid facing"
+	end
+	local facing: Facing = facingString :: Facing
+
+	local orientation = payload.Orientation
+	if orientation ~= "Horizontal" and orientation ~= "Vertical" then
+		return false, "Invalid wall strip orientation"
+	end
+
+	if orientation == "Horizontal" then
+		if facing ~= "North" and facing ~= "South" then
+			return false, "Horizontal strips require North or South facing"
+		end
+	else
+		if facing ~= "East" and facing ~= "West" then
+			return false, "Vertical strips require East or West facing"
+		end
+	end
+
+	local startCellXValue = tonumber(payload.StartCellX)
+	local startCellZValue = tonumber(payload.StartCellZ)
+	local endCellXValue = tonumber(payload.EndCellX)
+	local endCellZValue = tonumber(payload.EndCellZ)
+	if not startCellXValue or not startCellZValue or not endCellXValue or not endCellZValue then
+		return false, "Invalid wall strip coordinates"
+	end
+
+	local startCellX = math.floor(startCellXValue)
+	local startCellZ = math.floor(startCellZValue)
+	local endCellX = math.floor(endCellXValue)
+	local endCellZ = math.floor(endCellZValue)
+
+	if startCellX < 1 or startCellX > grid.Columns or endCellX < 1 or endCellX > grid.Columns then
+		return false, "Strip outside plot bounds"
+	end
+	if startCellZ < 1 or startCellZ > grid.Rows or endCellZ < 1 or endCellZ > grid.Rows then
+		return false, "Strip outside plot bounds"
+	end
+
+	local requiresFloorOnBothSides = spec.RequiresFloorOnBothSides == true
+	local plannedSegments: { PlannedSegment } = {}
+
+	if orientation == "Horizontal" then
+		if startCellZ ~= endCellZ then
+			return false, "Horizontal strips must stay on a single row"
+		end
+
+		local minX = math.min(startCellX, endCellX)
+		local maxX = math.max(startCellX, endCellX)
+		local cellZ = startCellZ
+
+		if minX < 1 or maxX > grid.Columns then
+			return false, "Strip outside plot bounds"
+		end
+
+		local count = maxX - minX + 1
+		plannedSegments = table.create(count) :: { PlannedSegment }
+		for cellX = minX, maxX do
+			if not state:CanPlaceWall(cellX, cellZ, facing, requiresFloorOnBothSides) then
+				return false, ("Wall blocked at (%d, %d)"):format(cellX, cellZ)
+			end
+
+			local key = state:PlacementKeyForType(cellX, cellZ, facing, "Wall")
+			if state.Save.PlacedObjects[key] then
+				return false, "A wall already occupies part of that strip"
+			end
+
+			plannedSegments[#plannedSegments + 1] = { cellX = cellX, cellZ = cellZ }
+		end
+	else
+		if startCellX ~= endCellX then
+			return false, "Vertical strips must stay on a single column"
+		end
+
+		local minZ = math.min(startCellZ, endCellZ)
+		local maxZ = math.max(startCellZ, endCellZ)
+		local cellX = startCellX
+
+		if minZ < 1 or maxZ > grid.Rows then
+			return false, "Strip outside plot bounds"
+		end
+
+		local count = maxZ - minZ + 1
+		plannedSegments = table.create(count) :: { PlannedSegment }
+
+		for cellZ = minZ, maxZ do
+			if not state:CanPlaceWall(cellX, cellZ, facing, requiresFloorOnBothSides) then
+				return false, ("Wall blocked at (%d, %d)"):format(cellX, cellZ)
+			end
+
+			local key = state:PlacementKeyForType(cellX, cellZ, facing, "Wall")
+			if state.Save.PlacedObjects[key] then
+				return false, "A wall already occupies part of that strip"
+			end
+
+			plannedSegments[#plannedSegments + 1] = { cellX = cellX, cellZ = cellZ }
+		end
+	end
+
+	for _, segment in plannedSegments do
+		local placed = state:PlaceWall(itemId, segment.cellX, segment.cellZ, 1, 1, facing, requiresFloorOnBothSides)
+		if not placed then
+			return false, "Failed to place wall strip"
+		end
+
+		WorldPlacer.Spawn(player, grid, itemId, segment.cellX, segment.cellZ, facing)
+		Helpers.sendPlacementDelta(player, "Placed", itemId, segment.cellX, segment.cellZ, facing, nil)
+	end
+
+	return true, "Wall strip placed"
+end
+
+return PlaceWallStrip

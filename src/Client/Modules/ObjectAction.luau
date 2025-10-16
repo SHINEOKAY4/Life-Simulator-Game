@@ -275,12 +275,16 @@ function ObjectAction.Move(object: Model, newPosition: Vector3)
 
 	local cellXAttr = tonumber(object:GetAttribute("CellX"))
 	local cellZAttr = tonumber(object:GetAttribute("CellZ"))
+	local widthAttr = tonumber(object:GetAttribute("WidthCells"))
+	local depthAttr = tonumber(object:GetAttribute("DepthCells"))
 	if cellXAttr ~= nil and cellZAttr ~= nil then
 		ObjectPreview.SetMoveOrigin({
 			ItemId = itemId,
 			CellX = cellXAttr,
 			CellZ = cellZAttr,
 			Facing = initialFacing,
+			WidthCells = widthAttr,
+			DepthCells = depthAttr,
 		})
 	else
 		ObjectPreview.SetMoveOrigin(nil)

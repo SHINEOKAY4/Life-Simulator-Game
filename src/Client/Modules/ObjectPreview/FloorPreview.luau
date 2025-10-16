@@ -187,9 +187,23 @@ function FloorPreview.Update(args: FloorUpdateArgs): FloorUpdateResult?
 
 	local anchorX = anchorCellX or args.cellX
 	local anchorZ = anchorCellZ or args.cellZ
+	local targetCellX = args.cellX
+	local targetCellZ = args.cellZ
+
+	local ignorePlacement = args.ignorePlacement
+	if ignorePlacement and ignorePlacement.PlacementType == "Floor" then
+		local moveWidth = ignorePlacement.WidthCells
+		local moveDepth = ignorePlacement.DepthCells
+		if typeof(moveWidth) == "number" and moveWidth > 0 and typeof(moveDepth) == "number" and moveDepth > 0 then
+			anchorX = args.cellX
+			anchorZ = args.cellZ
+			targetCellX = anchorX + moveWidth - 1
+			targetCellZ = anchorZ + moveDepth - 1
+		end
+	end
 
 	local indices, minCellX, minCellZ, maxCellX, maxCellZ, cellCount =
-		computeSelectionCells(args.grid, anchorX, anchorZ, args.cellX, args.cellZ)
+		computeSelectionCells(args.grid, anchorX, anchorZ, targetCellX, targetCellZ)
 	local selectionWidthCells = maxCellX - minCellX + 1
 	local selectionDepthCells = maxCellZ - minCellZ + 1
 
@@ -206,7 +220,7 @@ function FloorPreview.Update(args: FloorUpdateArgs): FloorUpdateResult?
 
 	local areaUnlocked =
 		isSelectionUnlocked(args.grid, args.chunkSize, minCellX, minCellZ, maxCellX, maxCellZ, args.isChunkUnlocked)
-	PlacementUtils.PopulateCellMapForType(args.grid, args.placed, "Floor", floorCellMap, args.ignorePlacement)
+	PlacementUtils.PopulateCellMapForType(args.grid, args.placed, "Floor", floorCellMap, ignorePlacement)
 
 	local occupied = false
 	for _, index in indices do
