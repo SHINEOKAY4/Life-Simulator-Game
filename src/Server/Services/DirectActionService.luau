@@ -33,6 +33,10 @@ type StationAssignment = {
 	RestModeOverride: string?,
 }
 
+local Config = {
+	OverridePreparationTimeout = 3, -- seconds to wait for resident to become available
+}
+
 local DirectActionService = {}
 DirectActionService.OverrideStarted = GoodSignal.new()
 DirectActionService.OverrideCompleted = GoodSignal.new()
@@ -194,7 +198,7 @@ function DirectActionService.AssignStationToResident(player: Player, residentNam
 		return false, "Resident not found"
 	end
 
-	local prepared, reason = prepareResidentForOverride(residentState, 3)
+	local prepared, reason = prepareResidentForOverride(residentState, Config.OverridePreparationTimeout)
 	if not prepared then
 		return false, reason or "Unable to prepare resident for override"
 	end
