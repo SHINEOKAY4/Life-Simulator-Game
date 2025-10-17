@@ -271,5 +271,4 @@ function PlotBuilder.PlaceWallStrip(selection: WallStripSelectionInfo)
 	end
 end
 
---#TODO: More functions for rotating, selecting already placed items, deleting placed items, etc.
 return PlotBuilder

@@ -99,9 +99,8 @@ function ResidentsStore.RequestDeleteResident(residentName: string)
 	return success, message
 end
 
-return ResidentsStore
+-- TODO: Optimize needs data synchronization
+-- Consider sending needs data on-demand when UI is opened rather than constant updates
+-- This would reduce network traffic for all residents
 
---#TODO: IDEA: Server do not send the needs data constantly on drift, instead when a player opens the resident
--- managementUI, the client requests the full data for that resident only once, and then the server sends
--- then the ui for bars updates in client after request.
--- this avoids requiring server to keep sending to update the needs bars constantly for all residents
+return ResidentsStore

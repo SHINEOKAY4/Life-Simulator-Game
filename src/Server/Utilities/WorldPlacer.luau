@@ -173,7 +173,7 @@ function WorldPlacer.Despawn(player: Player, itemId: string, cellX: number, cell
 		return
 	end
 
-	--#TODO optimize: if many items, this could be slow.
+	-- TODO: Optimize lookup performance for plots with many items (consider spatial indexing)
 	for _, inst in container:GetChildren() do
 		local matchesItem = inst:GetAttribute("ItemId") == itemId
 		local matchesCellX = inst:GetAttribute("CellX") == cellX

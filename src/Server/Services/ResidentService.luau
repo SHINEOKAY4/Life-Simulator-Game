@@ -22,6 +22,10 @@ ResidentService.PlayerResidentsChanged = GoodSignal.new()
 
 local Config = {
 	MaxResidentsPerHousehold = 8,
+	DefaultStatValue = 1,
+	DefaultNeedValue = 100,
+	DefaultAge = 0,
+	RemovalTimeout = 4,
 }
 
 local function ensureHouseholdState(player: Player, data: any?)
@@ -152,22 +156,22 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 
 	local newResidentData = {
 		Name = residentData.Name,
-		Age = residentData.Age or 0,
+		Age = residentData.Age or Config.DefaultAge,
 		Gender = residentData.Gender or "Unknown",
 		Traits = residentData.Traits or { "Balanced" },
 		Occupation = "Unemployed",
 		Statistics = {
-			Intelligence = 1,
-			Charisma = 1,
-			Creativity = 1,
-			Fitness = 1,
+			Intelligence = Config.DefaultStatValue,
+			Charisma = Config.DefaultStatValue,
+			Creativity = Config.DefaultStatValue,
+			Fitness = Config.DefaultStatValue,
 		},
 		Needs = {
-			Hunger = 100,
-			Energy = 100,
-			Hygiene = 100,
-			Fun = 100,
-			Social = 100,
+			Hunger = Config.DefaultNeedValue,
+			Energy = Config.DefaultNeedValue,
+			Hygiene = Config.DefaultNeedValue,
+			Fun = Config.DefaultNeedValue,
+			Social = Config.DefaultNeedValue,
 		},
 	}
 
@@ -215,7 +219,7 @@ function ResidentService.DeleteResident(player: Player, residentName: string)
 		return false, "Resident index not found."
 	end
 
-	local prepared, reason = prepareResidentForRemoval(resident, 4)
+	local prepared, reason = prepareResidentForRemoval(resident, Config.RemovalTimeout)
 	if not prepared then
 		return false, reason or "Resident is busy"
 	end
