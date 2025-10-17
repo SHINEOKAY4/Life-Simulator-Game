@@ -60,7 +60,6 @@ local function OnWorldClick()
 
 		ResidentRadialUI.Show(selectedModel)
 		NeedsInterface.Show(selectedModel)
-		print("Selected resident:", selectedModel:GetFullName())
 	else
 		ResidentRadialUI.Hide()
 		NeedsInterface.Hide()

@@ -81,11 +81,9 @@ function BillboardRadialUI.Init()
 		BillboardRadialUI.Hide()
 		ObjectAction.Close()
 		UiClickGuard() -- The order here is important to prevent input conflicts, this must be called after hiding the UI
-		print("CloseSelector action triggered")
 	end)
 
 	ObjectSelectorContext.MoveObject.Pressed:Connect(function()
-		print("MoveObject action triggered")
 		UiClickGuard()
 		if not AdorneeModel then
 			warn("No model selected for move action.")
@@ -93,11 +91,9 @@ function BillboardRadialUI.Init()
 		end
 
 		ObjectAction.Move(AdorneeModel, Vector3.new(0, 0, 0))
-		--#TODO: You can add functionality here to handle the move action
 	end)
 
 	ObjectSelectorContext.RotateObject.Pressed:Connect(function()
-		print("RotateObject action triggered")
 		UiClickGuard()
 		if not AdorneeModel then
 			warn("No model selected for rotate action.")
@@ -107,7 +103,6 @@ function BillboardRadialUI.Init()
 	end)
 
 	ObjectSelectorContext.DeleteObject.Pressed:Connect(function()
-		print("DeleteObject action triggered")
 		UiClickGuard()
 		if not AdorneeModel then
 			warn("No model selected for delete action.")
@@ -117,7 +112,6 @@ function BillboardRadialUI.Init()
 	end)
 
 	ObjectSelectorContext.CopyObject.Pressed:Connect(function()
-		print("CopyObject action triggered")
 		UiClickGuard()
 		if not AdorneeModel then
 			warn("No model selected for copy action.")

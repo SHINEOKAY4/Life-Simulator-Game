@@ -78,7 +78,6 @@ function PlotExpansion.Init()
 	end)
 
 	PlotContext.ToggleClickPurchase.Pressed:Connect(function()
-		print("ToggleClickPurchase pressed")
 		local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 		local plotModel = PlotFinder.FindPlot(plotIndex)
 		local coversFolder = plotModel and plotModel:FindFirstChild("Covers") :: Folder
@@ -96,12 +95,7 @@ function PlotExpansion.Init()
 		if hitCover == _HoveredCover then
 			local chunkX = hitCover:GetAttribute("ChunkX") :: number
 			local chunkZ = hitCover:GetAttribute("ChunkZ") :: number
-			local success, message = PlotStateStore.RequestPurchase(chunkX, chunkZ)
-			if success then
-				print("Toast notification UI implementation needed")
-			end
-			--#TODO: Toast notification for success/failure
-			print("Purchase result:", success, message)
+			PlotStateStore.RequestPurchase(chunkX, chunkZ)
 		end
 	end)
 
@@ -145,11 +139,11 @@ function PlotExpansion.Show()
 		end
 
 		local success, message = PlotStateStore.CanPurchaseChunk(chunkX, chunkZ)
-		--#TODO: Add Additional visual effects
 		_HoveredCover = hitCover
 		ChunkHighlight.Adornee = hitCover
 		PriceTag.Adornee = hitCover
-		PriceLabel.Text = if not success then message else "$" .. "400" -- #TODO: pricing logic
+		-- TODO: Implement dynamic pricing logic
+		PriceLabel.Text = if not success then message else "$400"
 		ChunkHighlight.FillColor = if success then Color3.fromRGB(0, 255, 0) else Color3.fromRGB(255, 0, 0)
 		ChunkHighlight.OutlineColor = if success then Color3.fromRGB(0, 100, 0) else Color3.fromRGB(100, 0, 0)
 	end)

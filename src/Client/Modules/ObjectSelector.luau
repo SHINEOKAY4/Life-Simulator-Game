@@ -66,12 +66,9 @@ local function OnWorldClick()
 			return
 		end
 
-		print("Selected model:", selectedModel:GetFullName())
 		SelectionHighlight.Adornee = selectedModel
-		-- then open context menu for actions (e.g., delete, move, rotate) / radial menu controller script
 		BillboardRadialUI.Show(selectedModel)
 	else
-		print("No model selected.")
 		ClearSelection()
 	end
 end
@@ -88,14 +85,7 @@ function ObjectSelector.Init()
 		end
 	end)
 
-	--ObjectPreviewEnabled.Changed:Connect(function()
-	--	if ObjectPreviewEnabled.Value and ObjectSelectorEnabled.Value then
-	--ObjectSelector.Hide()
-	--	end
-	--end)
-
 	ObjectSelectorContext.SelectObject.Pressed:Connect(function()
-		--#TODO: Add a debounce here to prevent multiple rapid clicks
 		if RadialBillboardButtonEnabled.Value then
 			return
 		end
@@ -103,7 +93,6 @@ function ObjectSelector.Init()
 	end)
 
 	ObjectSelectorContext.Toggle.Pressed:Connect(function()
-		print("Toggling Object Selector")
 		if not PlotFinder.IsWithinBounds(Player) then
 			warn("Player is not within plot bounds.")
 			return
@@ -112,10 +101,8 @@ function ObjectSelector.Init()
 		ObjectSelectorEnabled.Value = not ObjectSelectorEnabled.Value
 
 		if ObjectSelectorEnabled.Value then
-			print("Object Selector Enabled")
 			ObjectSelector.Show()
 		else
-			print("Object Selector Disabled")
 			ObjectSelector.Hide()
 		end
 	end)

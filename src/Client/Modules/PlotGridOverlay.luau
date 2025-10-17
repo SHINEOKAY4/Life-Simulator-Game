@@ -30,7 +30,6 @@ function PlotGridOverlay.Init()
 	end)
 
 	PlotContext.ToggleGridAction.Pressed:Connect(function()
-		print("PlotContext button pressed.")
 		PlotGridOverlayEnabled.Value = not PlotGridOverlayEnabled.Value
 		if PlotGridOverlayEnabled.Value then
 			PlotGridOverlay.Show()
@@ -41,11 +40,9 @@ function PlotGridOverlay.Init()
 end
 
 function PlotGridOverlay.Show()
-	print("Showing plot grid.")
 	local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
 	local GridSurface = plotModel and plotModel:FindFirstChild("GridSurface") :: BasePart
-
 	local gridVisual = GridSurface and GridSurface:FindFirstChild("GridVisual") :: Texture
 
 	if not gridVisual then
@@ -58,12 +55,9 @@ function PlotGridOverlay.Show()
 end
 
 function PlotGridOverlay.Hide()
-	print("Hiding plot grid.")
-
 	local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
 	local GridSurface = plotModel and plotModel:FindFirstChild("GridSurface") :: BasePart
-
 	local gridVisual = GridSurface and GridSurface:FindFirstChild("GridVisual") :: Texture
 
 	if not gridVisual then

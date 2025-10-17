@@ -61,7 +61,7 @@ function ResidentRadialUI.Init()
 	-- Initialize the UI elements here
 	ResidentSelectorContext.CustomizeResident.Pressed:Connect(function()
 		if ResidentRadial.Enabled then
-			--#TODO: Open customization menu
+			-- TODO: Implement customization menu
 			ResidentRadialUI.Hide()
 		end
 	end)
@@ -74,14 +74,14 @@ function ResidentRadialUI.Init()
 
 	ResidentSelectorContext.ProfileResident.Pressed:Connect(function()
 		if ResidentRadial.Enabled then
-			--#TODO: Open profile menu
+			-- TODO: Implement profile menu
 			ResidentRadialUI.Hide()
 		end
 	end)
 
 	ResidentSelectorContext.CommandResident.Pressed:Connect(function()
 		if ResidentRadial.Enabled then
-			--#TODO: Open command menu
+			-- TODO: Implement command menu
 			ResidentRadialUI.Hide()
 		end
 	end)

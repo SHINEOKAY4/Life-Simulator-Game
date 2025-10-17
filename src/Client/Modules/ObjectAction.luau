@@ -245,8 +245,6 @@ function ObjectAction.Init()
 end
 
 function ObjectAction.Move(object: Model, newPosition: Vector3)
-	print("Moving object:", object:GetFullName(), "to new position:", newPosition)
-	-- Implement movement logic here
 	-- Visual and mechanic goals: The original object gets parented to nil to sell the illusion of movement
 	-- The objectpreview of that object is now shown visually following the cursor to sell the illusion of movement
 	-- When the player clicks a position during object previewing, to place must send a move request to the server with the new position
@@ -293,7 +291,6 @@ function ObjectAction.Move(object: Model, newPosition: Vector3)
 end
 
 function ObjectAction.Rotate(object: Model, rotation: Vector3)
-	print("Rotating object:", object:GetFullName(), "to new rotation:", rotation)
 	local itemId = getObjectItemId(object)
 	if not itemId then
 		warn("Unknown item id for rotation")
@@ -354,8 +351,6 @@ function ObjectAction.Rotate(object: Model, rotation: Vector3)
 end
 
 function ObjectAction.Delete(object: Model)
-	print("Deleting object:", object:GetFullName())
-	-- Implement deletion logic here
 	local itemId = getObjectItemId(object)
 	if not itemId then
 		warn("Cannot delete object without item id")
@@ -371,8 +366,6 @@ function ObjectAction.Delete(object: Model)
 end
 
 function ObjectAction.Copy(object: Model)
-	print("Copying object:", object:GetFullName())
-	-- Implement copy logic here
 	local itemId = getObjectItemId(object)
 	if not itemId then
 		warn("Cannot copy object without item id")

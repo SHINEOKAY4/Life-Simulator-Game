@@ -114,7 +114,6 @@ local function createButtonsForCategory(category: string): { TextButton }
 		button.LayoutOrder = #buttons
 
 		button.MouseButton1Click:Connect(function()
-			print("Selected item: " .. itemModel.Name)
 			PlotBuilder.PreviewSelected(itemModel.Name)
 		end)
 
@@ -211,82 +210,66 @@ function PlotBuilderUI:Init()
 	end)
 
 	CategorySelection.Home.Pressed:Connect(function()
-		print("CategorySelection Home button pressed")
 		switchCategoryPanel("Home")
 	end)
 
 	CategorySelection.Furnitures.Pressed:Connect(function()
-		print("CategorySelection Furniture button pressed")
 		switchCategoryPanel("Furnitures")
 	end)
 
 	CategorySelection.Environment.Pressed:Connect(function()
-		print("CategorySelection Environment button pressed")
 		switchCategoryPanel("Environment")
 	end)
 
 	HomeSelection.Floors.Pressed:Connect(function()
-		print("HomeSelection Floors button pressed")
 		setActiveCategory("Floors")
 	end)
 
 	HomeSelection.Walls.Pressed:Connect(function()
-		print("HomeSelection Walls button pressed")
 		setActiveCategory("Walls")
 	end)
 
 	HomeSelection.Roofs.Pressed:Connect(function()
-		print("HomeSelection Roofs button pressed")
 		setActiveCategory("Roofs")
 	end)
 
 	HomeSelection.Decorations.Pressed:Connect(function()
-		print("HomeSelection Decorations button pressed")
 		setActiveCategory("Decorations")
 	end)
 
 	HomeSelection.Doors.Pressed:Connect(function()
-		print("HomeSelection Doors button pressed")
 		setActiveCategory("Doors")
 	end)
 
 	HomeSelection.Appliances.Pressed:Connect(function()
-		print("HomeSelection Appliances button pressed")
 		setActiveCategory("Appliances")
 	end)
 
 	FurnitureSelection.Chairs.Pressed:Connect(function()
-		print("FurnitureSelection Chairs button pressed")
 		setActiveCategory("Chairs")
 	end)
 
 	FurnitureSelection.Tables.Pressed:Connect(function()
-		print("FurnitureSelection Tables button pressed")
 		setActiveCategory("Tables")
 	end)
 
 	FurnitureSelection.Beds.Pressed:Connect(function()
-		print("FurnitureSelection Beds button pressed")
 		setActiveCategory("Beds")
 	end)
 
 	EnvironmentSelection.Outdoors.Pressed:Connect(function()
-		print("FurnitureSelection Outdoors button pressed")
 		setActiveCategory("Outdoors")
 	end)
 
 	EnvironmentSelection.Trees.Pressed:Connect(function()
-		print("EnvironmentSelection Trees button pressed")
 		setActiveCategory("Trees")
 	end)
 
 	EnvironmentSelection.Plants.Pressed:Connect(function()
-		print("EnvironmentSelection Plants button pressed")
 		setActiveCategory("Plants")
 	end)
 
 	EnvironmentSelection.Rocks.Pressed:Connect(function()
-		print("EnvironmentSelection Rocks button pressed")
 		setActiveCategory("Rocks")
 	end)
 

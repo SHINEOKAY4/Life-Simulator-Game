@@ -10,14 +10,7 @@ local NewResidentUI = {}
 
 function NewResidentUI.Init()
 	ResidentsPackets.PromptResidentCreation.OnClientEvent:Connect(function()
-		print("Received PromptResidentCreation packet from server. Opening resident creation UI...")
-		-- Here you would typically trigger your UI to open
-		-- For example:
-		-- local ResidentCreationUI = require(script.Parent.UserInterface.ResidentCreationUI)
-		-- ResidentCreationUI:Open()
-
-		-- ========== Test firing AddResidentRequest ==========
-		-- Simulate user input for testing purposes
+		-- Create default starter residents
 		local johnDoe = {
 			Name = "John Doe",
 			Gender = "Male",
@@ -27,11 +20,8 @@ function NewResidentUI.Init()
 			Gender = "Female",
 		}
 
-		local success, message = ResidentStore.RequestAddResident(johnDoe)
-		print("AddResidentRequest response:", success, message)
-
-		local success2, message2 = ResidentStore.RequestAddResident(janeDoe)
-		print("AddResidentRequest response:", success2, message2)
+		ResidentStore.RequestAddResident(johnDoe)
+		ResidentStore.RequestAddResident(janeDoe)
 	end)
 end
 
