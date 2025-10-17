@@ -26,6 +26,12 @@ ResidentsPackets.PlayerResidentDelta = Packet("PlayerResidentDelta", {
 			Gender = Packet.String,
 			Traits = { Packet.String },
 			Occupation = Packet.String,
+			Statistics = {
+				Intelligence = Packet.NumberU8,
+				Discipline = Packet.NumberU8,
+				Creativity = Packet.NumberU8,
+				Fitness = Packet.NumberU8,
+			},
 			Needs = {
 				Hunger = Packet.NumberU8,
 				Energy = Packet.NumberU8,
@@ -58,5 +64,8 @@ ResidentsPackets.PlayersResidentsSync = Packet("ResidentStateSync", {
 
 ResidentsPackets.RequestAssignStation =
 	Packet("RequestAssignStation", Packet.String, Packet.String):Response(Packet.Boolean8, Packet.StringLong)
+
+ResidentsPackets.RequestResidentMove =
+	Packet("RequestResidentMove", Packet.String, Packet.Vector3F32):Response(Packet.Boolean8, Packet.StringLong)
 
 return ResidentsPackets

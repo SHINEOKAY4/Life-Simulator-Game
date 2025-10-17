@@ -76,18 +76,6 @@ function ResidentAutonomyService.TrySatisfyNeedsForResident(
 		stationCache
 	)
 	if not decision then
-		if
-			FallbackActions.attemptGroundRest(
-				player,
-				residentName,
-				residentState,
-				evaluationClock,
-				evaluationTime,
-				stationCache
-			)
-		then
-			return true
-		end
 		local otherCriticalNeeds = Utils.hasBlockingCriticalNeed(player, residentState, "Social", stationCache)
 		if not otherCriticalNeeds then
 			if SocialCoordinator.attemptDirectSocial(player, residentName, residentState, stationCache) then

@@ -150,6 +150,12 @@ function NeedEvaluator.evaluate(
 
 				if not hasStationsPlaced then
 					tryComplainAboutMissingStation(resident, needName, value)
+					if isSurvival then
+						State.markSurvivalNeedUnavailable(resident, needName)
+						continue
+					end
+				elseif isSurvival then
+					State.clearSurvivalNeedUnavailable(resident, needName)
 				end
 
 				if not hasStationsPlaced and not isSurvival then

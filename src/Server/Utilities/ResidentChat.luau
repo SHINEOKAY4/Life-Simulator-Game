@@ -133,9 +133,9 @@ local InterruptHandlers: { [string]: (InterruptContext?) -> string? } = {
 	ManualOverride = function(context)
 		local stationLabel = resolveStationLabel(context)
 		if stationLabel then
-			return string.format("I'll pause at %s so you can take over.", stationLabel)
+			return string.format("Seriously? I'm beat—leaving %s but I need rest.", stationLabel)
 		end
-		return "Okay, handing things back to you."
+		return "I'm running on fumes here, try not to push me."
 	end,
 	DirectSocialPartnerFailed = function(context)
 		local partner = resolvePartnerName(context)

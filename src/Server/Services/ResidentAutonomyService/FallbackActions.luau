@@ -3,10 +3,7 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
-local ResidentActionHandlers = require(ServerScriptService.Server.Modules.ResidentActionHandlers)
 local ResidentMovement = require(ServerScriptService.Server.Utilities.ResidentMovement)
-local ResidentChat = require(ServerScriptService.Server.Utilities.ResidentChat)
-local NeedEffects = require(ServerScriptService.Server.Utilities.NeedEffects)
 local State = require(script.Parent.State)
 local Utils = require(script.Parent.Utils)
 local Constants = require(script.Parent.Constants)
@@ -19,7 +16,6 @@ type StationCache = { [string]: any }
 
 type Module = {
 	enqueueRoamAction: (Player, string, ResidentState) -> boolean,
-	attemptGroundRest: (Player, string, ResidentState, number?, number?, StationCache?) -> boolean,
 	evaluateResidentJob: (Player, string, ResidentState, StationCache?) -> boolean,
 }
 
@@ -125,61 +121,6 @@ function FallbackActions.enqueueRoamAction(player: Player, residentName: string,
 		local finishedAt = os.clock()
 		State.recordRoam(resident, finishedAt)
 		State.setPending(resident, nil)
-	end)
-	return true
-end
-
-function FallbackActions.attemptGroundRest(
-	player: Player,
-	residentName: string,
-	resident: ResidentState,
-	_nowClock: number?,
-	clockTime: number?,
-	stationCache: StationCache?
-): boolean
-	local needs = State.getNeeds()
-	local energyDef = needs.Energy
-	if not energyDef then
-		return false
-	end
-	local energyValue = resident:GetNeed("Energy")
-	if clockTime and not Utils.isNight(clockTime) and energyValue > energyDef.Critical then
-		return false
-	end
-	if energyValue >= energyDef.Low then
-		return false
-	end
-	local uniqueId = StationManager.findAvailableStation(player, "RestStation", residentName, stationCache)
-	if uniqueId then
-		return false
-	end
-	local behavior = ResidentActionHandlers.GetRestBehavior("Ground")
-	if not behavior then
-		return false
-	end
-	local actionName = "Auto:GroundRest"
-	State.setPending(resident, "Energy")
-	State.clearNextEvaluation(resident)
-	resident:EnqueueAction(actionName, function(context)
-		local cancelToken = context.CancelToken
-		if cancelToken.Cancelled then
-			State.setPending(resident, nil)
-			return
-		end
-		local initialLine = ResidentChat.SelectChatText(resident, behavior.ChatPhrases, nil)
-		if initialLine then
-			ResidentChat.ShowAction(resident, initialLine)
-		end
-		local succeeded = NeedEffects.Run(resident, cancelToken, behavior, {
-			StationType = "GroundRest",
-			ActionName = "rest",
-			NeedName = "Energy",
-			Player = player,
-		})
-		State.setPending(resident, nil)
-		if succeeded then
-			State.setNeedCooldown(resident, "Energy")
-		end
 	end)
 	return true
 end

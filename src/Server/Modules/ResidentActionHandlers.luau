@@ -32,6 +32,8 @@ export type HandlerAssignment = {
 
 local ResidentActionHandlers = {}
 
+type EmergencyGuard = (residentState: any, value: number, def: NeedConfig.NeedDef) -> boolean
+
 type Behavior = {
 	ApproachDistance: number?,
 	MoveTimeoutSeconds: number?,
@@ -44,6 +46,7 @@ type Behavior = {
 	ChatIntervalSeconds: number?,
 	RestProfileKey: string?,
 	EndReasonProvider: ((residentState: any) -> string?)?,
+	EmergencyGuards: { [string]: EmergencyGuard }?,
 }
 
 export type BehaviorSpec = {
@@ -58,6 +61,7 @@ export type BehaviorSpec = {
 	ChatIntervalSeconds: number?,
 	RestProfileKey: string?,
 	EndReasonProvider: ((residentState: any) -> string?)?,
+	EmergencyGuards: { [string]: EmergencyGuard }?,
 }
 
 local Needs = NeedConfig.Needs
@@ -269,9 +273,9 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 	CookStation = {
 		ApproachDistance = 3,
 		MoveTimeoutSeconds = 25,
-		DurationSeconds = 20,
+		DurationSeconds = 30,
 		Effects = {
-			{ Need = "Hunger", RatePerHour = 360 },
+			{ Need = "Hunger", RatePerHour = 90 },
 		},
 		Moodlets = {
 			{ Name = "Satisfied", DurationSeconds = 120, NeedBias = { Hunger = -0.2 } },
@@ -398,7 +402,7 @@ end
 
 local SleepTarget = computeEnergyTarget(Needs.Energy.Max, -1)
 local NapTarget = computeEnergyTarget(Needs.Energy.Low, Needs.Energy.Hysteresis + 6)
-local GroundTarget = computeEnergyTarget(Needs.Energy.Low, 4)
+local GroundTarget = nil
 
 local energyDef = Needs.Energy
 local energyLow = if energyDef then energyDef.Low else 40
@@ -507,6 +511,12 @@ local RestProfiles: { [string]: RestProfile } = {
 			},
 		} :: { any },
 	},
+}
+
+local REST_LIE_MODES: { [string]: boolean } = {
+	Sleep = true,
+	DaySleep = true,
+	Ground = true,
 }
 
 local function createRestShouldEnd(mode: string, targetEnergy: number?): ((any) -> boolean, (any) -> string?)
@@ -626,6 +636,14 @@ local function executeStationAction(stationType: string, context: HandlerContext
 			end
 		end
 	end
+	local restPoseMode: string? = nil
+	local restPoseEligible = false
+	if stationType == "RestStation" then
+		restPoseMode = behavior.RestProfileKey
+		if restPoseMode and REST_LIE_MODES[restPoseMode] and behavior.UseSeat ~= true then
+			restPoseEligible = true
+		end
+	end
 	local occupantIndex: number? = nil
 	local occupantCount: number? = nil
 	local stationRecord = assignment.StationRecord
@@ -675,8 +693,17 @@ local function executeStationAction(stationType: string, context: HandlerContext
 		})
 		return
 	end
+	local restPoseApplied = false
 	if arrival then
 		ResidentMovement.FaceStation(assignment.ResidentState, arrival.EntryCFrame)
+		if restPoseEligible then
+			restPoseApplied = ResidentMovement.ApplyRestPose(assignment.ResidentState, {
+				Mode = restPoseMode,
+				StationModel = assignment.StationModel,
+				EntryCFrame = arrival.EntryCFrame,
+				EntryAttachment = arrival.EntryAttachment,
+			})
+		end
 		if behavior.UseSeat and arrival.Seat then
 			ResidentMovement.SeatResident(assignment.ResidentState, arrival.Seat, context.CancelToken)
 		end
@@ -692,14 +719,22 @@ local function executeStationAction(stationType: string, context: HandlerContext
 		StationType = stationType,
 		Behavior = behavior,
 	})
-	NeedEffects.Run(assignment.ResidentState, context.CancelToken, behavior, {
-		StationType = stationType,
-		StationId = assignment.StationId,
-		StationName = stationName,
-		NeedName = assignment.NeedName,
-		ActionName = actionLabel,
-		Player = assignment.Player,
-	})
+	local runOk, runResult = pcall(function()
+		return NeedEffects.Run(assignment.ResidentState, context.CancelToken, behavior, {
+			StationType = stationType,
+			StationId = assignment.StationId,
+			StationName = stationName,
+			NeedName = assignment.NeedName,
+			ActionName = actionLabel,
+			Player = assignment.Player,
+		})
+	end)
+	if restPoseApplied then
+		ResidentMovement.ClearRestPose(assignment.ResidentState)
+	end
+	if not runOk then
+		error(runResult)
+	end
 	if arrival and behavior.UseSeat then
 		ResidentMovement.LeaveSeat(assignment.ResidentState, arrival.Seat)
 	end

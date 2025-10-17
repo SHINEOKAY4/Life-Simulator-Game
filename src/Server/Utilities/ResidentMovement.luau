@@ -5,10 +5,14 @@
 local PathfindingService = game:GetService("PathfindingService")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DEFAULT_TIMEOUT = 25
 local ARRIVAL_TOLERANCE = 2
 local WAYPOINT_TIMEOUT = 6
+local WALK_SPEED = 8
+local RUN_SPEED = 16
+local RUN_DISTANCE_THRESHOLD = 40
 
 export type CancelToken = { Cancelled: boolean, Reason: string? }
 
@@ -30,8 +34,52 @@ type StationArrival = {
 
 local ResidentMovement = {}
 local ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
+local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 
 local MOVEMENT_CHANNEL = "Movement"
+local restPoseState = setmetatable({}, { __mode = "k" })
+
+type RestPoseRecord = {
+	AutoRotate: boolean,
+	PlatformStand: boolean,
+	WalkSpeed: number?,
+	JumpPower: number?,
+	JumpHeight: number?,
+	UseJumpPower: boolean?,
+	RootAnchored: boolean,
+	RootOwner: Player?,
+	StandCFrame: CFrame?,
+	RootCFrame: CFrame?,
+}
+
+type RestPoseOptions = {
+	Mode: string?,
+	EntryCFrame: CFrame,
+	EntryAttachment: Attachment?,
+	StationModel: Model?,
+}
+
+local function getNumberAttribute(source: Instance?, attributeName: string): number?
+	if not source then
+		return nil
+	end
+	local value = source:GetAttribute(attributeName)
+	if typeof(value) == "number" then
+		return value
+	end
+	return nil
+end
+
+local function getVectorAttribute(source: Instance?, attributeName: string): Vector3?
+	if not source then
+		return nil
+	end
+	local value = source:GetAttribute(attributeName)
+	if typeof(value) == "Vector3" then
+		return value
+	end
+	return nil
+end
 
 local function getResidentName(residentState: any): string
 	local save = residentState and residentState.Save
@@ -85,6 +133,50 @@ end
 
 local function stopHumanoid(humanoid: Humanoid)
 	humanoid:Move(Vector3.zero)
+end
+
+local function getNeedValue(residentState: any, needName: string): number
+	if residentState and typeof(residentState.GetNeed) == "function" then
+		local ok, value = pcall(function()
+			return residentState:GetNeed(needName)
+		end)
+		if ok and typeof(value) == "number" then
+			return value
+		end
+	end
+	local config = NeedConfig.Needs[needName]
+	if config then
+		return config.Max
+	end
+	return 100
+end
+
+local function shouldRunToTarget(residentState: any, origin: Vector3, destination: Vector3): boolean
+	local distance = (origin - destination).Magnitude
+	if distance < RUN_DISTANCE_THRESHOLD then
+		return false
+	end
+	local hungerDef = NeedConfig.Needs.Hunger
+	local energyDef = NeedConfig.Needs.Energy
+	local hunger = getNeedValue(residentState, "Hunger")
+	local energy = getNeedValue(residentState, "Energy")
+	if hungerDef and hunger <= hungerDef.Critical then
+		return false
+	end
+	if energyDef and energy <= energyDef.Critical then
+		return false
+	end
+	if energyDef and energy <= energyDef.Low then
+		return false
+	end
+	return true
+end
+
+local function pickTravelSpeed(residentState: any, origin: Vector3, destination: Vector3): number
+	if shouldRunToTarget(residentState, origin, destination) then
+		return RUN_SPEED
+	end
+	return WALK_SPEED
 end
 
 local function computePathWithVariants(origin: Vector3, destination: Vector3): (Path?, { [number]: { [string]: any } })
@@ -211,6 +303,11 @@ local function moveToTarget(
 	end
 	ResidentMovement.LeaveSeat(residentState, nil)
 	local residentName = getResidentName(residentState)
+	local originalSpeed = humanoid.WalkSpeed
+	local desiredSpeed = pickTravelSpeed(residentState, root.Position, targetPosition)
+	if typeof(humanoid.WalkSpeed) == "number" and desiredSpeed ~= humanoid.WalkSpeed then
+		humanoid.WalkSpeed = desiredSpeed
+	end
 	local label = debugLabel or "Target"
 	local startClock = os.clock()
 	if residentState.SetDestination then
@@ -233,6 +330,9 @@ local function moveToTarget(
 		reached = waitForMoveFinished(humanoid, targetPosition, cancelToken, timeoutBudget)
 	end
 	stopHumanoid(humanoid)
+	if humanoid.Parent and typeof(originalSpeed) == "number" and humanoid.WalkSpeed ~= originalSpeed then
+		humanoid.WalkSpeed = originalSpeed
+	end
 	if residentState.SetDestination then
 		residentState:SetDestination(nil)
 	end
@@ -512,6 +612,216 @@ local function ensureSeat(stationModel: Model, entryCFrame: CFrame, entryAttachm
 	autoSeat.Disabled = false
 	autoSeat.CFrame = computeSeatCFrame(entryCFrame, entryAttachment)
 	return autoSeat
+end
+
+function ResidentMovement.ApplyRestPose(residentState: any, options: RestPoseOptions): boolean
+	local humanoid = getHumanoid(residentState)
+	if not humanoid then
+		return false
+	end
+	local root = getHumanoidRootPart(residentState)
+	if not root then
+		return false
+	end
+	local baseCFrame = options.EntryCFrame
+	local entryAttachment = options.EntryAttachment
+	if entryAttachment then
+		baseCFrame = entryAttachment.WorldCFrame
+	end
+	if not baseCFrame then
+		return false
+	end
+	local record = restPoseState[residentState]
+	if not record then
+		local networkOwner: Player? = nil
+		local ownerOk, owner = pcall(function()
+			return root:GetNetworkOwner()
+		end)
+		if ownerOk then
+			networkOwner = owner
+		end
+		record = {
+			AutoRotate = humanoid.AutoRotate,
+			PlatformStand = humanoid.PlatformStand,
+			WalkSpeed = if typeof(humanoid.WalkSpeed) == "number" then humanoid.WalkSpeed else nil,
+			JumpPower = if typeof(humanoid.JumpPower) == "number" then humanoid.JumpPower else nil,
+			JumpHeight = if typeof(humanoid.JumpHeight) == "number" then humanoid.JumpHeight else nil,
+			UseJumpPower = humanoid.UseJumpPower,
+			RootAnchored = root.Anchored,
+			RootOwner = networkOwner,
+			StandCFrame = baseCFrame,
+			RootCFrame = root.CFrame,
+		}
+		restPoseState[residentState] = record
+	else
+		record.StandCFrame = baseCFrame
+		record.RootCFrame = root.CFrame
+	end
+	local stationModel = options.StationModel
+	local pitch = getNumberAttribute(entryAttachment, "ResidentRestPitch")
+	if pitch == nil then
+		pitch = getNumberAttribute(stationModel, "ResidentRestPitch")
+	end
+	local yaw = getNumberAttribute(entryAttachment, "ResidentRestYaw")
+	if yaw == nil then
+		yaw = getNumberAttribute(stationModel, "ResidentRestYaw")
+	end
+	local roll = getNumberAttribute(entryAttachment, "ResidentRestRoll")
+	if roll == nil then
+		roll = getNumberAttribute(stationModel, "ResidentRestRoll")
+	end
+	local heightOffset = getNumberAttribute(entryAttachment, "ResidentRestHeight")
+	if heightOffset == nil then
+		heightOffset = getNumberAttribute(stationModel, "ResidentRestHeight")
+	end
+	local restOffset = getVectorAttribute(entryAttachment, "ResidentRestOffset")
+	if restOffset == nil then
+		restOffset = getVectorAttribute(stationModel, "ResidentRestOffset")
+	end
+	local mode = options.Mode
+	local baseLook = baseCFrame.LookVector
+	local baseUp = baseCFrame.UpVector
+	if mode == "Ground" then
+		local flattenedLook = Vector3.new(baseLook.X, 0, baseLook.Z)
+		if flattenedLook.Magnitude > 0 then
+			baseLook = flattenedLook.Unit
+		else
+			baseLook = Vector3.new(0, 0, -1)
+		end
+		baseUp = Vector3.new(0, 1, 0)
+	else
+		if baseLook.Magnitude == 0 then
+			baseLook = Vector3.new(0, 0, -1)
+		end
+		if baseUp.Magnitude == 0 then
+			baseUp = Vector3.new(0, 1, 0)
+		end
+	end
+	local defaultPitch = -90
+	if mode == "Ground" or mode == "Sleep" or mode == "DaySleep" then
+		defaultPitch = 90
+	end
+	local pitchValue: number = if pitch ~= nil then pitch else defaultPitch
+	local yawValue: number = if yaw ~= nil then yaw else 0
+	local rollValue: number = if roll ~= nil then roll else 0
+	local heightOffsetValue: number = if heightOffset ~= nil then heightOffset else 0
+	local restOffsetValue: Vector3 = if restOffset ~= nil then restOffset else Vector3.new()
+	local baseRotation = CFrame.lookAt(Vector3.new(), baseLook, baseUp)
+	local rotationAdjust = CFrame.Angles(math.rad(pitchValue), math.rad(yawValue), math.rad(rollValue))
+	local finalRotation = baseRotation * rotationAdjust
+	local baseHeight = root.Size.Y * 0.5
+	local verticalOffset = baseHeight + heightOffsetValue
+	local basePosition = baseCFrame.Position + baseCFrame.UpVector * verticalOffset
+	local finalPosition = basePosition + finalRotation:VectorToWorldSpace(restOffsetValue)
+	if mode == "Ground" then
+		-- Snap collapse poses to nearby floor so residents do not float mid-air
+		local rayParams = RaycastParams.new()
+		rayParams.FilterType = Enum.RaycastFilterType.Exclude
+		local parentModel = root.Parent
+		if parentModel then
+			rayParams.FilterDescendantsInstances = { parentModel }
+		end
+		local rayOrigin = Vector3.new(finalPosition.X, finalPosition.Y + 8, finalPosition.Z)
+		local rayDirection = Vector3.new(0, -80, 0)
+		local hit = workspace:Raycast(rayOrigin, rayDirection, rayParams)
+		if hit then
+			local verticalHalf = 0.5
+				* (
+					math.abs(finalRotation.RightVector.Y) * root.Size.X
+					+ math.abs(finalRotation.UpVector.Y) * root.Size.Y
+					+ math.abs(finalRotation.LookVector.Y) * root.Size.Z
+				)
+			local bottomY = finalPosition.Y - verticalHalf
+			finalPosition += Vector3.new(0, hit.Position.Y - bottomY, 0)
+		end
+	end
+	local finalCFrame = CFrame.new(finalPosition) * finalRotation
+	root.AssemblyLinearVelocity = Vector3.new()
+	root.AssemblyAngularVelocity = Vector3.new()
+	root.CFrame = finalCFrame
+	local _ = pcall(function()
+		root:SetNetworkOwner(nil)
+	end)
+	root.Anchored = true
+	humanoid:Move(Vector3.zero)
+	humanoid.Sit = false
+	humanoid.Jump = false
+	humanoid.AutoRotate = false
+	humanoid.PlatformStand = true
+	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+	if typeof(humanoid.WalkSpeed) == "number" then
+		humanoid.WalkSpeed = 0
+	end
+	if humanoid.UseJumpPower then
+		if typeof(humanoid.JumpPower) == "number" then
+			humanoid.JumpPower = 0
+		end
+	else
+		if typeof(humanoid.JumpHeight) == "number" then
+			humanoid.JumpHeight = 0
+		end
+	end
+	return true
+end
+
+function ResidentMovement.ClearRestPose(residentState: any): boolean
+	local record = restPoseState[residentState]
+	if not record then
+		return false
+	end
+	local humanoid = getHumanoid(residentState)
+	local root = getHumanoidRootPart(residentState)
+	if humanoid and root then
+		root.AssemblyLinearVelocity = Vector3.new()
+		root.AssemblyAngularVelocity = Vector3.new()
+		local standCFrame = record.StandCFrame
+		if standCFrame then
+			local hipHeight = if typeof(humanoid.HipHeight) == "number" then humanoid.HipHeight else 2
+			local verticalStandOffset = hipHeight + root.Size.Y * 0.5
+			local standPosition = standCFrame.Position
+			standPosition += standCFrame.LookVector * -0.75
+			standPosition += standCFrame.UpVector * verticalStandOffset
+			local lookTarget = standPosition + standCFrame.LookVector
+			root.CFrame = CFrame.new(standPosition, lookTarget)
+		end
+		root.Anchored = record.RootAnchored
+		if record.RootOwner then
+			local _ = pcall(function()
+				root:SetNetworkOwner(record.RootOwner :: Player)
+			end)
+		else
+			local _ = pcall(function()
+				root:SetNetworkOwner(nil)
+			end)
+		end
+	end
+	restPoseState[residentState] = nil
+	if humanoid then
+		humanoid.AutoRotate = record.AutoRotate
+		humanoid.PlatformStand = record.PlatformStand
+		humanoid.Sit = false
+		humanoid.Jump = false
+		humanoid:Move(Vector3.zero)
+		if record.WalkSpeed ~= nil then
+			humanoid.WalkSpeed = record.WalkSpeed
+		end
+		local useJumpPower = record.UseJumpPower
+		if useJumpPower then
+			if record.JumpPower ~= nil then
+				humanoid.JumpPower = record.JumpPower
+			end
+		else
+			if record.JumpHeight ~= nil then
+				humanoid.JumpHeight = record.JumpHeight
+			end
+		end
+		if record.PlatformStand then
+			humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+		else
+			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end
+	end
+	return true
 end
 
 function ResidentMovement.GoToStation(

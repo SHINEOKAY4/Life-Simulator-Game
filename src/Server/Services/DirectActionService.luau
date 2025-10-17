@@ -8,6 +8,7 @@ local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local ResidentMovement = require(ServerScriptService.Server.Utilities.ResidentMovement)
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
@@ -45,6 +46,17 @@ local OverrideHandlers: {
 	) -> (),
 } =
 	{}
+
+local MANUAL_MOVE_TIMEOUT_SECONDS = 25
+local COLLAPSE_RELEASE_ENERGY = 4
+
+local function isFiniteNumber(value: number): boolean
+	return value == value and value > -math.huge and value < math.huge
+end
+
+local function isFiniteVector3(value: Vector3): boolean
+	return isFiniteNumber(value.X) and isFiniteNumber(value.Y) and isFiniteNumber(value.Z)
+end
 
 function DirectActionService.GetHandler(stationType: string)
 	return OverrideHandlers[stationType]
@@ -135,6 +147,14 @@ function DirectActionService.Init()
 		local success, message = DirectActionService.AssignStationToResident(player, residentName, uniqueId)
 		return success, message
 	end
+
+	ResidentsPackets.RequestResidentMove.OnServerInvoke = function(
+		player: Player,
+		residentName: string,
+		targetPosition: Vector3
+	)
+		return DirectActionService.MoveResidentToWorldPosition(player, residentName, targetPosition)
+	end
 end
 
 function DirectActionService.AssignStationToResident(player: Player, residentName: string, uniqueId: string)
@@ -194,6 +214,14 @@ function DirectActionService.AssignStationToResident(player: Player, residentNam
 		return false, "Resident not found"
 	end
 
+	local collapseActive = typeof(residentState._EnergyCollapseRelease) == "function"
+	if collapseActive then
+		local energyValue = residentState:GetNeed("Energy")
+		if typeof(energyValue) ~= "number" or energyValue < COLLAPSE_RELEASE_ENERGY then
+			return false, "Resident is collapsed"
+		end
+	end
+
 	local prepared, reason = prepareResidentForOverride(residentState, 3)
 	if not prepared then
 		return false, reason or "Unable to prepare resident for override"
@@ -229,6 +257,68 @@ function DirectActionService.AssignStationToResident(player: Player, residentNam
 	DirectActionService.OverrideStarted:Fire(assignment)
 	enqueueOverrideAction(assignment)
 	return true, "Manual override queued"
+end
+
+function DirectActionService.MoveResidentToWorldPosition(player: Player, residentName: string, targetPosition: Vector3)
+	if type(residentName) ~= "string" or residentName == "" then
+		return false, "Invalid resident name"
+	end
+
+	if typeof(targetPosition) ~= "Vector3" or not isFiniteVector3(targetPosition) then
+		return false, "Invalid target position"
+	end
+
+	local residentState = ResidentService.GetResident(player, residentName)
+	if not residentState then
+		return false, "Resident not found"
+	end
+
+	local collapseActive = typeof(residentState._EnergyCollapseRelease) == "function"
+	if collapseActive then
+		local energyValue = residentState:GetNeed("Energy")
+		if typeof(energyValue) ~= "number" or energyValue < COLLAPSE_RELEASE_ENERGY then
+			return false, "Resident is collapsed"
+		end
+	end
+
+	local prepared, reason = prepareResidentForOverride(residentState, 3)
+	if not prepared then
+		return false, reason or "Resident is busy"
+	end
+
+	residentState:SetManualOverrideState({ Mode = "ManualMove", TargetPosition = targetPosition })
+
+	residentState:EnqueueAction("ManualOverride:Move", function(context)
+		local releaseCollapse = residentState._EnergyCollapseRelease
+		if typeof(releaseCollapse) == "function" then
+			releaseCollapse()
+		end
+		ResidentMovement.ClearRestPose(residentState)
+		local ok, result = pcall(ResidentMovement.GoToWorldPosition, residentState, targetPosition, {
+			CancelToken = context.CancelToken,
+			TimeoutSeconds = MANUAL_MOVE_TIMEOUT_SECONDS,
+			DebugName = "ManualMove",
+		})
+
+		residentState:ClearManualOverrideState()
+		residentState:EnableAutomation()
+
+		if not ok then
+			error(result)
+		end
+
+		if result then
+			return
+		end
+
+		if context.CancelToken.Cancelled then
+			error(context.CancelToken.Reason or "Movement cancelled")
+		end
+
+		error("Resident could not reach the destination")
+	end)
+
+	return true, "Movement queued"
 end
 
 return DirectActionService

@@ -4,6 +4,7 @@
 
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
@@ -20,6 +21,9 @@ type EffectDef = {
 	RatePerHour: number?,
 }
 
+type NeedDef = NeedConfig.NeedDef
+type EmergencyGuard = (residentState: any, value: number, def: NeedDef) -> boolean
+
 type Behavior = {
 	Effects: { EffectDef }?,
 	DurationSeconds: number?,
@@ -28,6 +32,7 @@ type Behavior = {
 	ChatIntervalSeconds: number?,
 	ChatPhrases: { ResidentChat.ChatOption }?,
 	EndReasonProvider: ((residentState: any) -> string?)?,
+	EmergencyGuards: { [string]: EmergencyGuard }?,
 }
 
 local NeedEffects = {}
@@ -141,7 +146,8 @@ local function evaluateEmergencyNeeds(
 	residentState: any,
 	_targetedNeeds: { [string]: boolean },
 	positiveTargets: { [string]: boolean },
-	contextPlayer: Player?
+	contextPlayer: Player?,
+	guardOverrides: { [string]: EmergencyGuard }?
 ): (boolean, string?, string?)
 	local needsDef = NeedConfig.Needs
 	local worstNeed: string? = nil
@@ -180,6 +186,18 @@ local function evaluateEmergencyNeeds(
 
 	for needName, def in pairs(needsDef) do
 		local value = sanitizeNeed(residentState, needName)
+		local guard = guardOverrides and guardOverrides[needName]
+		if guard then
+			local ok, suppress = pcall(guard, residentState, value, def)
+			if not ok then
+				ResidentDebug.Trace(EFFECT_CHANNEL, string.format("Emergency guard error: %s", tostring(guard)), {
+					Need = needName,
+					Error = suppress,
+				})
+			elseif suppress then
+				continue
+			end
+		end
 		local isPositiveTarget = positiveTargets[needName] == true
 		local consider = false
 		if needName == "Hunger" then
@@ -239,6 +257,7 @@ function NeedEffects.Run(
 	local chatPhrases = behavior.ChatPhrases
 	local targetedNeeds: { [string]: boolean }
 	local positiveNeeds: { [string]: boolean }
+	local emergencyGuards = behavior.EmergencyGuards
 	local contextPlayer = if interruptContext then interruptContext.Player else nil
 	if effects then
 		targetedNeeds, positiveNeeds = gatherEffectContext(effects)
@@ -247,38 +266,166 @@ function NeedEffects.Run(
 		positiveNeeds = {}
 	end
 	local pauseApplied = false
+	local pausedNeeds: { [string]: boolean }? = nil
+	local usedGlobalPause = false
+	local usedLegacyToggle = false
+	local residentModel: Model? = if residentState and residentState.Model then residentState.Model else nil
+	local activityTracking = false
+	local trackedProgress = 0
+	local lastEmitTime = 0
+	local activityReason: string? = nil
+	local stationType = if interruptContext and typeof(interruptContext.StationType) == "string"
+		then interruptContext.StationType :: string
+		else nil
+	local stationAction = if interruptContext and typeof(interruptContext.ActionName) == "string"
+		then interruptContext.ActionName :: string
+		else nil
+	local shouldTrackStation = residentModel ~= nil
+		and stationType ~= nil
+		and stationType:find("Station", 1, true) ~= nil
+	local function setAttribute(attribute: string, value: any)
+		if not residentModel then
+			return
+		end
+		residentModel:SetAttribute(attribute, value)
+	end
+	local function beginActivity()
+		if not shouldTrackStation or activityTracking then
+			return
+		end
+		activityTracking = true
+		trackedProgress = 0
+		lastEmitTime = 0
+		activityReason = nil
+		setAttribute("StationActivityActive", true)
+		setAttribute("StationActivityType", stationType)
+		setAttribute("StationActivityAction", stationAction)
+		setAttribute("StationActivityDuration", duration)
+		setAttribute("StationActivityStart", Workspace:GetServerTimeNow())
+		setAttribute("StationActivityProgress", 0)
+		setAttribute("StationActivityReason", nil)
+	end
+	local function emitProgress(progress: number, force: boolean?)
+		if not activityTracking then
+			return
+		end
+		trackedProgress = math.clamp(progress, 0, 1)
+		if not residentModel then
+			return
+		end
+		if trackedProgress >= 1 or force then
+			setAttribute("StationActivityProgress", trackedProgress)
+			return
+		end
+		local now = Workspace:GetServerTimeNow()
+		if now - lastEmitTime >= 0.2 then
+			lastEmitTime = now
+			setAttribute("StationActivityProgress", trackedProgress)
+		end
+	end
+	local function clearActivity(_success: boolean, reason: string?, finalProgress: number?)
+		if not activityTracking then
+			return
+		end
+		local progressValue = if finalProgress ~= nil then math.clamp(finalProgress, 0, 1) else trackedProgress
+		emitProgress(progressValue, true)
+		activityTracking = false
+		setAttribute("StationActivityActive", false)
+		setAttribute("StationActivityReason", reason)
+		setAttribute("StationActivityDuration", nil)
+		setAttribute("StationActivityStart", nil)
+		setAttribute("StationActivityType", nil)
+		setAttribute("StationActivityAction", nil)
+		activityReason = nil
+	end
 	local function applyPause()
 		if pauseApplied then
 			return
 		end
-		if residentState and typeof(residentState.PushNeedDecayPause) == "function" then
-			residentState:PushNeedDecayPause()
-			pauseApplied = true
-			return
-		end
-		if residentState and typeof(residentState.SetNeedDecayPaused) == "function" then
-			residentState:SetNeedDecayPaused(true)
-			pauseApplied = true
+		if residentState then
+			local pauseNeedFn = typeof(residentState.PushNeedPause) == "function"
+			if pauseNeedFn then
+				local added = false
+				for needName, isPositive in pairs(positiveNeeds) do
+					if isPositive then
+						if not pausedNeeds then
+							pausedNeeds = {}
+						end
+						local needs = pausedNeeds :: { [string]: boolean }
+						if not needs[needName] then
+							(residentState :: any):PushNeedPause(needName)
+							needs[needName] = true
+						end
+						added = true
+					end
+				end
+				if added then
+					pauseApplied = true
+					return
+				end
+			end
+			if typeof(residentState.PushNeedDecayPause) == "function" then
+				residentState:PushNeedDecayPause()
+				pauseApplied = true
+				usedGlobalPause = true
+				return
+			end
+			if typeof(residentState.SetNeedDecayPaused) == "function" then
+				residentState:SetNeedDecayPaused(true)
+				pauseApplied = true
+				usedLegacyToggle = true
+			end
 		end
 	end
 	local function releasePause()
 		if not pauseApplied then
 			return
 		end
-		if residentState and typeof(residentState.PopNeedDecayPause) == "function" then
-			residentState:PopNeedDecayPause()
-		elseif residentState and typeof(residentState.SetNeedDecayPaused) == "function" then
-			residentState:SetNeedDecayPaused(false)
+		local canPopNeed = pausedNeeds ~= nil and residentState and typeof(residentState.PopNeedPause) == "function"
+		if canPopNeed then
+			local needs = pausedNeeds :: { [string]: boolean }
+			pausedNeeds = nil
+			for needName in pairs(needs) do
+				(residentState :: any):PopNeedPause(needName)
+			end
+		elseif residentState then
+			local popFn = if typeof(residentState.PopNeedDecayPause) == "function"
+				then function()
+					residentState:PopNeedDecayPause()
+				end
+				else nil
+			local toggleFn = if typeof(residentState.SetNeedDecayPaused) == "function"
+				then function()
+					residentState:SetNeedDecayPaused(false)
+				end
+				else nil
+			local releaseOrder = {
+				{ Condition = usedGlobalPause, Fn = popFn },
+				{ Condition = usedLegacyToggle, Fn = toggleFn },
+				{ Condition = true, Fn = popFn },
+				{ Condition = true, Fn = toggleFn },
+			}
+			for _, candidate in ipairs(releaseOrder) do
+				local fn = candidate.Fn
+				if fn and candidate.Condition then
+					fn()
+					break
+				end
+			end
 		end
 		pauseApplied = false
+		usedGlobalPause = false
+		usedLegacyToggle = false
 	end
-	local function finalize(success: boolean)
+	local function finalize(success: boolean, reason: string?, finalProgress: number?)
 		if success then
 			applyMoodlets(residentState, behavior.Moodlets)
 		end
+		clearActivity(success, reason, finalProgress)
 		releasePause()
 	end
-	local function failReturn(): boolean
+	local function failReturn(reason: string?, progress: number?): boolean
+		clearActivity(false, reason, progress)
 		releasePause()
 		return false
 	end
@@ -293,14 +440,15 @@ function NeedEffects.Run(
 			Need = needName,
 		})
 	end
-	local function abortIfEmergency(): boolean
+	local function abortIfEmergency(): (boolean, string?)
 		local emergency, emergencyReason, emergencyNeed =
-			evaluateEmergencyNeeds(residentState, targetedNeeds, positiveNeeds, contextPlayer)
+			evaluateEmergencyNeeds(residentState, targetedNeeds, positiveNeeds, contextPlayer, emergencyGuards)
 		if emergency and emergencyReason then
 			emitEmergency(emergencyReason, emergencyNeed)
-			return true
+			activityReason = emergencyReason
+			return true, emergencyReason
 		end
-		return false
+		return false, nil
 	end
 	if
 		not residentState
@@ -328,19 +476,24 @@ function NeedEffects.Run(
 		Duration = duration,
 		Effects = effects,
 	})
-	if abortIfEmergency() then
-		return false
+	local abortEarly, abortReason = abortIfEmergency()
+	if abortEarly then
+		return failReturn(abortReason, trackedProgress)
 	end
 	applyPause()
+	beginActivity()
+	emitProgress(0, true)
 	applyInstantEffects(residentState, effects, appliedInstant)
-	if abortIfEmergency() then
-		return failReturn()
+	local abortAfterInstant, abortInstantReason = abortIfEmergency()
+	if abortAfterInstant then
+		return failReturn(abortInstantReason, trackedProgress)
 	end
 	if token and token.Cancelled then
 		local cancelReason = if token.Reason and token.Reason ~= "" then token.Reason else "Cancelled"
 		ResidentChat.ShowInterrupt(residentState, cancelReason, interruptContext)
 		ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects cancelled: %s", residentName))
-		return failReturn()
+		activityReason = cancelReason
+		return failReturn(cancelReason, trackedProgress)
 	end
 	local elapsed = 0
 	local lastTick = os.clock()
@@ -361,7 +514,7 @@ function NeedEffects.Run(
 		nextChatTime = os.clock() + chatInterval
 	end
 	if duration == 0 then
-		finalize(true)
+		finalize(true, nil, trackedProgress)
 		return true
 	end
 	while elapsed < duration do
@@ -369,23 +522,29 @@ function NeedEffects.Run(
 			local cancelReason = if token.Reason and token.Reason ~= "" then token.Reason else "Cancelled"
 			ResidentChat.ShowInterrupt(residentState, cancelReason, interruptContext)
 			ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects cancelled: %s", residentName))
-			return failReturn()
+			activityReason = cancelReason
+			return failReturn(cancelReason, if duration > 0 then elapsed / duration else trackedProgress)
 		end
-		if abortIfEmergency() then
-			return failReturn()
+		local abortDuring, abortReasonDuring = abortIfEmergency()
+		if abortDuring then
+			return failReturn(abortReasonDuring, if duration > 0 then elapsed / duration else trackedProgress)
 		end
 		if shouldEnd and shouldEnd(residentState) then
 			local reasonResolver = behavior.EndReasonProvider
+			local resolvedReason: string? = nil
 			if reasonResolver then
-				local reason = reasonResolver(residentState)
-				if reason and reason ~= "" then
-					ResidentChat.ShowInterrupt(residentState, reason, interruptContext)
+				resolvedReason = reasonResolver(residentState)
+				if resolvedReason and resolvedReason ~= "" then
+					ResidentChat.ShowInterrupt(residentState, resolvedReason, interruptContext)
 				end
 			end
 			ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects early exit: %s", residentName), {
 				Elapsed = elapsed,
 			})
-			finalize(true)
+			local completion = if duration > 0 then math.clamp(elapsed / duration, 0, 1) else trackedProgress
+			local reasonLabel = if resolvedReason and resolvedReason ~= "" then resolvedReason else "NeedSatisfied"
+			activityReason = reasonLabel
+			finalize(true, reasonLabel, completion)
 			return true
 		end
 		RunService.Heartbeat:Wait()
@@ -409,11 +568,16 @@ function NeedEffects.Run(
 			emitChat()
 			nextChatTime = now + chatInterval
 		end
+		if duration > 0 then
+			emitProgress(elapsed / duration)
+		end
 	end
 	ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects completed: %s", residentName), {
 		Elapsed = elapsed,
 	})
-	finalize(true)
+	local completionProgress = if duration > 0 then math.clamp(elapsed / duration, 0, 1) else trackedProgress
+	activityReason = activityReason or "DurationComplete"
+	finalize(true, activityReason, completionProgress)
 	return true
 end
 

@@ -20,12 +20,18 @@ local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled"
 local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
 local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEnabled")
 local ObjectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled")
+local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
 
 type Facing = ObjectPreview.Facing
 type WallStripSelectionInfo = ObjectPreview.WallStripSelectionInfo
 local PlotBuilder = {}
 
 function PlotBuilder.Init()
+	JobSelectionUIEnabled.Changed:Connect(function()
+		if JobSelectionUIEnabled.Value and PlotBuilderEnabled.Value then
+			PlotBuilder.Hide()
+		end
+	end)
 	PlotExpansionEnabled.Changed:Connect(function()
 		if PlotExpansionEnabled.Value and PlotBuilderEnabled.Value then
 			PlotBuilder.Hide()

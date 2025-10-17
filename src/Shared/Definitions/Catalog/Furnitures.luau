@@ -56,7 +56,7 @@ local Furnitures = {
 		StationEffects = {
 			DurationSeconds = 16,
 			Effects = {
-				{ Need = "Hunger", RatePerHour = 420 },
+				{ Need = "Hunger", RatePerHour = 150 },
 			},
 		},
 	},
@@ -77,7 +77,7 @@ local Furnitures = {
 		StationEffects = {
 			DurationSeconds = 22,
 			Effects = {
-				{ Need = "Hunger", RatePerHour = 500 },
+				{ Need = "Hunger", RatePerHour = 125 },
 			},
 		},
 	},
@@ -136,9 +136,9 @@ local Furnitures = {
 		Tags = { "Basic", "Fire" },
 		ModelPath = { "Furnitures", "Campfire" },
 		StationEffects = {
-			DurationSeconds = 20,
+			DurationSeconds = 60,
 			Effects = {
-				{ Need = "Hunger", RatePerHour = 380 },
+				{ Need = "Hunger", RatePerHour = 50 },
 			},
 		},
 	},
@@ -148,7 +148,7 @@ local Furnitures = {
 		PlacementType = "CellObject",
 		StationType = "RestStation",
 		Station = true,
-		maxOccupancy = 2,
+		maxOccupancy = 1,
 		WidthCells = 3,
 		DepthCells = 2,
 		Facing = { "North", "East", "South", "West" },

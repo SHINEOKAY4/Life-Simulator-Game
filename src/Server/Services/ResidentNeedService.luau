@@ -119,12 +119,18 @@ function ResidentNeedService.Decay(resident: ResidentState, gameHours: number)
 	if gameHours <= 0 then
 		return
 	end
+	local globalPaused = false
 	if resident and typeof(resident.IsNeedDecayPaused) == "function" then
-		if resident:IsNeedDecayPaused() then
-			return
-		end
+		globalPaused = resident:IsNeedDecayPaused()
 	end
+	if globalPaused then
+		return
+	end
+	local hasNeedPauseCheck = resident and typeof(resident.IsNeedPaused) == "function"
 	for needName, definition in pairs(NeedConfig.Needs) do
+		if hasNeedPauseCheck and resident:IsNeedPaused(needName) then
+			continue
+		end
 		local value = resident:GetNeed(needName)
 		local traits = if resident.GetTraits then resident:GetTraits() else nil
 		local decayMultiplier = TraitUtils.GetNeedDecayMultiplier(traits, needName)

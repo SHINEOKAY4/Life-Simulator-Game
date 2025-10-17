@@ -6,23 +6,26 @@ local Players = game:GetService("Players")
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
-local ResidentNeedsGui = PlayerGui:WaitForChild("ResidentNeedsGui") :: ScreenGui
-local MainFrame = ResidentNeedsGui:WaitForChild("Main") :: Frame
+local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
+local ResidentUIEnabled = ActiveQueryFolder:FindFirstChild("ResidentUIEnabled") :: BoolValue
+
+local ResidentGui = PlayerGui:WaitForChild("ResidentGui") :: ScreenGui
+local MainFrame = ResidentGui:WaitForChild("Main") :: Frame
 local HungerInfoBar = MainFrame:WaitForChild("HungerInfoBar") :: Frame
 local EnergyInfoBar = MainFrame:WaitForChild("EnergyInfoBar") :: Frame
 local FunInfoBar = MainFrame:WaitForChild("FunInfoBar") :: Frame
 local SocialInfoBar = MainFrame:WaitForChild("SocialInfoBar") :: Frame
 local HygieneInfoBar = MainFrame:WaitForChild("HygieneInfoBar") :: Frame
 
-local NeedsInterface = {}
+local ResidentUI = {}
 local Connections = {} :: { RBXScriptConnection }
 local CurrentSelected = nil :: Model?
 
-function NeedsInterface.Init()
-	-- Initialization code for NeedsInterface goes here
+function ResidentUI.Init()
+	-- Initialization code for ResidentUI goes here
 end
 
-function NeedsInterface.Show(residentModel: Model)
+function ResidentUI.Show(residentModel: Model)
 	if CurrentSelected == residentModel then
 		return
 	end
@@ -30,8 +33,8 @@ function NeedsInterface.Show(residentModel: Model)
 	for _, connection in ipairs(Connections) do
 		connection:Disconnect()
 	end
-	ResidentNeedsGui.Enabled = true
-
+	ResidentGui.Enabled = true
+	ResidentUIEnabled.Value = true
 	-- Update all bars initially
 	local hunger = residentModel:GetAttribute("Hunger") :: number
 	local energy = residentModel:GetAttribute("Energy") :: number
@@ -43,6 +46,8 @@ function NeedsInterface.Show(residentModel: Model)
 		local foreground = infoBar:FindFirstChild("Foreground") :: Frame
 		local bar = foreground:FindFirstChild("Bar") :: Frame
 		local barColor = Color3.fromHSV((value / 100) * 0.33, 1, 1) -- Green to Red
+		local percentLabel = foreground:FindFirstChild("Percent") :: TextLabel
+		percentLabel.Text = tostring(math.floor(value)) .. "%"
 		bar.BackgroundColor3 = barColor
 		bar.Size = UDim2.fromScale(value / 100, 1)
 	end
@@ -92,11 +97,16 @@ function NeedsInterface.Show(residentModel: Model)
 	)
 end
 
-function NeedsInterface.Hide()
-	ResidentNeedsGui.Enabled = false
+function ResidentUI.Hide()
+	ResidentGui.Enabled = false
+	ResidentUIEnabled.Value = false
 	CurrentSelected = nil
 	for _, connection in ipairs(Connections) do
 		connection:Disconnect()
 	end
 end
-return NeedsInterface
+
+function ResidentUI.GetCurrentSelectedResident()
+	return CurrentSelected
+end
+return ResidentUI

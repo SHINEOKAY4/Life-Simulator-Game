@@ -60,6 +60,7 @@ State.NonSurvivalSuppressed = setmetatable({} :: { [ResidentState]: { [string]: 
 State.MissingStationComplaints = setmetatable({} :: { [ResidentState]: { [string]: boolean } }, { __mode = "k" })
 State.StationIteratorState = {} :: { [number]: { [string]: { version: number, order: { string }, index: number } } }
 State.ItemSpecCache = {} :: { [string]: { [string]: any }? }
+State.SurvivalUnavailable = setmetatable({} :: { [ResidentState]: { [string]: boolean } }, { __mode = "k" })
 
 State.SecondsPerFullDayCached = TimeScale.GetSecondsPerFullDay()
 State.NeedCooldownSeconds = {} :: { [string]: number }
@@ -201,6 +202,15 @@ local function getOrCreateMissingComplaints(resident: ResidentState)
 	return entry
 end
 
+local function getOrCreateSurvivalUnavailable(resident: ResidentState)
+	local entry = State.SurvivalUnavailable[resident]
+	if not entry then
+		entry = {}
+		State.SurvivalUnavailable[resident] = entry
+	end
+	return entry
+end
+
 function State.didComplainAboutMissingStation(resident: ResidentState, needName: string): boolean
 	local entry = State.MissingStationComplaints[resident]
 	return entry ~= nil and entry[needName] == true
@@ -213,6 +223,26 @@ end
 
 function State.getMissingStationPhrases(needName: string)
 	return State.MissingStationPhrases[needName] or State.MissingStationPhrases._default
+end
+
+function State.markSurvivalNeedUnavailable(resident: ResidentState, needName: string)
+	local entry = getOrCreateSurvivalUnavailable(resident)
+	entry[needName] = true
+end
+
+function State.clearSurvivalNeedUnavailable(resident: ResidentState, needName: string)
+	local entry = State.SurvivalUnavailable[resident]
+	if entry then
+		entry[needName] = nil
+		if next(entry) == nil then
+			State.SurvivalUnavailable[resident] = nil
+		end
+	end
+end
+
+function State.isSurvivalNeedUnavailable(resident: ResidentState, needName: string): boolean
+	local entry = State.SurvivalUnavailable[resident]
+	return entry ~= nil and entry[needName] == true
 end
 
 function State.setPending(resident: ResidentState, value: string?)

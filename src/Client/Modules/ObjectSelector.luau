@@ -23,6 +23,7 @@ local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled"
 local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled") :: BoolValue
 local RadialBillboardButtonEnabled = ActiveQueryFolder:WaitForChild("RadialBillboardButtonEnabled") :: BoolValue
 local ObjectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled") :: BoolValue
+local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
 
 local ObjectSelector = {}
 
@@ -77,6 +78,11 @@ local function OnWorldClick()
 end
 
 function ObjectSelector.Init()
+	JobSelectionUIEnabled.Changed:Connect(function()
+		if JobSelectionUIEnabled.Value and ObjectSelectorEnabled.Value then
+			ObjectSelector.Hide()
+		end
+	end)
 	PlotBuilderEnabled.Changed:Connect(function()
 		if PlotBuilderEnabled.Value and ObjectSelectorEnabled.Value then
 			ObjectSelector.Hide()

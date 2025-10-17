@@ -21,6 +21,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ActionQueue = require(ServerScriptService.Server.Classes.ActionQueue)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
+local ResidentMovement = require(ServerScriptService.Server.Utilities.ResidentMovement)
 
 -- This is not set in stone (figuring out how things will play out in this module)
 local function _WaitOnSignalWithTimeout<A...>(signal, timeoutSeconds: number?): (boolean, A...)
@@ -71,6 +72,12 @@ end
 local ResidentState = {}
 ResidentState.__index = ResidentState
 
+type MoveOptions = {
+	ActionName: string?,
+	TimeoutSeconds: number?,
+	DebugName: string?,
+}
+
 local function hydrateNeeds(save: ResidentData)
 	local needs = save.Needs
 	if typeof(needs) ~= "table" then
@@ -113,6 +120,7 @@ function ResidentState.new(save: ResidentData)
 	self.AutoJobEnabled = true -- Whether the resident can perform auto job actions
 	self.CurrentOverride = nil
 	self.NeedDecayPauseCount = 0
+	self.NeedDecayPaused = {} :: { [string]: number }
 	self.DestinationChanged = GoodSignal.new()
 	self.DestinationCompleted = GoodSignal.new()
 	self.ActionChanged = GoodSignal.new()
@@ -191,7 +199,27 @@ function ResidentState:SetDestination(destination)
 	self.DestinationChanged:Fire(destination)
 end
 
-function ResidentState:EnqueueMoveTo() end
+function ResidentState:EnqueueMoveTo(targetPosition: Vector3, options: MoveOptions?)
+	local actionName = if options
+			and options.ActionName
+			and options.ActionName ~= ""
+		then options.ActionName
+		else "MoveTo"
+
+	self:EnqueueAction(actionName, function(context)
+		local arrived = ResidentMovement.GoToWorldPosition(self, targetPosition, {
+			CancelToken = context and context.CancelToken or nil,
+			TimeoutSeconds = options and options.TimeoutSeconds or nil,
+			DebugName = options and options.DebugName or nil,
+		})
+		if not arrived then
+			if context and context.CancelToken and context.CancelToken.Cancelled then
+				error(context.CancelToken.Reason or "Movement cancelled")
+			end
+			error("Resident failed to reach destination")
+		end
+	end)
+end
 
 function ResidentState:EnqueueAction(actionName: string, actionFunction: (context: any?) -> ())
 	self.ActionQueue:Enqueue(actionName, actionFunction)
@@ -340,8 +368,49 @@ function ResidentState:IsNeedDecayPaused(): boolean
 	return (self.NeedDecayPauseCount or 0) > 0
 end
 
+function ResidentState:PushNeedPause(needName: string)
+	if type(needName) ~= "string" or needName == "" then
+		return
+	end
+	local pauses = self.NeedDecayPaused
+	if not pauses then
+		pauses = {}
+		self.NeedDecayPaused = pauses
+	end
+	pauses[needName] = (pauses[needName] or 0) + 1
+end
+
+function ResidentState:PopNeedPause(needName: string)
+	if type(needName) ~= "string" or needName == "" then
+		return
+	end
+	local pauses = self.NeedDecayPaused
+	if not pauses then
+		return
+	end
+	local count = pauses[needName]
+	if not count then
+		return
+	end
+	if count <= 1 then
+		pauses[needName] = nil
+	else
+		pauses[needName] = count - 1
+	end
+end
+
+function ResidentState:IsNeedPaused(needName: string): boolean
+	if type(needName) ~= "string" or needName == "" then
+		return false
+	end
+	local pauses = self.NeedDecayPaused
+	if not pauses then
+		return false
+	end
+	return (pauses[needName] or 0) > 0
+end
+
 function ResidentState:Destroy()
-	-- Disconnect external connections first
 	if self.Connections then
 		for _, connection in ipairs(self.Connections) do
 			connection:Disconnect()
@@ -376,6 +445,7 @@ function ResidentState:Destroy()
 		self.NeedsChanged = nil
 	end
 	self.ActiveMoodlets = nil
+	self.NeedDecayPaused = nil
 	-- Destroy model last
 	if self.Model then
 		self.Model:Destroy()

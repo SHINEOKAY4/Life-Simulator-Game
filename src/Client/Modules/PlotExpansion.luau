@@ -25,6 +25,7 @@ local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
 local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
 local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEnabled")
+local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
 
 local camera = Workspace.CurrentCamera :: Camera
 
@@ -49,6 +50,11 @@ local function BuildParams(coversFolder: Folder): RaycastParams
 end
 
 function PlotExpansion.Init()
+	JobSelectionUIEnabled.Changed:Connect(function()
+		if JobSelectionUIEnabled.Value and PlotExpansionEnabled.Value then
+			PlotExpansion.Hide()
+		end
+	end)
 	PlotBuilderEnabled.Changed:Connect(function()
 		if PlotBuilderEnabled.Value and PlotExpansionEnabled.Value then
 			PlotExpansion.Hide()
