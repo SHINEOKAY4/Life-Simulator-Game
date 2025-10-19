@@ -9,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -30,6 +31,12 @@ local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEn
 local camera = Workspace.CurrentCamera :: Camera
 
 local PlotExpansion = {}
+local INPUT_DEBOUNCE_SECONDS = 0.25
+
+local function runDebounced(actionName: string, callback: () -> ()): ()
+	local key = string.format("PlotExpansion/%s", actionName)
+	Debounce.RunIfAvailable(key, INPUT_DEBOUNCE_SECONDS, callback, Player.UserId)
+end
 
 local Connection: RBXScriptConnection? = nil
 local _HoveredCover: BasePart? = nil
@@ -68,47 +75,51 @@ function PlotExpansion.Init()
 	end)
 
 	PlotContext.ToggleExpansion.Pressed:Connect(function()
-		local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
-		if not plotIndex then
-			warn("Player does not own a plot.")
-			return
-		end
-
-		if PlotFinder.IsWithinBounds(Player) then
-			if PlotExpansionEnabled.Value then
-				PlotExpansion.Hide()
-			else
-				PlotExpansion.Show()
+		runDebounced("Toggle", function()
+			local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
+			if not plotIndex then
+				warn("Player does not own a plot.")
+				return
 			end
-		end
+
+			if PlotFinder.IsWithinBounds(Player) then
+				if PlotExpansionEnabled.Value then
+					PlotExpansion.Hide()
+				else
+					PlotExpansion.Show()
+				end
+			end
+		end)
 	end)
 
 	PlotContext.ToggleClickPurchase.Pressed:Connect(function()
-		print("ToggleClickPurchase pressed")
-		local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
-		local plotModel = PlotFinder.FindPlot(plotIndex)
-		local coversFolder = plotModel and plotModel:FindFirstChild("Covers") :: Folder
+		runDebounced("Purchase", function()
+			print("ToggleClickPurchase pressed")
+			local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
+			local plotModel = PlotFinder.FindPlot(plotIndex)
+			local coversFolder = plotModel and plotModel:FindFirstChild("Covers") :: Folder
 
-		local params = BuildParams(coversFolder)
-		local mouse = UserInputService:GetMouseLocation()
-		local ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
-		local result = Workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
+			local params = BuildParams(coversFolder)
+			local mouse = UserInputService:GetMouseLocation()
+			local ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
+			local result = Workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
 
-		if not result or not result.Instance or not result.Instance:IsA("BasePart") then
-			return
-		end
-
-		local hitCover = result.Instance
-		if hitCover == _HoveredCover then
-			local chunkX = hitCover:GetAttribute("ChunkX") :: number
-			local chunkZ = hitCover:GetAttribute("ChunkZ") :: number
-			local success, message = PlotStateStore.RequestPurchase(chunkX, chunkZ)
-			if success then
-				print("Toast notification UI implementation needed")
+			if not result or not result.Instance or not result.Instance:IsA("BasePart") then
+				return
 			end
-			--#TODO: Toast notification for success/failure
-			print("Purchase result:", success, message)
-		end
+
+			local hitCover = result.Instance
+			if hitCover == _HoveredCover then
+				local chunkX = hitCover:GetAttribute("ChunkX") :: number
+				local chunkZ = hitCover:GetAttribute("ChunkZ") :: number
+				local success, message = PlotStateStore.RequestPurchase(chunkX, chunkZ)
+				if success then
+					print("Toast notification UI implementation needed")
+				end
+				--#TODO: Toast notification for success/failure
+				print("Purchase result:", success, message)
+			end
+		end)
 	end)
 
 	Player:GetAttributeChangedSignal("WithinPlot"):Connect(function()

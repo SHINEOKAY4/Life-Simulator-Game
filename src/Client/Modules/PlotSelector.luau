@@ -8,6 +8,7 @@ local Players = game:GetService("Players")
 --local CameraModule = require(script.Parent.Camera)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -21,6 +22,12 @@ local PlotSelector = {}
 local Connections: { RBXScriptConnection } = {}
 local ActiveCameraTween: Tween? = nil
 local CurrentIndex = 1
+local INPUT_DEBOUNCE_SECONDS = 0.25
+
+local function runDebounced(actionName: string, callback: () -> ()): ()
+	local key = string.format("PlotSelector/%s", actionName)
+	Debounce.RunIfAvailable(key, INPUT_DEBOUNCE_SECONDS, callback, Player.UserId)
+end
 
 local function MoveCamera()
 	local currentPlot = PlotFinder.FindPlot(CurrentIndex)
@@ -83,21 +90,27 @@ function PlotSelector.Init()
 	table.insert(
 		Connections,
 		PlotSelectorContext.MoveNextAction.Pressed:Connect(function()
-			PlotSelector.Next()
+			runDebounced("Next", function()
+				PlotSelector.Next()
+			end)
 		end)
 	)
 
 	table.insert(
 		Connections,
 		PlotSelectorContext.MovePreviousAction.Pressed:Connect(function()
-			PlotSelector.Previous()
+			runDebounced("Previous", function()
+				PlotSelector.Previous()
+			end)
 		end)
 	)
 
 	table.insert(
 		Connections,
 		PlotSelectorContext.SelectAction.Pressed:Connect(function()
-			PlotSelector.Select()
+			runDebounced("Select", function()
+				PlotSelector.Select()
+			end)
 		end)
 	)
 end

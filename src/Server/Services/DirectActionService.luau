@@ -34,6 +34,8 @@ type StationAssignment = {
 	RestModeOverride: string?,
 }
 
+type StationCache = { [string]: { [string]: StationRecord } }
+
 local DirectActionService = {}
 DirectActionService.OverrideStarted = GoodSignal.new()
 DirectActionService.OverrideCompleted = GoodSignal.new()
@@ -91,6 +93,30 @@ local function finalizeAssignment(assignment: StationAssignment, succeeded: bool
 	end
 end
 
+local function clearExistingManualOverride(
+	player: Player,
+	residentState: any,
+	residentName: string,
+	stationCacheOverride: StationCache?
+)
+	local currentOverride = residentState.CurrentOverride
+	if typeof(currentOverride) ~= "table" then
+		residentState:ClearManualOverrideState()
+		return
+	end
+	local stationType = currentOverride.StationType
+	local stationId = currentOverride.StationId
+	if typeof(stationType) == "string" and typeof(stationId) == "string" then
+		local cache = stationCacheOverride or PlotService.GetStationsForPlayer(player)
+		local scope = cache[stationType]
+		local stationRecord = scope and scope[stationId]
+		if stationRecord then
+			releaseStationOccupancy(stationRecord, residentName)
+		end
+	end
+	residentState:ClearManualOverrideState()
+end
+
 local function resolveHandler(stationType: string)
 	return OverrideHandlers[stationType]
 		or function(context, _assignment)
@@ -117,14 +143,35 @@ end
 
 local function prepareResidentForOverride(residentState: any, timeoutSeconds: number?): (boolean, string?)
 	residentState:CancelCurrentAction("ManualOverride")
+	residentState:ClearQueuedActions()
 	local idle = residentState:WaitUntilIdle(timeoutSeconds)
 	if not idle then
+		if typeof(residentState.ForceStopAllActions) == "function" then
+			residentState:ForceStopAllActions("ManualOverride")
+		else
+			residentState:CancelCurrentAction("ManualOverride")
+			residentState:ClearQueuedActions()
+			local activeName = residentState.CurrentAction
+			if residentState.SetDestination then
+				residentState:SetDestination(nil)
+			else
+				residentState.Destination = nil
+			end
+			residentState.CurrentAction = nil
+			residentState.IsBusy = false
+			if residentState.ActionChanged then
+				residentState.ActionChanged:Fire(nil)
+			end
+			if activeName and residentState.ActionCompleted then
+				residentState.ActionCompleted:Fire(activeName, false, "ManualOverride")
+			end
+			residentState:ResetCancelToken()
+		end
+	else
 		residentState:ResetCancelToken()
-		return false, "Resident is busy"
 	end
-	residentState:ClearQueuedActions()
-	residentState:ResetCancelToken()
 	residentState:DisableAutomation()
+	residentState:ClearQueuedActions()
 	return true, nil
 end
 
@@ -158,6 +205,12 @@ function DirectActionService.Init()
 end
 
 function DirectActionService.AssignStationToResident(player: Player, residentName: string, uniqueId: string)
+	if type(residentName) ~= "string" or residentName == "" then
+		return false, "Invalid resident name"
+	end
+	if type(uniqueId) ~= "string" or uniqueId == "" then
+		return false, "Invalid station id"
+	end
 	local plotIndex = player:GetAttribute("OwnedPlotIndex") :: number
 	if not plotIndex then
 		return false, "Player does not own a plot"
@@ -168,7 +221,6 @@ function DirectActionService.AssignStationToResident(player: Player, residentNam
 	if not containerFolder then
 		return false, "No containers found on plot"
 	end
-
 	local itemModel = containerFolder:FindFirstChild(uniqueId) :: Model?
 	if not itemModel then
 		return false, "Item not found in containers"
@@ -226,6 +278,8 @@ function DirectActionService.AssignStationToResident(player: Player, residentNam
 	if not prepared then
 		return false, reason or "Unable to prepare resident for override"
 	end
+
+	clearExistingManualOverride(player, residentState, residentName, playerStations)
 
 	resolvedStation.Occupied = true
 	resolvedStation.Model = itemModel
@@ -285,6 +339,8 @@ function DirectActionService.MoveResidentToWorldPosition(player: Player, residen
 	if not prepared then
 		return false, reason or "Resident is busy"
 	end
+
+	clearExistingManualOverride(player, residentState, residentName)
 
 	residentState:SetManualOverrideState({ Mode = "ManualMove", TargetPosition = targetPosition })
 

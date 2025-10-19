@@ -7,6 +7,7 @@ local Players = game:GetService("Players")
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ObjectPreview = require(script.Parent.ObjectPreview)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
+local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -25,6 +26,12 @@ local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEn
 type Facing = ObjectPreview.Facing
 type WallStripSelectionInfo = ObjectPreview.WallStripSelectionInfo
 local PlotBuilder = {}
+local INPUT_DEBOUNCE_SECONDS = 0.25
+
+local function runDebounced(actionName: string, callback: () -> ()): ()
+	local key = string.format("PlotBuilder/%s", actionName)
+	Debounce.RunIfAvailable(key, INPUT_DEBOUNCE_SECONDS, callback, Player.UserId)
+end
 
 function PlotBuilder.Init()
 	JobSelectionUIEnabled.Changed:Connect(function()
@@ -61,28 +68,32 @@ function PlotBuilder.Init()
 	end)
 
 	BuildContext.ToggleBuildMode.Pressed:Connect(function()
-		local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
-		if not plotIndex then
-			warn("Player does not own a plot.")
-			return
-		end
-		if PlotFinder.IsWithinBounds(Player) then
-			if PlotBuilderEnabled.Value then
-				PlotBuilder.Hide()
-			else
-				PlotBuilder.Show()
+		runDebounced("Toggle", function()
+			local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
+			if not plotIndex then
+				warn("Player does not own a plot.")
+				return
 			end
-		end
+			if PlotFinder.IsWithinBounds(Player) then
+				if PlotBuilderEnabled.Value then
+					PlotBuilder.Hide()
+				else
+					PlotBuilder.Show()
+				end
+			end
+		end)
 	end)
 
 	BuildContext.PlacePreview.Pressed:Connect(function()
-		if ObjectPreview.TryBeginFloorDrag() then
-			return
-		end
-		if ObjectPreview.TryBeginWallStripDrag() then
-			return
-		end
-		PlotBuilder.PlaceSelectedPreview()
+		runDebounced("PlacePreview", function()
+			if ObjectPreview.TryBeginFloorDrag() then
+				return
+			end
+			if ObjectPreview.TryBeginWallStripDrag() then
+				return
+			end
+			PlotBuilder.PlaceSelectedPreview()
+		end)
 	end)
 
 	Player:GetAttributeChangedSignal("WithinPlot"):Connect(function()

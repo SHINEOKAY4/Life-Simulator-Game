@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local JobCatalog = require(ReplicatedStorage.Shared.Configurations.JobCatalog)
 local Timer = require(ReplicatedStorage.Shared.Utilities.Timer)
+local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -17,7 +18,6 @@ local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled") :: BoolValue
 local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled") :: BoolValue
-local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEnabled") :: BoolValue
 local PlotGridOverlayEnabled = ActiveQueryFolder:FindFirstChild("PlotGridOverlayEnabled") :: BoolValue
 local ResidualUIEnabled = ActiveQueryFolder:FindFirstChild("ResidentUIEnabled") :: BoolValue
 
@@ -41,6 +41,12 @@ InputContext.Name = "JobSelectionContext"
 InputContext.Parent = PlayerGui
 
 local JobSelectionUI = {}
+local INPUT_DEBOUNCE_SECONDS = 0.25
+
+local function runDebounced(actionName: string, callback: () -> ()): ()
+	local key = string.format("JobSelectionUI/%s", actionName)
+	Debounce.RunIfAvailable(key, INPUT_DEBOUNCE_SECONDS, callback, LocalPlayer.UserId)
+end
 
 type JobFolder = Folder & {
 	GetAttribute: (JobFolder, string) -> any,
@@ -276,7 +282,9 @@ local function createCard(jobFolder: JobFolder): TextButton?
 	table.insert(
 		connections,
 		inputAction.Pressed:Connect(function()
-			focusCard()
+			Debounce.RunIfAvailable(string.format("JobSelectionUI/Card/%s", jobId), INPUT_DEBOUNCE_SECONDS, function()
+				focusCard()
+			end, LocalPlayer.UserId)
 		end)
 	)
 
@@ -363,11 +371,13 @@ function JobSelectionUI.Init()
 	end)
 
 	JobSelectionContext.Toggle.Pressed:Connect(function()
-		if JobSelectionGui.Enabled then
-			JobSelectionUI.Hide()
-		else
-			JobSelectionUI.Show()
-		end
+		runDebounced("Toggle", function()
+			if JobSelectionGui.Enabled then
+				JobSelectionUI.Hide()
+			else
+				JobSelectionUI.Show()
+			end
+		end)
 	end)
 
 	JobListingsFolder:GetAttributeChangedSignal("LastListings"):Connect(function()

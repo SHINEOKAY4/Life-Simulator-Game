@@ -7,9 +7,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local ResidentController = require(script.Parent.ResidentController)
-local ResidentRadialUI = require(script.Parent.Parent.UserInterface.ResidentRadialUI)
+local StationRadialUI = require(script.Parent.Parent.UserInterface.StationRadialUI)
 local ResidentUI = require(script.Parent.Parent.UserInterface.ResidentUI)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
 local Player = Players.LocalPlayer
 
@@ -28,6 +29,12 @@ local _ResidentRadialEnabled = ActiveQueryFolder:FindFirstChild("ResidentRadialE
 
 local ResidentSelector = {}
 
+local INPUT_DEBOUNCE_SECONDS = 0.2
+local function runDebounced(actionName: string, callback: () -> ()): ()
+	local key = string.format("ResidentSelector/%s", actionName)
+	Debounce.RunIfAvailable(key, INPUT_DEBOUNCE_SECONDS, callback, Player.UserId)
+end
+
 local DOUBLE_CLICK_WINDOW = 0.2
 
 type PendingMove = {
@@ -37,14 +44,29 @@ type PendingMove = {
 
 local pendingMove: PendingMove? = nil
 
+local function isWithinDoubleClickWindow(): boolean
+	local pending = pendingMove
+	if not pending then
+		return false
+	end
+
+	local selectedResident = ResidentUI.GetCurrentSelectedResident()
+	if selectedResident ~= pending.Resident then
+		return false
+	end
+
+	local now = os.clock()
+	return (now - pending.Timestamp) <= DOUBLE_CLICK_WINDOW
+end
+
 local function resetPendingMove()
 	pendingMove = nil
 end
 
-local function findStationUnderCursor(unitRay: Ray, plotModel: Model): Model?
+local function findStationUnderCursor(unitRay: Ray, plotModel: Model): (Model?, string)
 	local container = plotModel:FindFirstChild("Container")
 	if not container then
-		return nil
+		return nil, ""
 	end
 
 	local params = RaycastParams.new()
@@ -54,25 +76,24 @@ local function findStationUnderCursor(unitRay: Ray, plotModel: Model): Model?
 
 	local result = Workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, params)
 	if not result or not result.Instance then
-		return nil
+		return nil, ""
 	end
 
 	local hitModel = result.Instance:FindFirstAncestorOfClass("Model")
 	if not hitModel then
-		return nil
+		return nil, ""
 	end
 
 	local itemIdAttr = hitModel:GetAttribute("ItemId")
 	if typeof(itemIdAttr) ~= "string" or itemIdAttr == "" then
-		return nil
+		return nil, ""
 	end
 
 	local itemSpec = ItemFinder.FindItemById(itemIdAttr)
 	if not itemSpec or itemSpec.Station ~= true then
-		return nil
+		return nil, ""
 	end
-
-	return hitModel
+	return hitModel, itemSpec.StationType
 end
 
 local function OnWorldClick()
@@ -105,11 +126,13 @@ local function OnWorldClick()
 	end
 
 	local residentModel = ResidentUI.GetCurrentSelectedResident()
+
 	if residentModel then
-		local stationModel = findStationUnderCursor(unitRay, plotModel)
+		local stationModel, stationType = findStationUnderCursor(unitRay, plotModel)
 		if stationModel then
+			print("Station selected:", stationModel:GetFullName())
 			resetPendingMove()
-			ResidentRadialUI.Show(stationModel)
+			StationRadialUI.Show(stationModel, stationType)
 			return
 		end
 	end
@@ -212,7 +235,15 @@ function ResidentSelector.Init()
 		then
 			return
 		end
-		OnWorldClick()
+
+		if isWithinDoubleClickWindow() then
+			OnWorldClick()
+			return
+		end
+
+		runDebounced("Select", function()
+			OnWorldClick()
+		end)
 	end)
 end
 

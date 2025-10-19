@@ -11,6 +11,7 @@ local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementHelpers = require(ReplicatedStorage.Shared.Utilities.PlacementHelpers)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
+local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -23,6 +24,7 @@ local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
 local ObjectActionContext = InputContextsFolder:WaitForChild("ObjectActionContext")
 
 local ObjectAction = {}
+local INPUT_DEBOUNCE_SECONDS = 0.25
 local CurrentSelectedObject: Model? = nil
 local SelectedObjectOriginalParent: Instance? = nil
 local DetachedPreviewObject: Model? = nil
@@ -231,16 +233,18 @@ function ObjectAction.Init()
 	end)
 
 	ObjectActionContext.ClickMoveRequest.Pressed:Connect(function()
-		local object = CurrentSelectedObject or DetachedPreviewObject
-		if not object then
-			warn("No object selected for move action.")
-			return
-		end
+		Debounce.RunIfAvailable("ObjectAction/ClickMove", INPUT_DEBOUNCE_SECONDS, function()
+			local object = CurrentSelectedObject or DetachedPreviewObject
+			if not object then
+				warn("No object selected for move action.")
+				return
+			end
 
-		if RadialBillboardButtonEnabled.Value then
-			return
-		end
-		PlaceSelectedPreview(object)
+			if RadialBillboardButtonEnabled.Value then
+				return
+			end
+			PlaceSelectedPreview(object)
+		end, Player.UserId)
 	end)
 end
 

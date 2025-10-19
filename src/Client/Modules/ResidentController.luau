@@ -33,4 +33,16 @@ function ResidentController.RequestMoveToLocation(residentModel: Model, targetPo
 	return success, message
 end
 
+function ResidentController.RequestResidentToStation(residentName: string, stationName: string)
+	if not residentName or not stationName then
+		return false, "Invalid station request"
+	end
+
+	local success, message = ResidentsPackets.RequestAssignStation:Fire(residentName, stationName)
+	if not success then
+		warn(("Station request rejected for %s: %s"):format(residentName, message))
+	end
+
+	return success, message
+end
 return ResidentController

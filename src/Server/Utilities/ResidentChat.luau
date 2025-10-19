@@ -47,18 +47,60 @@ local StationFriendlyNames: { [string]: string } = {
 }
 
 local NeedFriendlyNames: { [string]: string } = {
-	Hunger = "I'm starving",
-	Hygiene = "I really need to clean up",
-	Fun = "I need something fun first",
-	Energy = "I'm running on empty",
-	Social = "I need to talk to someone",
+	Hunger = "I could really use a bite to eat",
+	Hygiene = "I should take a moment to freshen up",
+	Fun = "I could use a little fun first",
+	Energy = "I'm running low on energy",
+	Social = "I could use some company",
 }
 
 local GenericInterrupts: { string } = {
-	"I got pulled away unexpectedly...",
-	"Something came up, so I had to stop.",
-	"Can't keep going right now.",
+	"Something popped up; I'll be back soon.",
+	"I need to pause for just a moment.",
+	"Had to step away for a bit.",
 }
+
+local StationArticles: { [string]: boolean } = {
+	the = true,
+	a = true,
+	an = true,
+	my = true,
+	our = true,
+	your = true,
+	their = true,
+	this = true,
+	that = true,
+	these = true,
+	those = true,
+	some = true,
+	another = true,
+	any = true,
+}
+
+local function formatStationForSentence(rawLabel: string?): string?
+	if rawLabel == nil then
+		return nil
+	end
+	local trimmed = rawLabel:gsub("^%s+", ""):gsub("%s+$", "")
+	if trimmed == "" then
+		return nil
+	end
+	local lower = trimmed:lower()
+	local firstWord = lower:match("^(%w+)")
+	if firstWord and StationArticles[firstWord] then
+		return trimmed
+	end
+	if trimmed:find("%s") then
+		return "the " .. trimmed
+	end
+	if trimmed == lower then
+		return "the " .. trimmed
+	end
+	if trimmed:match("^%u%l*$") then
+		return "the " .. lower
+	end
+	return "the " .. trimmed
+end
 
 local function selectRandom(entries: { string }): string
 	return entries[rng:NextInteger(1, #entries)]
@@ -118,60 +160,65 @@ end
 local function buildUrgentNeedText(reasonNeed: string, context: InterruptContext?): string
 	local base = NeedFriendlyNames[reasonNeed]
 	local stationLabel = resolveStationLabel(context)
-	if base and stationLabel then
-		return string.format("%s—leaving %s.", base, stationLabel)
+	local stationPhrase = if stationLabel then formatStationForSentence(stationLabel) or stationLabel else nil
+	if base and stationPhrase then
+		return string.format("%s, so I'm stepping away from %s for now.", base, stationPhrase)
 	elseif base then
 		return base .. "."
-	elseif stationLabel then
-		return string.format("Leaving %s to deal with something urgent.", stationLabel)
+	elseif stationPhrase then
+		return string.format("Stepping away from %s to handle something important.", stationPhrase)
 	end
 	local friendlyNeed = humanizeReason(reasonNeed)
-	return string.format("Need to handle %s right away.", friendlyNeed)
+	return string.format("I need to handle %s right away.", friendlyNeed)
 end
 
 local InterruptHandlers: { [string]: (InterruptContext?) -> string? } = {
 	ManualOverride = function(context)
 		local stationLabel = resolveStationLabel(context)
-		if stationLabel then
-			return string.format("Seriously? I'm beat—leaving %s but I need rest.", stationLabel)
+		local stationPhrase = if stationLabel then formatStationForSentence(stationLabel) or stationLabel else nil
+		if stationPhrase then
+			return string.format("I'll step away from %s for now.", stationPhrase)
 		end
-		return "I'm running on fumes here, try not to push me."
+		return "I'll take a short break for now."
 	end,
 	DirectSocialPartnerFailed = function(context)
 		local partner = resolvePartnerName(context)
 		if partner then
-			return string.format("%s bailed on me mid-chat...", partner)
+			return string.format("I think %s had to step away mid-chat.", partner)
 		end
-		return "My chat partner walked off on me."
+		return "Looks like my chat partner had to leave."
 	end,
 	DirectSocialCancelled = function(context)
 		local partner = resolvePartnerName(context)
 		if partner then
-			return string.format("Our chat with %s got cut short.", partner)
+			return string.format("Our chat with %s paused for now.", partner)
 		end
-		return "That conversation just got cancelled."
+		return "That conversation is on hold for the moment."
 	end,
 	StationRemoved = function(context)
 		local stationLabel = resolveStationLabel(context)
-		if stationLabel then
-			return string.format("My %s vanished!", stationLabel)
+		local stationPhrase = if stationLabel then formatStationForSentence(stationLabel) or stationLabel else nil
+		if stationPhrase then
+			return string.format("Looks like %s is gone for now.", stationPhrase)
 		end
-		return "The thing I was using disappeared!"
+		return "Looks like what I was using is gone for now."
 	end,
 	MovementFailed = function(context)
 		local stationLabel = resolveStationLabel(context)
-		if stationLabel then
-			return string.format("I can't reach %s.", stationLabel)
+		local stationPhrase = if stationLabel then formatStationForSentence(stationLabel) or stationLabel else nil
+		if stationPhrase then
+			return string.format("I can't quite reach %s right now.", stationPhrase)
 		end
-		return "Couldn't get there."
+		return "I can't get there just yet."
 	end,
 	Cancelled = function(_context)
-		return "That got cancelled."
+		return "That was cancelled for now."
 	end,
 	EnergySatisfied = function(context)
 		local stationLabel = resolveStationLabel(context)
-		if stationLabel then
-			return string.format("Feeling rested—done at %s.", stationLabel)
+		local stationPhrase = if stationLabel then formatStationForSentence(stationLabel) or stationLabel else nil
+		if stationPhrase then
+			return string.format("Feeling rested—wrapping up at %s.", stationPhrase)
 		end
 		return "Feeling rested and ready."
 	end,
@@ -204,7 +251,8 @@ function ResidentChat.ResolveInterruptText(reason: string?, context: InterruptCo
 	if reason == nil or reason == "" then
 		local stationLabel = resolveStationLabel(context)
 		if stationLabel then
-			return string.format("Had to stop at %s.", stationLabel)
+			local stationPhrase = formatStationForSentence(stationLabel) or stationLabel
+			return string.format("Had to pause at %s for now.", stationPhrase)
 		end
 		return selectRandom(GenericInterrupts)
 	end
@@ -229,9 +277,10 @@ function ResidentChat.ResolveInterruptText(reason: string?, context: InterruptCo
 	local stationLabel = resolveStationLabel(context)
 	local friendlyReason = humanizeReason(reason)
 	if stationLabel then
-		return string.format("Stopped at %s because %s.", stationLabel, friendlyReason)
+		local stationPhrase = formatStationForSentence(stationLabel) or stationLabel
+		return string.format("Paused at %s because %s.", stationPhrase, friendlyReason)
 	end
-	return string.format("Stopped because %s.", friendlyReason)
+	return string.format("Paused because %s.", friendlyReason)
 end
 
 function ResidentChat.ResolveInterruptColor(reason: string?): Enum.ChatColor

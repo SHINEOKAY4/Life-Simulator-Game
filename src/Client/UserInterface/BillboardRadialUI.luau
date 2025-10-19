@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local ObjectAction = require(script.Parent.Parent.Modules.ObjectAction)
 
 local Player = Players.LocalPlayer
@@ -24,6 +25,7 @@ local BillboardRadialUI = {}
 local AdorneeModel: Model? = nil
 
 local OriginalButtonPositions: { [TextButton]: UDim2 } = {}
+local INPUT_DEBOUNCE_SECONDS = 0.2
 
 local function registerButton(button: TextButton)
 	if OriginalButtonPositions[button] then
@@ -65,28 +67,39 @@ local function AnimateButtonsOut()
 	end
 end
 
-local function UiClickGuard(length: number?)
+local function UiClickGuard(length: number?): boolean
 	if RadialBillboardButtonEnabled.Value then
-		return
+		return false
 	end
-	local cooldown = length or 0.18
+
+	local cooldown = length or INPUT_DEBOUNCE_SECONDS
+	local key = "BillboardRadialUI/Action"
+	if not Debounce.TryAcquire(key, cooldown, Player.UserId) then
+		return false
+	end
+
 	RadialBillboardButtonEnabled.Value = true
 	task.delay(cooldown, function()
 		RadialBillboardButtonEnabled.Value = false
 	end)
+	return true
 end
 
 function BillboardRadialUI.Init()
 	ObjectSelectorContext.CloseSelector.Pressed:Connect(function()
+		if not UiClickGuard() then
+			return
+		end
 		BillboardRadialUI.Hide()
 		ObjectAction.Close()
-		UiClickGuard() -- The order here is important to prevent input conflicts, this must be called after hiding the UI
 		print("CloseSelector action triggered")
 	end)
 
 	ObjectSelectorContext.MoveObject.Pressed:Connect(function()
+		if not UiClickGuard() then
+			return
+		end
 		print("MoveObject action triggered")
-		UiClickGuard()
 		if not AdorneeModel then
 			warn("No model selected for move action.")
 			return
@@ -97,8 +110,10 @@ function BillboardRadialUI.Init()
 	end)
 
 	ObjectSelectorContext.RotateObject.Pressed:Connect(function()
+		if not UiClickGuard() then
+			return
+		end
 		print("RotateObject action triggered")
-		UiClickGuard()
 		if not AdorneeModel then
 			warn("No model selected for rotate action.")
 			return
@@ -107,8 +122,10 @@ function BillboardRadialUI.Init()
 	end)
 
 	ObjectSelectorContext.DeleteObject.Pressed:Connect(function()
+		if not UiClickGuard() then
+			return
+		end
 		print("DeleteObject action triggered")
-		UiClickGuard()
 		if not AdorneeModel then
 			warn("No model selected for delete action.")
 			return
@@ -117,8 +134,10 @@ function BillboardRadialUI.Init()
 	end)
 
 	ObjectSelectorContext.CopyObject.Pressed:Connect(function()
+		if not UiClickGuard() then
+			return
+		end
 		print("CopyObject action triggered")
-		UiClickGuard()
 		if not AdorneeModel then
 			warn("No model selected for copy action.")
 			return

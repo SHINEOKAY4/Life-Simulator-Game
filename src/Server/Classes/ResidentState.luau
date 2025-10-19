@@ -186,6 +186,30 @@ function ResidentState:ClearQueuedActions()
 	end
 end
 
+function ResidentState:ForceStopAllActions(reason: string?)
+	local cancelReason = reason or "ForceStop"
+	self:CancelCurrentAction(cancelReason)
+	self:ClearQueuedActions()
+	if self.ActionQueue and typeof(self.ActionQueue) == "table" then
+		self.ActionQueue.CurrentActionName = nil
+	end
+	local activeAction = self.CurrentAction
+	self.CurrentAction = nil
+	self.IsBusy = false
+	if self.SetDestination then
+		self:SetDestination(nil)
+	else
+		self.Destination = nil
+	end
+	self:ResetCancelToken()
+	if self.ActionChanged then
+		self.ActionChanged:Fire(nil)
+	end
+	if activeAction and self.ActionCompleted then
+		self.ActionCompleted:Fire(activeAction, false, cancelReason)
+	end
+end
+
 function ResidentState:SetManualOverrideState(state: { [string]: any }?)
 	self.CurrentOverride = state
 end

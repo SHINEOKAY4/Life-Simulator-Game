@@ -7,6 +7,7 @@ local Players = game:GetService("Players")
 
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local BillboardRadialUI = require(script.Parent.Parent.UserInterface.BillboardRadialUI)
 
 local Player = Players.LocalPlayer
@@ -26,6 +27,12 @@ local ObjectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnab
 local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
 
 local ObjectSelector = {}
+local INPUT_DEBOUNCE_SECONDS = 0.25
+
+local function runDebounced(actionName: string, callback: () -> ()): ()
+	local key = string.format("ObjectSelector/%s", actionName)
+	Debounce.RunIfAvailable(key, INPUT_DEBOUNCE_SECONDS, callback, Player.UserId)
+end
 
 local function ClearSelection()
 	SelectionHighlight.Adornee = nil
@@ -105,25 +112,30 @@ function ObjectSelector.Init()
 		if RadialBillboardButtonEnabled.Value then
 			return
 		end
-		OnWorldClick()
+
+		runDebounced("Select", function()
+			OnWorldClick()
+		end)
 	end)
 
 	ObjectSelectorContext.Toggle.Pressed:Connect(function()
-		print("Toggling Object Selector")
-		if not PlotFinder.IsWithinBounds(Player) then
-			warn("Player is not within plot bounds.")
-			return
-		end
+		runDebounced("Toggle", function()
+			print("Toggling Object Selector")
+			if not PlotFinder.IsWithinBounds(Player) then
+				warn("Player is not within plot bounds.")
+				return
+			end
 
-		ObjectSelectorEnabled.Value = not ObjectSelectorEnabled.Value
+			ObjectSelectorEnabled.Value = not ObjectSelectorEnabled.Value
 
-		if ObjectSelectorEnabled.Value then
-			print("Object Selector Enabled")
-			ObjectSelector.Show()
-		else
-			print("Object Selector Disabled")
-			ObjectSelector.Hide()
-		end
+			if ObjectSelectorEnabled.Value then
+				print("Object Selector Enabled")
+				ObjectSelector.Show()
+			else
+				print("Object Selector Disabled")
+				ObjectSelector.Hide()
+			end
+		end)
 	end)
 
 	Player:GetAttributeChangedSignal("WithinPlot"):Connect(function()

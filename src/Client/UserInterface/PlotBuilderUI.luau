@@ -3,8 +3,10 @@
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local PlotBuilder = require(script.Parent.Parent.Modules.PlotBuilder)
+local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -28,6 +30,18 @@ local PlotBuilderUI = {}
 local ActiveView: string? = nil
 type CategoryPanel = "Home" | "Furnitures" | "Environment"
 local ActivePanel: CategoryPanel? = nil
+local INPUT_DEBOUNCE_SECONDS = 0.2
+
+local function connectDebounced(action: InputAction, actionName: string, callback: () -> ()): ()
+	action.Pressed:Connect(function()
+		Debounce.RunIfAvailable(
+			string.format("PlotBuilderUI/%s", actionName),
+			INPUT_DEBOUNCE_SECONDS,
+			callback,
+			Player.UserId
+		)
+	end)
+end
 
 local CATEGORY_TAGS = {
 	Floors = "Floor",
@@ -210,82 +224,82 @@ function PlotBuilderUI:Init()
 		end
 	end)
 
-	CategorySelection.Home.Pressed:Connect(function()
+	connectDebounced(CategorySelection.Home, "CategoryHome", function()
 		print("CategorySelection Home button pressed")
 		switchCategoryPanel("Home")
 	end)
 
-	CategorySelection.Furnitures.Pressed:Connect(function()
+	connectDebounced(CategorySelection.Furnitures, "CategoryFurniture", function()
 		print("CategorySelection Furniture button pressed")
 		switchCategoryPanel("Furnitures")
 	end)
 
-	CategorySelection.Environment.Pressed:Connect(function()
+	connectDebounced(CategorySelection.Environment, "CategoryEnvironment", function()
 		print("CategorySelection Environment button pressed")
 		switchCategoryPanel("Environment")
 	end)
 
-	HomeSelection.Floors.Pressed:Connect(function()
+	connectDebounced(HomeSelection.Floors, "HomeFloors", function()
 		print("HomeSelection Floors button pressed")
 		setActiveCategory("Floors")
 	end)
 
-	HomeSelection.Walls.Pressed:Connect(function()
+	connectDebounced(HomeSelection.Walls, "HomeWalls", function()
 		print("HomeSelection Walls button pressed")
 		setActiveCategory("Walls")
 	end)
 
-	HomeSelection.Roofs.Pressed:Connect(function()
+	connectDebounced(HomeSelection.Roofs, "HomeRoofs", function()
 		print("HomeSelection Roofs button pressed")
 		setActiveCategory("Roofs")
 	end)
 
-	HomeSelection.Decorations.Pressed:Connect(function()
+	connectDebounced(HomeSelection.Decorations, "HomeDecorations", function()
 		print("HomeSelection Decorations button pressed")
 		setActiveCategory("Decorations")
 	end)
 
-	HomeSelection.Doors.Pressed:Connect(function()
+	connectDebounced(HomeSelection.Doors, "HomeDoors", function()
 		print("HomeSelection Doors button pressed")
 		setActiveCategory("Doors")
 	end)
 
-	HomeSelection.Appliances.Pressed:Connect(function()
+	connectDebounced(HomeSelection.Appliances, "HomeAppliances", function()
 		print("HomeSelection Appliances button pressed")
 		setActiveCategory("Appliances")
 	end)
 
-	FurnitureSelection.Chairs.Pressed:Connect(function()
+	connectDebounced(FurnitureSelection.Chairs, "FurnitureChairs", function()
 		print("FurnitureSelection Chairs button pressed")
 		setActiveCategory("Chairs")
 	end)
 
-	FurnitureSelection.Tables.Pressed:Connect(function()
+	connectDebounced(FurnitureSelection.Tables, "FurnitureTables", function()
 		print("FurnitureSelection Tables button pressed")
 		setActiveCategory("Tables")
 	end)
 
-	FurnitureSelection.Beds.Pressed:Connect(function()
+	connectDebounced(FurnitureSelection.Beds, "FurnitureBeds", function()
 		print("FurnitureSelection Beds button pressed")
 		setActiveCategory("Beds")
 	end)
 
-	EnvironmentSelection.Outdoors.Pressed:Connect(function()
+	connectDebounced(EnvironmentSelection.Outdoors, "EnvironmentOutdoors", function()
 		print("FurnitureSelection Outdoors button pressed")
 		setActiveCategory("Outdoors")
 	end)
 
-	EnvironmentSelection.Trees.Pressed:Connect(function()
+	connectDebounced(EnvironmentSelection.Trees, "EnvironmentTrees", function()
 		print("EnvironmentSelection Trees button pressed")
 		setActiveCategory("Trees")
 	end)
 
-	EnvironmentSelection.Plants.Pressed:Connect(function()
+	connectDebounced(EnvironmentSelection.Plants, "EnvironmentPlants", function()
 		print("EnvironmentSelection Plants button pressed")
 		setActiveCategory("Plants")
 	end)
 
-	EnvironmentSelection.Rocks.Pressed:Connect(function()
+	connectDebounced(EnvironmentSelection.Rocks, "EnvironmentRocks", function()
 		print("EnvironmentSelection Rocks button pressed")
 		setActiveCategory("Rocks")
 	end)

@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -16,6 +17,7 @@ local PlotGridOverlayEnabled = ActiveQueryFolder:FindFirstChild("PlotGridOverlay
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
 
 local PlotGridOverlay = {}
+local INPUT_DEBOUNCE_SECONDS = 0.2
 
 function PlotGridOverlay.Init()
 	-- Ensure the grid overlay is also toggled off when PlotBuilder is disabled
@@ -30,13 +32,15 @@ function PlotGridOverlay.Init()
 	end)
 
 	PlotContext.ToggleGridAction.Pressed:Connect(function()
-		print("PlotContext button pressed.")
-		PlotGridOverlayEnabled.Value = not PlotGridOverlayEnabled.Value
-		if PlotGridOverlayEnabled.Value then
-			PlotGridOverlay.Show()
-		else
-			PlotGridOverlay.Hide()
-		end
+		Debounce.RunIfAvailable("PlotGridOverlay/Toggle", INPUT_DEBOUNCE_SECONDS, function()
+			print("PlotContext button pressed.")
+			PlotGridOverlayEnabled.Value = not PlotGridOverlayEnabled.Value
+			if PlotGridOverlayEnabled.Value then
+				PlotGridOverlay.Show()
+			else
+				PlotGridOverlay.Hide()
+			end
+		end, Player.UserId)
 	end)
 end
 
