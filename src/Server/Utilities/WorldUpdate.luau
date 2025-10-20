@@ -31,6 +31,14 @@ local function ensureConnection()
 		return
 	end
 	_connection = RunService.Heartbeat:Connect(function(dt)
+		if _taskCount == 0 then
+			if _connection then
+				_connection:Disconnect()
+				_connection = nil
+			end
+			return
+		end
+		
 		for name, task in pairs(_tasks) do
 			task.Accum += dt
 			local interval = task.Interval
@@ -40,14 +48,6 @@ local function ensureConnection()
 				if _tasks[name] ~= task then
 					break
 				end
-			end
-		end
-
-		-- Auto-shutdown when no tasks remain.
-		if _taskCount == 0 then
-			if _connection then
-				_connection:Disconnect()
-				_connection = nil
 			end
 		end
 	end)

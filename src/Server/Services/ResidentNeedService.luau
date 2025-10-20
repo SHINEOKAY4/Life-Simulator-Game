@@ -34,27 +34,38 @@ local function rebuildResidentSnapshot()
 		local player = Players:GetPlayerByUserId(userId)
 		if player then
 			for residentName, residentState in pairs(residentMap) do
-				table.insert(Residents, {
+				Residents[#Residents + 1] = {
 					Player = player,
 					ResidentName = residentName,
 					State = residentState,
-				})
+				}
 			end
 		end
 	end
 end
 
 local function pruneResidents(): boolean
+	local writeIndex = 1
 	local removed = false
-	for index = #Residents, 1, -1 do
-		local entry = Residents[index]
+	
+	for readIndex = 1, #Residents do
+		local entry = Residents[readIndex]
 		local player = entry.Player
 		local residentState = entry.State
-		if player.Parent == nil or residentState == nil or residentState.ActionQueue == nil then
-			table.remove(Residents, index)
+		if player.Parent ~= nil and residentState ~= nil and residentState.ActionQueue ~= nil then
+			if writeIndex ~= readIndex then
+				Residents[writeIndex] = entry
+			end
+			writeIndex += 1
+		else
 			removed = true
 		end
 	end
+	
+	for i = #Residents, writeIndex, -1 do
+		Residents[i] = nil
+	end
+	
 	return removed
 end
 

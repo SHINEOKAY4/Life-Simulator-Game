@@ -246,12 +246,14 @@ function Grid:FootprintCells(
 	assert(widthInCells > 0 and depthInCells > 0, "Footprint size must be greater than 0")
 
 	local rotatedWidth, rotatedDepth = RotateFootprint(widthInCells, depthInCells, facing)
+	local maxCellX = anchorCellX + rotatedWidth - 1
+	local maxCellZ = anchorCellZ + rotatedDepth - 1
 
 	assert(
 		anchorCellX >= 1
 			and anchorCellZ >= 1
-			and (anchorCellX + rotatedWidth - 1) <= self.Columns
-			and (anchorCellZ + rotatedDepth - 1) <= self.Rows,
+			and maxCellX <= self.Columns
+			and maxCellZ <= self.Rows,
 		"Footprint goes out of bounds"
 	)
 
@@ -259,14 +261,13 @@ function Grid:FootprintCells(
 	local indices = table.create(count)
 	local i = 0
 	local columns = self.Columns
+	local baseRowOffset = (anchorCellZ - 1) * columns
 
 	for offsetZ = 0, rotatedDepth - 1 do
-		local z = anchorCellZ + offsetZ
-		local rowOffset = (z - 1) * columns
+		local rowOffset = baseRowOffset + offsetZ * columns
 		for offsetX = 0, rotatedWidth - 1 do
-			local x = anchorCellX + offsetX
 			i += 1
-			indices[i] = rowOffset + x
+			indices[i] = rowOffset + anchorCellX + offsetX
 		end
 	end
 
@@ -297,18 +298,16 @@ function Grid:ClippedFootprintCells(
 	local count = 0
 	local columns = self.Columns
 	local rows = self.Rows
+	local minX = math.max(1, anchorCellX)
+	local maxX = math.min(columns, anchorCellX + rotatedWidth - 1)
+	local minZ = math.max(1, anchorCellZ)
+	local maxZ = math.min(rows, anchorCellZ + rotatedDepth - 1)
 
-	for offsetZ = 0, rotatedDepth - 1 do
-		local z = anchorCellZ + offsetZ
-		if z >= 1 and z <= rows then
-			local rowOffset = (z - 1) * columns
-			for offsetX = 0, rotatedWidth - 1 do
-				local x = anchorCellX + offsetX
-				if x >= 1 and x <= columns then
-					count += 1
-					indices[count] = rowOffset + x
-				end
-			end
+	for z = minZ, maxZ do
+		local rowOffset = (z - 1) * columns
+		for x = minX, maxX do
+			count += 1
+			indices[count] = rowOffset + x
 		end
 	end
 

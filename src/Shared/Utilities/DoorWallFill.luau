@@ -52,13 +52,16 @@ local function getWallVisualInfo(wallId: string): WallVisualInfo?
 
 	local _, wallSize = wallModel:GetBoundingBox()
 	local samplePart = findFirstBasePart(wallModel)
+	
+	local defaultMaterial = Enum.Material.SmoothPlastic
+	local defaultColor = Color3.fromRGB(255, 255, 255)
 
 	local info: WallVisualInfo = {
 		Size = wallSize,
-		Material = samplePart and samplePart.Material or Enum.Material.SmoothPlastic,
-		Color = samplePart and samplePart.Color or Color3.fromRGB(255, 255, 255),
-		Transparency = samplePart and samplePart.Transparency or 0,
-		Reflectance = samplePart and samplePart.Reflectance or 0,
+		Material = if samplePart then samplePart.Material else defaultMaterial,
+		Color = if samplePart then samplePart.Color else defaultColor,
+		Transparency = if samplePart then samplePart.Transparency else 0,
+		Reflectance = if samplePart then samplePart.Reflectance else 0,
 	}
 
 	wallModel:Destroy()

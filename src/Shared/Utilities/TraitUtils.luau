@@ -10,32 +10,22 @@ local TraitUtils = {}
 
 type TraitProfile = TraitConfig.TraitProfile
 
-local function resolveTrait(traitName: string): TraitProfile?
-	return TraitConfig[traitName]
-end
-
-local function iterTraits(traits: { string }?): () -> (number?, string?)
-	local list = traits or {}
-	local index = 0
-	return function()
-		index += 1
-		local value = list[index]
-		if value ~= nil then
-			return index, value
-		end
-		return nil, nil
-	end
-end
-
 function TraitUtils.GetNeedDecayMultiplier(traits: { string }?, needName: string): number
+	if not traits then
+		return 1
+	end
+	
 	local multiplier = 1
-	for _, traitName in iterTraits(traits) do
-		if traitName then
-			local profile = resolveTrait(traitName)
-			local lookup = profile and profile.NeedDecayMultipliers
-			local traitMultiplier = lookup and lookup[needName]
-			if traitMultiplier ~= nil then
-				multiplier *= traitMultiplier
+	for i = 1, #traits do
+		local traitName = traits[i]
+		local profile = TraitConfig[traitName]
+		if profile then
+			local lookup = profile.NeedDecayMultipliers
+			if lookup then
+				local traitMultiplier = lookup[needName]
+				if traitMultiplier ~= nil then
+					multiplier *= traitMultiplier
+				end
 			end
 		end
 	end
@@ -43,14 +33,21 @@ function TraitUtils.GetNeedDecayMultiplier(traits: { string }?, needName: string
 end
 
 function TraitUtils.GetNeedScoreBias(traits: { string }?, needName: string): number
+	if not traits then
+		return 0
+	end
+	
 	local bias = 0
-	for _, traitName in iterTraits(traits) do
-		if traitName then
-			local profile = resolveTrait(traitName)
-			local lookup = profile and profile.NeedScoreBias
-			local traitBias = lookup and lookup[needName]
-			if traitBias ~= nil then
-				bias += traitBias
+	for i = 1, #traits do
+		local traitName = traits[i]
+		local profile = TraitConfig[traitName]
+		if profile then
+			local lookup = profile.NeedScoreBias
+			if lookup then
+				local traitBias = lookup[needName]
+				if traitBias ~= nil then
+					bias += traitBias
+				end
 			end
 		end
 	end

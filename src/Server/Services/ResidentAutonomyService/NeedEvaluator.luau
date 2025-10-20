@@ -63,11 +63,12 @@ function NeedEvaluator.evaluate(
 	local needs = State.getNeeds()
 
 	local hungerDef = needs.Hunger
-	local hungerValue = if hungerDef then resident:GetNeed("Hunger") else nil
+	local hungerValue: number? = nil
 	local hungerCritical = false
 	local survivalSatisfied = true
 
-	if hungerDef and hungerValue ~= nil then
+	if hungerDef then
+		hungerValue = resident:GetNeed("Hunger")
 		hungerCritical = hungerValue <= hungerDef.Critical
 		if hungerValue < hungerDef.Low then
 			survivalSatisfied = false
@@ -92,6 +93,9 @@ function NeedEvaluator.evaluate(
 	
 	local residentTraits = resident:GetTraits()
 
+	local isNightTime = Utils.isNight(clockTime)
+	local circadianSleepBias = State.getCircadian().SleepBias
+
 	for _, needName in ipairs(State.NeedEvaluationOrder) do
 		local def = needs[needName]
 		if def then
@@ -102,11 +106,8 @@ function NeedEvaluator.evaluate(
 					continue
 				end
 
-				if needName == "Energy" and hungerDef and hungerValue ~= nil then
-					if hungerCritical then
-						continue
-					end
-					if hungerValue < hungerDef.Low and hungerStationsPlaced then
+				if needName == "Energy" and hungerDef and hungerValue then
+					if hungerCritical or (hungerValue < hungerDef.Low and hungerStationsPlaced) then
 						continue
 					end
 				end
@@ -135,14 +136,15 @@ function NeedEvaluator.evaluate(
 					State.clearNonSurvivalSuppression(resident, stationType)
 				end
 
-				local deficit = math.max(0, def.Low - value)
+				local deficit = def.Low - value
 				if deficit > 0 then
-					local score = math.clamp(deficit / math.max(1, def.Low), 0, 1)
+					local defLow = def.Low
+					local score = math.clamp(deficit / math.max(1, defLow), 0, 1)
 					if value <= def.Critical then
 						score += 1
 					end
-					if needName == "Energy" and Utils.isNight(clockTime) then
-						score *= 1 + State.getCircadian().SleepBias
+					if needName == "Energy" and isNightTime then
+						score *= 1 + circadianSleepBias
 					end
 					local traitBias = TraitUtils.GetNeedScoreBias(residentTraits, needName)
 					local moodBias = resident:GetMoodBias(needName, nowClock)
@@ -159,11 +161,8 @@ function NeedEvaluator.evaluate(
 					if score > 0 then
 						local cooldownSeconds = State.getNeedCooldownSeconds(needName, def)
 						local onCooldown = State.isNeedOnCooldown(resident, needName, cooldownSeconds, nowClock)
-						if onCooldown and needName == "Energy" and energyDef and energyValue ~= nil then
-							local bypass = value <= def.Critical
-							if not bypass and value < def.Low and Utils.isNight(clockTime) then
-								bypass = true
-							end
+						if onCooldown and needName == "Energy" and energyDef and energyValue then
+							local bypass = value <= def.Critical or (value < defLow and isNightTime)
 							if bypass then
 								onCooldown = false
 							end
@@ -174,9 +173,7 @@ function NeedEvaluator.evaluate(
 							if uniqueId and stationRecord and itemSpec and stationModel then
 								if score > bestScore then
 									bestScore = score
-									local restOverride = if needName == "Energy"
-											and energyDef
-											and energyValue ~= nil
+									local restOverride = if needName == "Energy" and energyDef and energyValue
 										then chooseRestMode(energyDef, energyValue, clockTime)
 										else nil
 									bestDecision = {
