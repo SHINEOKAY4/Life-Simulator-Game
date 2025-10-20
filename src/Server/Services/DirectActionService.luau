@@ -141,32 +141,61 @@ local function enqueueOverrideAction(assignment: StationAssignment)
 	end)
 end
 
+local function forceClearActions(residentState: any, reason: string)
+	if typeof(residentState.ForceStopAllActions) == "function" then
+		residentState:ForceStopAllActions(reason)
+		return
+	end
+	residentState:CancelCurrentAction(reason)
+	residentState:ClearQueuedActions()
+	local activeName = residentState.CurrentAction
+	if residentState.SetDestination then
+		residentState:SetDestination(nil)
+	else
+		residentState.Destination = nil
+	end
+	residentState.CurrentAction = nil
+	residentState.IsBusy = false
+	if residentState.ActionChanged then
+		residentState.ActionChanged:Fire(nil)
+	end
+	if activeName and residentState.ActionCompleted then
+		residentState.ActionCompleted:Fire(activeName, false, reason)
+	end
+	residentState:ResetCancelToken()
+end
+
+local function ensureCollapseReleased(residentState: any, timeoutSeconds: number?): (boolean, string?)
+	local releaseFn = residentState._EnergyCollapseRelease
+	if typeof(releaseFn) ~= "function" then
+		return true, nil
+	end
+	local energyValue = residentState:GetNeed("Energy")
+	if typeof(energyValue) ~= "number" or energyValue < COLLAPSE_RELEASE_ENERGY then
+		return false, "Resident is collapsed"
+	end
+	releaseFn()
+	ResidentMovement.ClearRestPose(residentState)
+	local idle = residentState:WaitUntilIdle(timeoutSeconds)
+	if idle then
+		residentState:ResetCancelToken()
+		return true, nil
+	end
+	forceClearActions(residentState, "ManualOverride")
+	local cleared = residentState:WaitUntilIdle(timeoutSeconds)
+	return cleared, if cleared then nil else "Resident is busy"
+end
+
 local function prepareResidentForOverride(residentState: any, timeoutSeconds: number?): (boolean, string?)
+	local collapseReleased, collapseReason = ensureCollapseReleased(residentState, timeoutSeconds)
+	if not collapseReleased then
+		return false, collapseReason
+	end
 	residentState:CancelCurrentAction("ManualOverride")
 	residentState:ClearQueuedActions()
 	local idle = residentState:WaitUntilIdle(timeoutSeconds)
 	if not idle then
-		if typeof(residentState.ForceStopAllActions) == "function" then
-			residentState:ForceStopAllActions("ManualOverride")
-		else
-			residentState:CancelCurrentAction("ManualOverride")
-			residentState:ClearQueuedActions()
-			local activeName = residentState.CurrentAction
-			if residentState.SetDestination then
-				residentState:SetDestination(nil)
-			else
-				residentState.Destination = nil
-			end
-			residentState.CurrentAction = nil
-			residentState.IsBusy = false
-			if residentState.ActionChanged then
-				residentState.ActionChanged:Fire(nil)
-			end
-			if activeName and residentState.ActionCompleted then
-				residentState.ActionCompleted:Fire(activeName, false, "ManualOverride")
-			end
-			residentState:ResetCancelToken()
-		end
+		forceClearActions(residentState, "ManualOverride")
 	else
 		residentState:ResetCancelToken()
 	end
@@ -265,6 +294,9 @@ function DirectActionService.AssignStationToResident(player: Player, residentNam
 	if not residentState then
 		return false, "Resident not found"
 	end
+	if residentState.IsOnShift then
+		return false, "Resident is currently working"
+	end
 
 	local collapseActive = typeof(residentState._EnergyCollapseRelease) == "function"
 	if collapseActive then
@@ -325,6 +357,9 @@ function DirectActionService.MoveResidentToWorldPosition(player: Player, residen
 	local residentState = ResidentService.GetResident(player, residentName)
 	if not residentState then
 		return false, "Resident not found"
+	end
+	if residentState.IsOnShift then
+		return false, "Resident is currently working"
 	end
 
 	local collapseActive = typeof(residentState._EnergyCollapseRelease) == "function"

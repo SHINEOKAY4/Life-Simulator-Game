@@ -135,8 +135,14 @@ function FallbackActions.evaluateResidentJob(
 		return false
 	end
 	local save = resident.Save
-	local occupation = if save then save.Occupation else nil
-	local hasJob = typeof(occupation) == "string" and occupation ~= "" and occupation ~= "Unemployed"
+	local currentCareerId = if save then save.CurrentCareerId else nil
+	if typeof(currentCareerId) ~= "string" or currentCareerId == "" then
+		local fallbackOccupation = if save then save.Occupation else nil
+		if typeof(fallbackOccupation) == "string" and fallbackOccupation ~= "Unemployed" then
+			currentCareerId = fallbackOccupation
+		end
+	end
+	local hasJob = typeof(currentCareerId) == "string" and currentCareerId ~= ""
 	if hasJob then
 		return false
 	end

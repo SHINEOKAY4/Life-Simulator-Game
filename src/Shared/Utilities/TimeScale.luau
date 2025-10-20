@@ -27,4 +27,16 @@ function TimeScale.GetClockTime(): number
 	return (phase * 24 + startClock) % 24
 end
 
+function TimeScale.GetDayIndex(): number
+	local secPerDay = TimeScale.GetSecondsPerFullDay()
+	local serverSeconds = Workspace:GetServerTimeNow()
+	return math.floor(serverSeconds / secPerDay)
+end
+
+function TimeScale.GetSecondsIntoDay(): number
+	local secPerDay = TimeScale.GetSecondsPerFullDay()
+	local serverSeconds = Workspace:GetServerTimeNow()
+	return serverSeconds % secPerDay
+end
+
 return TimeScale

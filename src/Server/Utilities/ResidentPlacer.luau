@@ -7,6 +7,22 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 
 local ResidentPlacer = {}
 
+local hiddenFolder: Folder?
+
+local function getHiddenFolder(): Folder
+	if hiddenFolder and hiddenFolder.Parent then
+		return hiddenFolder
+	end
+	local container = ReplicatedStorage:FindFirstChild("ResidentOffsite")
+	if not container or not container:IsA("Folder") then
+		container = Instance.new("Folder")
+		container.Name = "ResidentOffsite"
+		container.Parent = ReplicatedStorage
+	end
+	hiddenFolder = container
+	return container
+end
+
 function ResidentPlacer.Spawn(player, residentState)
 	local plotIndex = player:GetAttribute("OwnedPlotIndex") :: number
 	if not plotIndex then
@@ -31,7 +47,11 @@ function ResidentPlacer.Spawn(player, residentState)
 end
 
 function ResidentPlacer.Despawn(residentState) -- Only moves parent to nil, does not destroy
-	residentState.Model.Parent = nil
+	local model = residentState.Model
+	if not model then
+		return
+	end
+	model.Parent = getHiddenFolder()
 end
 
 function ResidentPlacer.DespawnAll(allResidents) -- allResidents: {ResidentState}

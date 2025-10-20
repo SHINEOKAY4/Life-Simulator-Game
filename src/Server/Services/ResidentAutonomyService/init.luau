@@ -108,7 +108,11 @@ local function handleStationRemoved(player: Player, _stationType: string, _uniqu
 			if residentState then
 				residentState:CancelCurrentAction("StationRemoved")
 				residentState:ClearQueuedActions()
+				-- Ensure we clear any rest pose (lying down) in case the station (e.g., a bed)
+				-- was removed while the resident was resting. LeaveSeat handles seated
+				-- residents but does not clear rest poses applied for lying down.
 				ResidentMovement.LeaveSeat(residentState, nil)
+				ResidentMovement.ClearRestPose(residentState)
 				State.setPending(residentState, nil)
 				State.clearNextEvaluation(residentState)
 				task.defer(function()

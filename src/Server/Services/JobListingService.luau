@@ -3,6 +3,7 @@ local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local HttpService = game:GetService("HttpService")
 
+local CareerService = require(ServerScriptService.Server.Services.CareerService)
 local JobPackets = require(ReplicatedStorage.Network.JobPackets)
 local JobCatalog = require(ReplicatedStorage.Shared.Configurations.JobCatalog)
 local DataStore = require(ServerStorage.ServerPackages.DataStore)
@@ -172,6 +173,9 @@ local function deepCopyMetrics(source: Metrics): Metrics
 end
 
 local function validateResidentForJob(player: Player, residentName: string?, job: JobEntry): (boolean, string?)
+	if job.Type == "Gig" then
+		return true, nil
+	end
 	if job.Requirements == nil or #job.Requirements == 0 then
 		return true, nil
 	end
@@ -731,6 +735,8 @@ local function reserveJobSlot(player: Player, jobId: string, residentName: strin
 		end)
 		return false, "Positions for that listing are gone."
 	end
+
+	-- == This is for gigs == --
 	local listing = board.Listings[listingIndex]
 	if listing.Unlimited then
 		listing.LastTakenAt = now
@@ -745,6 +751,7 @@ local function reserveJobSlot(player: Player, jobId: string, residentName: strin
 		applyBoard(board)
 		return true, job.Name .. " secured!"
 	end
+	--- ==================== ---
 	if (listing.SlotsRemaining or 0) <= 0 then
 		table.remove(board.Listings, listingIndex)
 		board.Metrics = computeMetrics(board.Listings)
@@ -779,7 +786,17 @@ local function reserveJobSlot(player: Player, jobId: string, residentName: strin
 			tryRestock()
 		end)
 	end
-	return true, job.Name .. " secured!"
+
+	local result = CareerService.SetCareerForResident(player, residentName, jobId)
+	if not result.Success then
+		warn(
+			("[JobListingService] Career assignment failed after reservation for %s: %s"):format(
+				tostring(jobId),
+				tostring(result.Message)
+			)
+		)
+	end
+	return true, result.Message or (job.Name .. " secured!")
 end
 
 function JobListingService.Init()

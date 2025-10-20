@@ -6,6 +6,9 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local ResidentUI = require(script.Parent.ResidentUI)
+local GigManager = require(script.Parent.Parent.Modules.GigManager)
+local JobPackets = require(ReplicatedStorage.Network.JobPackets)
 local JobCatalog = require(ReplicatedStorage.Shared.Configurations.JobCatalog)
 local Timer = require(ReplicatedStorage.Shared.Utilities.Timer)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
@@ -34,6 +37,7 @@ local GigTemplate = InterfacesTemplateFolder:FindFirstChild("GigTemplate") :: Te
 local JobListScrollingFrame = ListContainer.JobList
 
 local JobSelectionContext = JobSelectionGui:WaitForChild("JobSelectionContext")
+
 local BlurEffect = Lighting:FindFirstChild("Blur")
 
 local InputContext = Instance.new("InputContext")
@@ -232,7 +236,11 @@ local function updateCardText(jobFolder: JobFolder, jobCard: TextButton, jobInfo
 	pay.Text = string.format("$ %s per %s", tostring(basePay), payUnit)
 	title.Text = jobInfo.Name
 	if availableSlots then
-		availableSlots.Text = string.format("Available: %s/%s", tostring(slotsRemaining), tostring(maxSlots))
+		if jobInfo.Type == "Gig" then
+			availableSlots.Text = "Available: Unlimited"
+		else
+			availableSlots.Text = string.format("Available: %s/%s", tostring(slotsRemaining), tostring(maxSlots))
+		end
 	end
 end
 
@@ -370,6 +378,46 @@ function JobSelectionUI.Init()
 		end
 	end)
 
+	JobSelectionContext.ApplyButtonAction.Pressed:Connect(function()
+		runDebounced("Apply", function()
+			if selectedCard then
+				local jobId = selectedCard.Name
+				local jobInfo = getJobInfo(jobId)
+				if jobInfo then
+					print("Applying for job:", jobInfo.Name)
+					if jobInfo.Type == "Gig" then
+						local success, message, runId = GigManager.StartGig(jobId)
+						print("Gig start result:", success, message, runId)
+						if not success then
+							warn(message)
+							return
+						end
+						JobSelectionUI.Hide()
+						return
+					end
+					local residentModel = ResidentUI.GetCurrentSelectedResident()
+					local residentName = if residentModel then residentModel.Name else nil
+					if not residentName then
+						warn("No resident selected to apply for job.")
+						return
+					end
+
+					local success, message = JobPackets.RequestJob:Fire(jobId, residentName)
+					print("Career application result:", success, message)
+					if not success then
+						warn(message)
+						return
+					end
+					JobSelectionUI.Hide()
+					ResidentUI.Hide(false) -- false to clear selection
+				else
+					warn("No job info found for selected job ID:", jobId)
+				end
+			else
+				warn("No job selected to apply for.")
+			end
+		end)
+	end)
 	JobSelectionContext.Toggle.Pressed:Connect(function()
 		runDebounced("Toggle", function()
 			if JobSelectionGui.Enabled then

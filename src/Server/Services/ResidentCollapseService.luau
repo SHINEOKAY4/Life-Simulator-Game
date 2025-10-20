@@ -17,10 +17,13 @@ local ResidentCollapseService = {}
 local energyDef = NeedConfig.Needs.Energy
 local COLLAPSE_RELEASE_ENERGY = 4 -- minimum energy needed before regaining manual control
 local COLLAPSE_CHANNEL = "Collapse"
+local COLLAPSE_RELEASE_REASON_HUNGER = "HungerInterrupt"
 
 local collapseConnections = setmetatable({} :: { [any]: RBXScriptConnection }, { __mode = "k" })
 local contextByResident = setmetatable({} :: { [any]: { UserId: number?, Name: string } }, { __mode = "k" })
 local activeCollapse = setmetatable({} :: { [any]: boolean }, { __mode = "k" })
+local energyPauseTokens = setmetatable({} :: { [any]: string }, { __mode = "k" })
+local releaseReasons = setmetatable({} :: { [any]: string }, { __mode = "k" })
 
 local collapseChat = {
 	{ Text = "I'm spent... hitting the floor." },
@@ -41,10 +44,68 @@ local function setCollapseAttribute(residentState: any, active: boolean)
 	end
 end
 
+local function applyEnergyPause(residentState: any)
+	if energyPauseTokens[residentState] ~= nil then
+		return
+	end
+	if typeof(residentState.PushNeedPause) == "function" then
+		residentState:PushNeedPause("Energy")
+		energyPauseTokens[residentState] = "Need"
+		return
+	end
+	if typeof(residentState.PushNeedDecayPause) == "function" then
+		residentState:PushNeedDecayPause()
+		energyPauseTokens[residentState] = "Global"
+		return
+	end
+	if typeof(residentState.SetNeedDecayPaused) == "function" then
+		residentState:SetNeedDecayPaused(true)
+		energyPauseTokens[residentState] = "Toggle"
+	end
+end
+
+local function releaseEnergyPause(residentState: any)
+	local token = energyPauseTokens[residentState]
+	if token == nil then
+		return
+	end
+	energyPauseTokens[residentState] = nil
+	if token == "Need" then
+		if typeof(residentState.PopNeedPause) == "function" then
+			residentState:PopNeedPause("Energy")
+		end
+		return
+	end
+	if token == "Global" then
+		if typeof(residentState.PopNeedDecayPause) == "function" then
+			residentState:PopNeedDecayPause()
+		end
+		return
+	end
+	if token == "Toggle" then
+		if typeof(residentState.SetNeedDecayPaused) == "function" then
+			residentState:SetNeedDecayPaused(false)
+		end
+	end
+end
+
+local function setReleaseReason(residentState: any, reason: string)
+	releaseReasons[residentState] = reason
+end
+
+local function takeReleaseReason(residentState: any): string?
+	local reason = releaseReasons[residentState]
+	if reason ~= nil then
+		releaseReasons[residentState] = nil
+	end
+	return reason
+end
+
 local function releaseCollapseHold(residentState: any)
 	activeCollapse[residentState] = nil
 	AutonomyState.setPending(residentState, nil)
 	setCollapseAttribute(residentState, false)
+	releaseEnergyPause(residentState)
 	residentState._EnergyCollapseRelease = nil
 end
 
@@ -74,11 +135,13 @@ local function startCollapse(residentState: any, context: { UserId: number?, Nam
 	if activeCollapse[residentState] then
 		return
 	end
+	releaseReasons[residentState] = nil
 	activeCollapse[residentState] = true
 	setCollapseAttribute(residentState, true)
 	residentState._EnergyCollapseRelease = function()
 		releaseCollapseHold(residentState)
 	end
+	applyEnergyPause(residentState)
 
 	local residentName = context.Name or getResidentName(residentState)
 	ResidentDebug.Trace(COLLAPSE_CHANNEL, string.format("Energy collapse triggered: %s", residentName))
@@ -94,14 +157,24 @@ local function startCollapse(residentState: any, context: { UserId: number?, Nam
 		activeCollapse[residentState] = nil
 		setCollapseAttribute(residentState, false)
 		AutonomyState.setPending(residentState, nil)
+		releaseEnergyPause(residentState)
 		return
 	end
 
 	behavior.ChatPhrases = collapseChat
 	behavior.ChatIntervalSeconds = nil
 	behavior.EmergencyGuards = {
-		Hunger = function(state, _, _)
-			return suppressHungerGuard(state)
+		Hunger = function(state, value, def)
+			if suppressHungerGuard(state) then
+				return true
+			end
+			if typeof(value) == "number" and def and typeof(def) == "table" then
+				local critical = def.Critical
+				if typeof(critical) == "number" and value <= critical then
+					setReleaseReason(state, COLLAPSE_RELEASE_REASON_HUNGER)
+				end
+			end
+			return false
 		end,
 	}
 
@@ -178,6 +251,16 @@ local function startCollapse(residentState: any, context: { UserId: number?, Nam
 			})
 		end
 
+		local releaseReason = takeReleaseReason(residentState)
+		if releaseReason == COLLAPSE_RELEASE_REASON_HUNGER then
+			if restPoseApplied then
+				ResidentMovement.ClearRestPose(residentState)
+			end
+			if activeCollapse[residentState] then
+				releaseCollapseHold(residentState)
+			end
+		end
+
 		if handleEnergyChanged then
 			task.defer(function()
 				handleEnergyChanged(residentState, context, residentState:GetNeed("Energy"))
@@ -247,6 +330,8 @@ local function cleanupResident(residentState: any)
 	end
 	contextByResident[residentState] = nil
 	releaseCollapseHold(residentState)
+	releaseEnergyPause(residentState)
+	releaseReasons[residentState] = nil
 end
 
 function ResidentCollapseService.Refresh()

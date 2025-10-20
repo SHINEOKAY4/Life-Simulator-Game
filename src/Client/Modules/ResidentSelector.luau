@@ -192,7 +192,7 @@ function ResidentSelector.Init()
 	JobSelectionUIEnabled.Changed:Connect(function()
 		if JobSelectionUIEnabled.Value and ResidentSelectorContext.Enabled then
 			ResidentSelectorContext.Enabled = false
-			ResidentUI.Hide()
+			ResidentUI.Hide(true)
 		else
 			ResidentSelectorContext.Enabled = true
 		end

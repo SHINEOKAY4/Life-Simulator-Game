@@ -37,6 +37,24 @@ local function ensureHouseholdState(player: Player, data: any?)
 	return data
 end
 
+local function ensureResidentCareerState(save: any)
+	if typeof(save) ~= "table" then
+		return
+	end
+	if typeof(save.Occupation) ~= "string" or save.Occupation == "" then
+		save.Occupation = "Unemployed"
+	end
+	if typeof(save.CurrentCareerId) ~= "string" then
+		save.CurrentCareerId = if save.Occupation ~= "Unemployed" then save.Occupation else ""
+	end
+	if typeof(save.CareerStreak) ~= "number" then
+		save.CareerStreak = 0
+	end
+	if typeof(save.MomentumExpireClock) ~= "number" then
+		save.MomentumExpireClock = 0
+	end
+end
+
 local function prepareResidentForRemoval(residentState, timeoutSeconds: number?): (boolean, string?)
 	if not residentState then
 		return false, "Resident state missing"
@@ -95,6 +113,7 @@ function ResidentService.Load(player: Player)
 	local filteredResidents = {}
 	for _, resident in ipairs(data.Residents) do
 		if typeof(resident) == "table" and type(resident.Name) == "string" then
+			ensureResidentCareerState(resident)
 			filteredResidents[#filteredResidents + 1] = resident
 			local mapKey = resident.Name
 			local indexKey = #filteredResidents
@@ -156,6 +175,9 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 		Gender = residentData.Gender or "Unknown",
 		Traits = residentData.Traits or { "Balanced" },
 		Occupation = "Unemployed",
+		CurrentCareerId = "",
+		CareerStreak = 0,
+		MomentumExpireClock = 0,
 		Statistics = {
 			Intelligence = 1,
 			Discipline = 1,
@@ -170,6 +192,8 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 			Social = 100,
 		},
 	}
+
+	ensureResidentCareerState(newResidentData)
 
 	local payload = {
 		UserId = player.UserId,

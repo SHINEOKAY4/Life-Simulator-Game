@@ -374,6 +374,7 @@ function ObjectAction.Delete(object: Model)
 	Packets.DestroyRequest:Fire(itemData)
 end
 
+-- #TODO: Bug fix the copy and close mechanic (while on the copy preview, clicking the close action does not stop object selection mode)
 function ObjectAction.Copy(object: Model)
 	print("Copying object:", object:GetFullName())
 	-- Implement copy logic here
