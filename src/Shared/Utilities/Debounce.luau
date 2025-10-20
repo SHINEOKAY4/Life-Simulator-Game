@@ -45,12 +45,12 @@ end
 -- Returns expiration time or nil if not active; cleans up expired entries.
 local function getActiveExpiration(scopedKey: string): number?
 	local expirationTime = state[scopedKey]
-	if expirationTime == nil then
+	if not expirationTime then
 		return nil
 	end
 
 	if now() >= expirationTime then
-		clearKey(scopedKey)
+		state[scopedKey] = nil
 		return nil
 	end
 
@@ -74,20 +74,17 @@ end
 -- Runs the callback only if the debounce can be acquired.
 -- If the callback throws, the debounce is cleared immediately and the error is rethrown.
 function Debounce.RunIfAvailable(key: Key, durationSeconds: number?, callback: () -> (), scope: Scope): boolean
-	if Debounce.TryAcquire(key, durationSeconds, scope) then
-		local success, result = pcall(function()
-			callback()
-			return true
-		end)
-		if not success then
-			-- Ensure a failing callback does not leave the debounce stuck.
-			clearKey(toScopedKey(key, scope))
-			error(tostring(result))
-		end
-		return true
+	if not Debounce.TryAcquire(key, durationSeconds, scope) then
+		return false
 	end
-
-	return false
+	
+	local success, result = pcall(callback)
+	if not success then
+		-- Ensure a failing callback does not leave the debounce stuck.
+		clearKey(toScopedKey(key, scope))
+		error(tostring(result))
+	end
+	return true
 end
 
 -- Returns true if the debounce is currently active for the key.

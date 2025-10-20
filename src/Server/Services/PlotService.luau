@@ -61,25 +61,26 @@ local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapsho
 	end
 	table.sort(keys)
 
-	local result = table.create(#keys)
-	for index = 1, #keys do
+	local keyCount = #keys
+	local result = table.create(keyCount)
+	for index = 1, keyCount do
 		local saved = map[keys[index]]
 		if saved then
 			local spec = saved.id and ItemFinder.FindItemById(saved.id) or nil
 			local metadata = saved.Metadata
 			local widthCells = metadata and (metadata.WidthCells or metadata.widthCells)
 			if not widthCells or widthCells <= 0 then
-				widthCells = spec and (spec.WidthCells or spec.Width) or 1
+				widthCells = if spec then (spec.WidthCells or spec.Width or 1) else 1
 			end
 			local depthCells = metadata and (metadata.DepthCells or metadata.depthCells)
 			if not depthCells or depthCells <= 0 then
-				depthCells = spec and (spec.DepthCells or spec.Depth) or 1
+				depthCells = if spec then (spec.DepthCells or spec.Depth or 1) else 1
 			end
 			result[index] = {
 				id = saved.id,
 				cellX = saved.cellX,
 				cellZ = saved.cellZ,
-				facing = (saved.facing or "North") :: string,
+				facing = saved.facing or "North",
 				WidthCells = widthCells,
 				DepthCells = depthCells,
 			}
@@ -186,6 +187,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 	StationScopeVersions[userId] = StationScopeVersions[userId] or {}
 
 	-- Station names are the object IDs of the stations and the key is the unique id for easier reference
+	local stationCache = PlayerStations[userId]
 	for uniqueKey, obj in pairs(data.PlacedObjects) do
 		local facing = obj.facing or "North"
 		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing, {
@@ -193,26 +195,22 @@ function PlotService.Load(player: Player, plotModel: Model)
 		})
 
 		local itemSpec = ItemFinder.FindItemById(obj.id)
-		local stationType = itemSpec and itemSpec.StationType or nil
-		if not stationType then
-			continue
+		local stationType = itemSpec and itemSpec.StationType
+		if stationType then
+			local stationScope = stationCache[stationType]
+			if not stationScope then
+				stationScope = {}
+				stationCache[stationType] = stationScope
+			end
+			stationScope[uniqueKey] = {
+				Id = obj.id,
+				Residents = {},
+				Occupied = false,
+				Model = nil,
+				ActiveOverride = nil,
+			}
+			bumpStationVersion(userId, stationType)
 		end
-		local stationCache = PlayerStations[userId]
-		local stationScope = stationCache[stationType]
-		if not stationScope then
-			stationScope = {}
-			stationCache[stationType] = stationScope
-		end
-		stationScope[uniqueKey] = {
-			Id = obj.id,
-			Residents = {},
-			Occupied = false,
-			Model = nil,
-			ActiveOverride = nil,
-		} -- Initialize with empty resident list and not occupied
-		bumpStationVersion(userId, stationType)
-		-- e.g ["RestStation"] = {object1, object2, ...} -- this is to support multiple instances of the same station
-		-- Helpful for finding another pathing option, weighing options by stats, checking if a station is occupied, etc
 	end
 
 	-- Possibly add a revision to discard stale client state in future (if problematic)
@@ -371,8 +369,12 @@ function PlotService.RemoveStationForPlayer(player: Player, stationName: string,
 	end
 
 	local removed = stationInstances[uniqueId]
+	if not removed then
+		return
+	end
+	
 	local occupants: { string } = {}
-	if removed and typeof(removed.Residents) == "table" then
+	if typeof(removed.Residents) == "table" then
 		for _, residentName in ipairs(removed.Residents) do
 			if typeof(residentName) == "string" then
 				occupants[#occupants + 1] = residentName
@@ -387,9 +389,8 @@ function PlotService.RemoveStationForPlayer(player: Player, stationName: string,
 		stationCache[stationName] = nil
 	end
 
-	if removed then
-		PlotService.StationRemoved:Fire(player, stationName, uniqueId, occupants)
-	end
+	PlotService.StationRemoved:Fire(player, stationName, uniqueId, occupants)
+end
 end
 
 function PlotService.GetStationVersion(player: Player, stationType: string): number

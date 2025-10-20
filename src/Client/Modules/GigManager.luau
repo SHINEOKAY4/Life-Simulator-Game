@@ -18,7 +18,7 @@ function GigManager.StartGig(gigId: string): (boolean, string, string?)
 	if not success then
 		return false, message, nil
 	end
-	local runId = if type(remoteRunId) == "string" and remoteRunId ~= "" then remoteRunId else nil
+	local runId = if typeof(remoteRunId) == "string" and remoteRunId ~= "" then remoteRunId else nil
 	if runId then
 		activeRuns[runId] = {
 			RunId = runId,

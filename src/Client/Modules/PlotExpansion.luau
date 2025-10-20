@@ -16,10 +16,13 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
 local PlotContext = InputContextsFolder:WaitForChild("PlotContext")
+local ToggleExpansionAction = PlotContext.ToggleExpansion
+local ToggleClickPurchaseAction = PlotContext.ToggleClickPurchase
 
 local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
-local ChunkHighlight = AssetsFolder.VisualTools:WaitForChild("ChunkHighlight") :: Highlight
-local PriceTag = AssetsFolder.VisualTools:WaitForChild("PriceTag") :: BillboardGui
+local VisualToolsFolder = AssetsFolder.VisualTools
+local ChunkHighlight = VisualToolsFolder:WaitForChild("ChunkHighlight") :: Highlight
+local PriceTag = VisualToolsFolder:WaitForChild("PriceTag") :: BillboardGui
 local PriceLabel = PriceTag:FindFirstChild("Label") :: TextLabel
 
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
@@ -44,7 +47,7 @@ local _HoveredCover: BasePart? = nil
 local function ClearEffects()
 	_HoveredCover = nil
 	ChunkHighlight.Adornee = nil
-	PriceTag.Adornee = AssetsFolder.VisualTools
+	PriceTag.Adornee = VisualToolsFolder
 end
 
 local function BuildParams(coversFolder: Folder): RaycastParams
@@ -74,7 +77,7 @@ function PlotExpansion.Init()
 		end
 	end)
 
-	PlotContext.ToggleExpansion.Pressed:Connect(function()
+	ToggleExpansionAction.Pressed:Connect(function()
 		runDebounced("Toggle", function()
 			local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 			if not plotIndex then
@@ -92,7 +95,7 @@ function PlotExpansion.Init()
 		end)
 	end)
 
-	PlotContext.ToggleClickPurchase.Pressed:Connect(function()
+	ToggleClickPurchaseAction.Pressed:Connect(function()
 		runDebounced("Purchase", function()
 			print("ToggleClickPurchase pressed")
 			local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
@@ -132,7 +135,7 @@ end
 
 function PlotExpansion.Show()
 	PlotExpansionEnabled.Value = true
-	PlotContext.ToggleClickPurchase.Enabled = true
+	ToggleClickPurchaseAction.Enabled = true
 	local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
 	local coversFolder = plotModel and plotModel:FindFirstChild("Covers") :: Folder
@@ -174,8 +177,8 @@ end
 
 function PlotExpansion.Hide()
 	PlotExpansionEnabled.Value = false
-	PlotContext.ToggleClickPurchase.Enabled = false
-	PriceTag.Parent = AssetsFolder.VisualTools
+	ToggleClickPurchaseAction.Enabled = false
+	PriceTag.Parent = VisualToolsFolder
 	PriceTag.Enabled = false
 	if Connection then
 		Connection:Disconnect()
