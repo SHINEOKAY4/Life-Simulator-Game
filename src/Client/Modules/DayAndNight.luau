@@ -11,6 +11,8 @@ local DefaultSecondsPerFullDay = 1440 -- 24 minutes for a full 24h cycle
 local DefaultStartClockTime = 16.5 -- hours (0..24). 16.5 ~ 4:30 PM
 
 local Connection = nil :: RBXScriptConnection?
+local lastUpdateTime = 0
+local UPDATE_INTERVAL = 1/30 -- Update lighting at 30 FPS instead of render FPS
 
 -- ================= Helpers =================
 local function ensureEffect(className: string, parent: Instance)
@@ -271,6 +273,12 @@ end
 
 function DayAndNight.Enable()
 	Connection = RunService.PreRender:Connect(function()
+		local currentTime = os.clock()
+		if currentTime - lastUpdateTime < UPDATE_INTERVAL then
+			return
+		end
+		lastUpdateTime = currentTime
+		
 		local clockTime = computeClockTimeFromServerNow()
 		setIfChanged(Lighting, "ClockTime", clockTime)
 
