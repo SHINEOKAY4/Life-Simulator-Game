@@ -2,7 +2,6 @@
 -- NeedEffects.lua
 -- Applies catalog-defined need adjustments while residents interact with stations.
 
-local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
@@ -12,6 +11,43 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
 local ResidentChat = require(ServerScriptService.Server.Utilities.ResidentChat)
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
+local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
+
+local SCHEDULER_TASK_NAME = "NeedEffectsRunner"
+local SCHEDULER_INTERVAL = 1 / 30
+
+type SchedulerRuntime = {
+	Id: number,
+	Step: (dt: number) -> boolean,
+	HandleError: (err: any) -> (),
+}
+
+local activeRuntimes: { [number]: SchedulerRuntime } = {}
+local schedulerActive = false
+local nextRuntimeId = 0
+
+local function stepRuntimes(dt: number)
+	for _runtimeId, runtime in pairs(activeRuntimes) do
+		local success, finishedOrError = pcall(runtime.Step, dt)
+		if not success then
+			runtime.HandleError(finishedOrError)
+		end
+	end
+	if next(activeRuntimes) == nil then
+		WorldUpdate.Unsubscribe(SCHEDULER_TASK_NAME)
+		schedulerActive = false
+	end
+end
+
+local function ensureScheduler()
+	if schedulerActive then
+		return
+	end
+	WorldUpdate.Subscribe(SCHEDULER_TASK_NAME, SCHEDULER_INTERVAL, function(dt)
+		stepRuntimes(dt)
+	end)
+	schedulerActive = true
+end
 
 type CancelToken = { Cancelled: boolean, Reason: string? }
 
@@ -517,18 +553,71 @@ function NeedEffects.Run(
 		finalize(true, nil, trackedProgress)
 		return true
 	end
-	while elapsed < duration do
+
+	local function currentProgress(): number
+		if duration > 0 then
+			return math.clamp(if duration ~= 0 then elapsed / duration else 0, 0, 1)
+		end
+		return math.clamp(trackedProgress, 0, 1)
+	end
+
+	nextRuntimeId += 1
+	local runtimeId = nextRuntimeId
+	local runtimeThread: thread? = coroutine.running()
+	local waitingForResume = false
+	local completed = false
+	local finalResult = false
+	local hasResult = false
+
+	local function complete(result: boolean)
+		if completed then
+			return
+		end
+		completed = true
+		hasResult = true
+		finalResult = result
+		activeRuntimes[runtimeId] = nil
+		if waitingForResume and runtimeThread then
+			waitingForResume = false
+			task.spawn(runtimeThread, result)
+			runtimeThread = nil
+		end
+	end
+
+	local function handleSchedulerError(err: any)
+		if completed then
+			return
+		end
+		ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects runtime error: %s", tostring(err)), {
+			Resident = residentName,
+		})
+		activityReason = activityReason or "EffectError"
+		local result = failReturn(activityReason, currentProgress())
+		complete(result)
+	end
+
+	local function step(dt: number): boolean
+		if completed then
+			return true
+		end
+
 		if token and token.Cancelled then
 			local cancelReason = if token.Reason and token.Reason ~= "" then token.Reason else "Cancelled"
 			ResidentChat.ShowInterrupt(residentState, cancelReason, interruptContext)
 			ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects cancelled: %s", residentName))
 			activityReason = cancelReason
-			return failReturn(cancelReason, if duration > 0 then elapsed / duration else trackedProgress)
+			local result = failReturn(cancelReason, currentProgress())
+			complete(result)
+			return true
 		end
+
 		local abortDuring, abortReasonDuring = abortIfEmergency()
 		if abortDuring then
-			return failReturn(abortReasonDuring, if duration > 0 then elapsed / duration else trackedProgress)
+			local result = failReturn(abortReasonDuring, currentProgress())
+			complete(result)
+			return true
 		end
+
 		if shouldEnd and shouldEnd(residentState) then
 			local reasonResolver = behavior.EndReasonProvider
 			local resolvedReason: string? = nil
@@ -541,44 +630,87 @@ function NeedEffects.Run(
 			ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects early exit: %s", residentName), {
 				Elapsed = elapsed,
 			})
-			local completion = if duration > 0 then math.clamp(elapsed / duration, 0, 1) else trackedProgress
 			local reasonLabel = if resolvedReason and resolvedReason ~= "" then resolvedReason else "NeedSatisfied"
 			activityReason = reasonLabel
-			finalize(true, reasonLabel, completion)
+			finalize(true, reasonLabel, currentProgress())
+			complete(true)
 			return true
 		end
-		RunService.Heartbeat:Wait()
+
+		if dt <= 0 then
+			return false
+		end
+
 		local now = os.clock()
 		local realDelta = now - lastTick
+		if not (realDelta >= 0) or realDelta ~= realDelta then
+			realDelta = dt
+		end
 		lastTick = now
 		elapsed += realDelta
+
 		local gameHours = TimeScale.GameHoursFromRealDelta(realDelta)
 		if typeof(gameHours) ~= "number" or gameHours ~= gameHours or gameHours <= 0 then
 			gameHours = 0
 		end
 		if gameHours > 0 then
 			for _, effect in ipairs(effects) do
-				if effect.RatePerHour and effect.RatePerHour ~= 0 then
-					local delta = effect.RatePerHour * gameHours
-					applyDelta(residentState, effect.Need, delta)
+				local rate = effect.RatePerHour
+				if rate and rate ~= 0 then
+					applyDelta(residentState, effect.Need, rate * gameHours)
 				end
 			end
 		end
+
 		if nextChatTime and chatInterval and now >= nextChatTime then
-			emitChat()
-			nextChatTime = now + chatInterval
+			repeat
+				emitChat()
+				nextChatTime += chatInterval
+			until nextChatTime == nil or nextChatTime > now
 		end
+
 		if duration > 0 then
-			emitProgress(elapsed / duration)
+			emitProgress(math.min(elapsed / duration, 1))
 		end
+
+		if elapsed >= duration then
+			ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects completed: %s", residentName), {
+				Elapsed = elapsed,
+			})
+			activityReason = activityReason or "DurationComplete"
+			finalize(true, activityReason, currentProgress())
+			complete(true)
+			return true
+		end
+
+		return false
 	end
-	ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects completed: %s", residentName), {
-		Elapsed = elapsed,
-	})
-	local completionProgress = if duration > 0 then math.clamp(elapsed / duration, 0, 1) else trackedProgress
-	activityReason = activityReason or "DurationComplete"
-	finalize(true, activityReason, completionProgress)
-	return true
+
+	local runtime: SchedulerRuntime = {
+		Id = runtimeId,
+		Step = step,
+		HandleError = handleSchedulerError,
+	}
+	activeRuntimes[runtimeId] = runtime
+
+	ensureScheduler()
+
+	local success, resultOrError = pcall(step, 0)
+	if not success then
+		handleSchedulerError(resultOrError)
+	end
+
+	if completed then
+		if not hasResult then
+			return false
+		end
+		return finalResult
+	end
+
+	waitingForResume = true
+	local resumeResult = coroutine.yield()
+	waitingForResume = false
+	return resumeResult == true
 end
 
 return NeedEffects

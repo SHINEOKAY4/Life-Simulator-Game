@@ -105,6 +105,21 @@ for _, job in JobCatalog.Jobs do
 	JOBS_BY_ID[job.Id] = job
 end
 
+local function getCareerDisplayName(careerIdentifier: string?): string
+	if type(careerIdentifier) ~= "string" or careerIdentifier == "" then
+		return "Unemployed"
+	end
+	local professionDefinition = CareerService.GetCareerInfo(careerIdentifier)
+	if professionDefinition and type(professionDefinition.Name) == "string" and professionDefinition.Name ~= "" then
+		return professionDefinition.Name
+	end
+	local listingDefinition = JOBS_BY_ID[careerIdentifier]
+	if listingDefinition and type(listingDefinition.Name) == "string" and listingDefinition.Name ~= "" then
+		return listingDefinition.Name
+	end
+	return careerIdentifier
+end
+
 local DataStoreResponse = DataStore.Response
 
 local function formatTimestamp(timestamp: number): string
@@ -176,9 +191,6 @@ local function validateResidentForJob(player: Player, residentName: string?, job
 	if job.Type == "Gig" then
 		return true, nil
 	end
-	if job.Requirements == nil or #job.Requirements == 0 then
-		return true, nil
-	end
 	if residentName == nil or residentName == "" then
 		return false, "Select a resident to apply for this job."
 	end
@@ -187,6 +199,29 @@ local function validateResidentForJob(player: Player, residentName: string?, job
 		return false, "Resident not available. Make sure they are loaded."
 	end
 	local save = (residentState :: any).Save
+	local currentCareerIdentifier = ""
+	if type(save) == "table" then
+		local storedCurrentCareer = save.CurrentCareerId
+		if type(storedCurrentCareer) == "string" and storedCurrentCareer ~= "" then
+			currentCareerIdentifier = storedCurrentCareer
+		elseif type(save.Occupation) == "string" and save.Occupation ~= "" and save.Occupation ~= "Unemployed" then
+			currentCareerIdentifier = save.Occupation
+		end
+	end
+	if currentCareerIdentifier ~= "" then
+		if currentCareerIdentifier == job.Id then
+			return false,
+				("%s already works as %s."):format(residentName, getCareerDisplayName(currentCareerIdentifier))
+		end
+		return false,
+			("%s already has a career as %s. Ask them to quit first."):format(
+				residentName,
+				getCareerDisplayName(currentCareerIdentifier)
+			)
+	end
+	if job.Requirements == nil or #job.Requirements == 0 then
+		return true, nil
+	end
 	local statistics = if type(save) == "table" then save.Statistics else nil
 	if type(statistics) ~= "table" then
 		statistics = {}
@@ -365,27 +400,34 @@ local function ensureStore(): DataStoreObject
 end
 
 local function computeBoardHash(board: BoardState): string
-	local parts = table.create(#board.Listings * 3 + 4)
+	local listingCount = #board.Listings
+	local parts = table.create(listingCount * 9 + 5)
 	parts[#parts + 1] = tostring(board.Version)
 	parts[#parts + 1] = board.RestockId
 	parts[#parts + 1] = tostring(board.LastRestock)
 	parts[#parts + 1] = tostring(board.NextRestock)
 	for _, listing in ipairs(board.Listings) do
 		parts[#parts + 1] = listing.JobId
+		parts[#parts + 1] = listing.Rarity
+		parts[#parts + 1] = listing.Type
 		parts[#parts + 1] = tostring(listing.SlotsRemaining or -1)
 		parts[#parts + 1] = tostring(listing.MaxSlots or -1)
 		parts[#parts + 1] = listing.Unlimited and "1" or "0"
+		parts[#parts + 1] = tostring(listing.PostedAt)
+		parts[#parts + 1] = tostring(listing.LastTakenAt or 0)
+		parts[#parts + 1] = tostring(listing.LastTakenBy or 0)
 	end
 	return table.concat(parts, "|")
 end
 
 local function applyBoard(board: BoardState)
-	local boardCopy = cloneBoard(board)
-	local hash = computeBoardHash(boardCopy)
-	currentBoard = boardCopy
-	if hash == currentBoardHash then
+	local hash = computeBoardHash(board)
+	if hash == currentBoardHash and currentBoard ~= nil then
 		return
 	end
+
+	local boardCopy = cloneBoard(board)
+	currentBoard = boardCopy
 	currentBoardHash = hash
 	if not jobListingFolder then
 		return
@@ -715,8 +757,21 @@ local function reserveJobSlot(player: Player, jobId: string, residentName: strin
 	end
 	local now = os.time()
 	local board = sanitizeBoard(dataStore.Value)
+	local boardDirty = false
+
+	local function commitBoard(): string?
+		local saveResponse: string? = nil
+		if boardDirty then
+			dataStore.Value = board
+			saveResponse = saveStore(dataStore)
+		end
+		closeStore(dataStore)
+		return saveResponse
+	end
+
 	if needsRestock(board, now) then
 		board = buildRestockBoard(now, board)
+		boardDirty = true
 	end
 	local listingIndex = nil
 	for index, listing in ipairs(board.Listings) do
@@ -726,9 +781,7 @@ local function reserveJobSlot(player: Player, jobId: string, residentName: strin
 		end
 	end
 	if listingIndex == nil then
-		dataStore.Value = board
-		saveStore(dataStore)
-		closeStore(dataStore)
+		commitBoard()
 		applyBoard(board)
 		task.defer(function()
 			tryRestock()
@@ -742,10 +795,9 @@ local function reserveJobSlot(player: Player, jobId: string, residentName: strin
 		listing.LastTakenAt = now
 		listing.LastTakenBy = player.UserId
 		board.Metrics = computeMetrics(board.Listings)
-		dataStore.Value = board
-		local saveResponse = saveStore(dataStore)
-		closeStore(dataStore)
-		if saveResponse ~= DataStoreResponse.Saved then
+		boardDirty = true
+		local saveResponse = commitBoard()
+		if saveResponse and saveResponse ~= DataStoreResponse.Saved then
 			return false, "Could not secure the job. Please try again."
 		end
 		applyBoard(board)
@@ -755,9 +807,11 @@ local function reserveJobSlot(player: Player, jobId: string, residentName: strin
 	if (listing.SlotsRemaining or 0) <= 0 then
 		table.remove(board.Listings, listingIndex)
 		board.Metrics = computeMetrics(board.Listings)
-		dataStore.Value = board
-		saveStore(dataStore)
-		closeStore(dataStore)
+		boardDirty = true
+		local saveResponse = commitBoard()
+		if saveResponse and saveResponse ~= DataStoreResponse.Saved then
+			return false, "Could not secure the job. Please try again."
+		end
 		applyBoard(board)
 		task.defer(function()
 			tryRestock()
@@ -774,10 +828,9 @@ local function reserveJobSlot(player: Player, jobId: string, residentName: strin
 	if board.Metrics.TotalListings == 0 or board.Metrics.TotalSlotsRemaining == 0 then
 		board.NextRestock = now
 	end
-	dataStore.Value = board
-	local saveResponse = saveStore(dataStore)
-	closeStore(dataStore)
-	if saveResponse ~= DataStoreResponse.Saved then
+	boardDirty = true
+	local saveResponse = commitBoard()
+	if saveResponse and saveResponse ~= DataStoreResponse.Saved then
 		return false, "Could not secure the job. Please try again."
 	end
 	applyBoard(board)

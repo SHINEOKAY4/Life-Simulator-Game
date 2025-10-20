@@ -35,6 +35,17 @@ for _, job in JobCatalog.Jobs do
 	end
 end
 
+local function resolveCareerName(careerId: string?): string
+	if type(careerId) ~= "string" or careerId == "" then
+		return "Unemployed"
+	end
+	local definition = ProfessionById[careerId]
+	if definition and type(definition.Name) == "string" and definition.Name ~= "" then
+		return definition.Name
+	end
+	return careerId
+end
+
 type ActiveResidentShift = {
 	JobId: string,
 	StartClock: number,
@@ -182,6 +193,28 @@ function CareerService.SetCareerForResident(player: Player, residentName: string
 	end
 	local save = residentState.Save
 	ensureCareerFields(save)
+	local resolvedResidentName = residentName or "This resident"
+	local currentCareerId = save.CurrentCareerId
+	if type(currentCareerId) == "string" and currentCareerId ~= "" then
+		if currentCareerId == career.Id then
+			return {
+				Success = false,
+				Message = string.format(
+					"%s already works as %s.",
+					resolvedResidentName,
+					resolveCareerName(currentCareerId)
+				),
+			}
+		end
+		return {
+			Success = false,
+			Message = string.format(
+				"%s already has a career as %s. Ask them to quit first.",
+				resolvedResidentName,
+				resolveCareerName(currentCareerId)
+			),
+		}
+	end
 	save.CurrentCareerId = career.Id
 	save.Occupation = career.Id
 	return { Success = true, Message = career.Name .. " secured." }
