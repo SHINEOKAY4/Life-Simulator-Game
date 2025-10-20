@@ -89,13 +89,11 @@ function ResidentNeedService.Start()
 			return
 		end
 
-		for _, entry in ipairs(Residents) do
-			ResidentNeedService.Decay(entry.State, gameHours)
-		end
-
 		local nowClock = os.clock()
 		local clockTime = TimeScale.GetClockTime()
+
 		for _, entry in ipairs(Residents) do
+			ResidentNeedService.Decay(entry.State, gameHours)
 			ResidentAutonomyService.TrySatisfyNeedsForResident(
 				entry.Player,
 				entry.ResidentName,

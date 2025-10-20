@@ -74,10 +74,12 @@ local function getStationIterator(
 	end
 	local state = perUser[stationType]
 	if not state or state.version ~= stationVersion then
-		local order = {} :: { string }
+		local order = {}
+		local count = 0
 		for uniqueId in pairs(stationMap) do
 			if typeof(uniqueId) == "string" then
-				order[#order + 1] = uniqueId
+				count += 1
+				order[count] = uniqueId
 			end
 		end
 		local newState = {

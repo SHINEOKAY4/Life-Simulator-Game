@@ -92,10 +92,7 @@ end
 
 function MarkerPool.HideUnusedMarkers()
 	for index = activeMarkerCount + 1, #cellMarkers do
-		local marker = cellMarkers[index]
-		if marker.Transparency ~= 1 then
-			marker.Transparency = 1
-		end
+		cellMarkers[index].Transparency = 1
 	end
 end
 

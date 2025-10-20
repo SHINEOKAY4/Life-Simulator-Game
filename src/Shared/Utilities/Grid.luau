@@ -258,14 +258,15 @@ function Grid:FootprintCells(
 	local count = rotatedWidth * rotatedDepth
 	local indices = table.create(count)
 	local i = 0
+	local columns = self.Columns
 
 	for offsetZ = 0, rotatedDepth - 1 do
 		local z = anchorCellZ + offsetZ
-		local rowOffset = (z - 1) * self.Columns
+		local rowOffset = (z - 1) * columns
 		for offsetX = 0, rotatedWidth - 1 do
 			local x = anchorCellX + offsetX
 			i += 1
-			indices[i] = rowOffset + x -- same as self:CellToIndex(x, z)
+			indices[i] = rowOffset + x
 		end
 	end
 
@@ -293,15 +294,19 @@ function Grid:ClippedFootprintCells(
 
 	local rotatedWidth, rotatedDepth = RotateFootprint(widthInCells, depthInCells, facing)
 	local indices = {}
+	local count = 0
+	local columns = self.Columns
+	local rows = self.Rows
 
 	for offsetZ = 0, rotatedDepth - 1 do
 		local z = anchorCellZ + offsetZ
-		if z >= 1 and z <= self.Rows then
-			local rowOffset = (z - 1) * self.Columns
+		if z >= 1 and z <= rows then
+			local rowOffset = (z - 1) * columns
 			for offsetX = 0, rotatedWidth - 1 do
 				local x = anchorCellX + offsetX
-				if x >= 1 and x <= self.Columns then
-					indices[#indices + 1] = rowOffset + x
+				if x >= 1 and x <= columns then
+					count += 1
+					indices[count] = rowOffset + x
 				end
 			end
 		end

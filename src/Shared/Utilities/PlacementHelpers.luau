@@ -54,9 +54,12 @@ function PlacementHelpers.GetLiftAlongDirection(model: Model, direction: Vector3
 	local minProjection = math.huge
 
 	for sx = -1, 1, 2 do
+		local offsetX = halfX * sx
 		for sy = -1, 1, 2 do
+			local offsetY = halfY * sy
 			for sz = -1, 1, 2 do
-				local cornerOffset = Vector3.new(halfX * sx, halfY * sy, halfZ * sz)
+				local offsetZ = halfZ * sz
+				local cornerOffset = Vector3.new(offsetX, offsetY, offsetZ)
 				local cornerWorld = bboxCFrame * cornerOffset
 				local projection = unitDirection:Dot(cornerWorld - pivotPosition)
 				if projection < minProjection then
