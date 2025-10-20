@@ -115,9 +115,10 @@ function BucketClass:Allow(player: Player, tokens: number?): boolean
 		return false
 	end
 
-	local now = os.clock()
 	local userId = GetUserId(player)
 	local state = self.PerPlayer[userId]
+	local now = os.clock()
+	
 	if state == nil then
 		state = { tokens = config.burst, lastRefillTime = now }
 		self.PerPlayer[userId] = state
@@ -159,14 +160,13 @@ end
 --- @param player Player The player to check.
 --- @return number The current number of tokens, up to the burst limit.
 function BucketClass:GetTokens(player: Player): number
-	local now = os.clock()
-	local config = self.Config
 	local userId = GetUserId(player)
 	local state = self.PerPlayer[userId]
 	if state == nil then
-		return config.burst
+		return self.Config.burst
 	end
-	RefillTokens(state, config, now)
+	local now = os.clock()
+	RefillTokens(state, self.Config, now)
 	return state.tokens
 end
 
@@ -175,13 +175,13 @@ end
 --- @param player Player The player to check.
 --- @return number The time in seconds until the next token is available.
 function BucketClass:SecondsUntilNextToken(player: Player): number
-	local now = os.clock()
-	local config = self.Config
 	local userId = GetUserId(player)
 	local state = self.PerPlayer[userId]
 	if state == nil then
 		return 0
 	end
+	local now = os.clock()
+	local config = self.Config
 	RefillTokens(state, config, now)
 	if state.tokens >= 1 then
 		return 0
@@ -206,16 +206,16 @@ function BucketClass:TimeUntilAllow(player: Player, tokens: number?): number
 		return math.huge
 	end
 
-	local now = os.clock()
 	local userId = GetUserId(player)
 	local state = self.PerPlayer[userId]
 	if state == nil then
 		return 0
 	end
+	local now = os.clock()
 	RefillTokens(state, config, now)
 
-	local missingTokens = math.max(0, requestedTokens - state.tokens)
-	if missingTokens == 0 then
+	local missingTokens = requestedTokens - state.tokens
+	if missingTokens <= 0 then
 		return 0
 	end
 	return missingTokens / config.ratePerSecond

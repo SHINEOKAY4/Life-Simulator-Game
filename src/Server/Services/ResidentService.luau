@@ -111,15 +111,19 @@ function ResidentService.Load(player: Player)
 	NameToIndexMap[userId] = {}
 
 	local filteredResidents = {}
+	local residentsMap = PlayersResidents[userId]
+	local indexMap = NameToIndexMap[userId]
+	
 	for _, resident in ipairs(data.Residents) do
 		if typeof(resident) == "table" and type(resident.Name) == "string" then
 			ensureResidentCareerState(resident)
-			filteredResidents[#filteredResidents + 1] = resident
-			local mapKey = resident.Name
-			local indexKey = #filteredResidents
-			PlayersResidents[userId][mapKey] = ResidentState.new(resident)
-			NameToIndexMap[userId][mapKey] = indexKey
-			ResidentPlacer.Spawn(player, PlayersResidents[userId][mapKey])
+			local count = #filteredResidents + 1
+			filteredResidents[count] = resident
+			local residentName = resident.Name
+			local residentState = ResidentState.new(resident)
+			residentsMap[residentName] = residentState
+			indexMap[residentName] = count
+			ResidentPlacer.Spawn(player, residentState)
 		else
 			warn("[ResidentService] Skipping invalid resident entry during load")
 		end
@@ -201,12 +205,15 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 		ResidentDelta = { newResidentData },
 	}
 	-- Add the new resident
-	table.insert(data.Residents, newResidentData) -- Append to the saved data first, so the index is correct, NameToIndexMap uses # of array
-	data.ResidentsCount = #data.Residents
-	PlayersResidents[player.UserId][newResidentData.Name] = ResidentState.new(newResidentData)
-	NameToIndexMap[player.UserId][newResidentData.Name] = #data.Residents
+	local newIndex = #data.Residents + 1
+	data.Residents[newIndex] = newResidentData
+	data.ResidentsCount = newIndex
+	local residentState = ResidentState.new(newResidentData)
+	local residentName = newResidentData.Name
+	PlayersResidents[player.UserId][residentName] = residentState
+	NameToIndexMap[player.UserId][residentName] = newIndex
 
-	ResidentPlacer.Spawn(player, PlayersResidents[player.UserId][newResidentData.Name])
+	ResidentPlacer.Spawn(player, residentState)
 	ResidentService.PlayerResidentsChanged:Fire(player)
 	ResidentsPackets.PlayerResidentDelta:Fire(payload)
 	return true, "Resident created successfully."

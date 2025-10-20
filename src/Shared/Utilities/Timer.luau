@@ -52,14 +52,24 @@ end
 
 --- Advances all active timers by one frame. Called from Heartbeat.
 local function stepAllTimers()
-	for index = #ActiveTimerList, 1, -1 do
+	local listSize = #ActiveTimerList
+	if listSize == 0 then
+		if RunnerHeartbeatConnection then
+			RunnerHeartbeatConnection:Disconnect()
+			RunnerHeartbeatConnection = nil
+		end
+		return
+	end
+
+	local currentTime = getCurrentServerTime()
+	for index = listSize, 1, -1 do
 		local timer = ActiveTimerList[index]
 
 		if (not timer._isRunning) or timer._isStopped then
 			table.remove(ActiveTimerList, index)
 		else
 			-- Compute remaining using absolute end time (drift-free).
-			local remainingSeconds = math.max(0, timer._endTime - getCurrentServerTime())
+			local remainingSeconds = math.max(0, timer._endTime - currentTime)
 
 			-- Per-frame signal.
 			timer._tickCount += 1
@@ -81,11 +91,6 @@ local function stepAllTimers()
 				timer._endedSignal:Fire()
 			end
 		end
-	end
-
-	if #ActiveTimerList == 0 and RunnerHeartbeatConnection then
-		RunnerHeartbeatConnection:Disconnect()
-		RunnerHeartbeatConnection = nil
 	end
 end
 

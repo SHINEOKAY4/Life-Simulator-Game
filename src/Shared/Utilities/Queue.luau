@@ -106,7 +106,7 @@ end
 -- Returns the number of items currently in the queue.
 function Queue:Size(): number
 	local queue = self :: Queue
-	return queue.Tail - queue.Head + 1
+	return math.max(0, queue.Tail - queue.Head + 1)
 end
 
 -- Returns true if the queue has no items.
@@ -127,19 +127,22 @@ end
 -- Returns them in order from front to back.
 function Queue:Drain(limit: number?): { any }
 	local queue = self :: Queue
-	local availableCount = queue.Tail - queue.Head + 1
-	if availableCount <= 0 then
+	if queue.Head > queue.Tail then
 		return {}
 	end
 
-	local numberToDrain = limit and math.max(0, math.min(limit, availableCount)) or availableCount
+	local availableCount = queue.Tail - queue.Head + 1
+	local numberToDrain = if limit then math.min(limit, availableCount) else availableCount
 	local results = table.create(numberToDrain)
+	local head = queue.Head
 
 	for i = 1, numberToDrain do
-		results[i] = queue._data[queue.Head]
-		queue._data[queue.Head] = nil
-		queue.Head += 1
+		local index = head + i - 1
+		results[i] = queue._data[index]
+		queue._data[index] = nil
 	end
+
+	queue.Head = head + numberToDrain
 
 	if queue.Head > queue.Tail then
 		queue._data = {}

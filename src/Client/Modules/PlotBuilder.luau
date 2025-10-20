@@ -12,9 +12,12 @@ local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 local PlotBuilderGui = PlayerGui:WaitForChild("PlotBuilderGui")
+local PlotBuilderMain = PlotBuilderGui.Main
 
 local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
 local BuildContext = InputContextsFolder:WaitForChild("BuildContext")
+local ToggleBuildModeAction = BuildContext.ToggleBuildMode
+local PlacePreviewAction = BuildContext.PlacePreview
 
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
@@ -62,12 +65,12 @@ function PlotBuilder.Init()
 	ObjectPreviewEnabled.Changed:Connect(function()
 		-- if objectpreview is cancelled and plotbuilder is active, re-show plotbuilder and disable placing preview control
 		if not ObjectPreviewEnabled.Value and PlotBuilderEnabled.Value then
-			BuildContext.PlacePreview.Enabled = false
+			PlacePreviewAction.Enabled = false
 			PlotBuilder.Show()
 		end
 	end)
 
-	BuildContext.ToggleBuildMode.Pressed:Connect(function()
+	ToggleBuildModeAction.Pressed:Connect(function()
 		runDebounced("Toggle", function()
 			local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 			if not plotIndex then
@@ -84,7 +87,7 @@ function PlotBuilder.Init()
 		end)
 	end)
 
-	BuildContext.PlacePreview.Pressed:Connect(function()
+	PlacePreviewAction.Pressed:Connect(function()
 		runDebounced("PlacePreview", function()
 			if ObjectPreview.TryBeginFloorDrag() then
 				return
@@ -106,25 +109,24 @@ end
 
 function PlotBuilder.Show()
 	PlotBuilderEnabled.Value = true
-	PlotBuilderGui.Main.Visible = PlotBuilderEnabled.Value
+	PlotBuilderMain.Visible = true
 	PlotFinder.StartTracking(Player)
 end
 
 function PlotBuilder.Hide()
 	PlotBuilderEnabled.Value = false
-	PlotBuilderGui.Main.Visible = PlotBuilderEnabled.Value
-
+	PlotBuilderMain.Visible = false
 	PlotBuilder.RemovePreview()
 end
 
 function PlotBuilder.PreviewSelected(itemId: string, initialFacing: string?)
 	ObjectPreview.RenderPreview(itemId, initialFacing :: Facing?)
-	BuildContext.PlacePreview.Enabled = true
+	PlacePreviewAction.Enabled = true
 end
 
 function PlotBuilder.RemovePreview()
 	ObjectPreview.ClearPreview()
-	BuildContext.PlacePreview.Enabled = false
+	PlacePreviewAction.Enabled = false
 end
 
 function PlotBuilder.PlaceSelectedPreview()
@@ -172,7 +174,7 @@ function PlotBuilder.PlaceSelectedPreview()
 end
 
 function PlotBuilder.PlaceFloorSelection(selection: any)
-	if typeof(selection) ~= "table" then
+	if typeof(selection) ~= "table" or selection.CanPlace ~= true then
 		return
 	end
 
@@ -181,23 +183,13 @@ function PlotBuilder.PlaceFloorSelection(selection: any)
 		return
 	end
 
-	if selection.CanPlace ~= true then
-		return
-	end
-
 	local startX = selection.AnchorCellX
 	local startZ = selection.AnchorCellZ
 	local endX = selection.CurrentCellX
 	local endZ = selection.CurrentCellZ
-	local widthCells = selection.WidthCells
-	local depthCells = selection.DepthCells
 
-	if
-		typeof(startX) ~= "number"
-		or typeof(startZ) ~= "number"
-		or typeof(endX) ~= "number"
-		or typeof(endZ) ~= "number"
-	then
+	if typeof(startX) ~= "number" or typeof(startZ) ~= "number" 
+		or typeof(endX) ~= "number" or typeof(endZ) ~= "number" then
 		return
 	end
 
@@ -206,6 +198,9 @@ function PlotBuilder.PlaceFloorSelection(selection: any)
 	local maxCellX = math.max(startX, endX)
 	local maxCellZ = math.max(startZ, endZ)
 
+	local widthCells = selection.WidthCells
+	local depthCells = selection.DepthCells
+	
 	if typeof(widthCells) ~= "number" then
 		widthCells = maxCellX - minCellX + 1
 	end
@@ -230,16 +225,12 @@ function PlotBuilder.PlaceFloorSelection(selection: any)
 end
 
 function PlotBuilder.PlaceWallStrip(selection: WallStripSelectionInfo)
-	if typeof(selection) ~= "table" then
+	if typeof(selection) ~= "table" or selection.CanPlace ~= true then
 		return
 	end
 
 	local itemId = selection.ItemId
 	if typeof(itemId) ~= "string" or itemId == "" then
-		return
-	end
-
-	if selection.CanPlace ~= true then
 		return
 	end
 
@@ -250,27 +241,22 @@ function PlotBuilder.PlaceWallStrip(selection: WallStripSelectionInfo)
 	local facing = selection.Facing
 	local orientation = selection.Orientation
 
-	if typeof(startCellX) ~= "number" or typeof(endCellX) ~= "number" then
+	if typeof(startCellX) ~= "number" or typeof(endCellX) ~= "number" 
+		or typeof(startCellZ) ~= "number" or typeof(endCellZ) ~= "number" then
 		return
 	end
-	if typeof(startCellZ) ~= "number" or typeof(endCellZ) ~= "number" then
-		return
-	end
+	
 	if typeof(facing) ~= "string" or facing == "" then
 		return
 	end
+	
 	if orientation ~= "Horizontal" and orientation ~= "Vertical" then
 		return
 	end
 
-	if orientation == "Horizontal" then
-		if startCellZ ~= endCellZ then
-			return
-		end
-	else
-		if startCellX ~= endCellX then
-			return
-		end
+	if (orientation == "Horizontal" and startCellZ ~= endCellZ) 
+		or (orientation == "Vertical" and startCellX ~= endCellX) then
+		return
 	end
 
 	local success, message = Packets.PlaceWallStripRequest:Fire({
