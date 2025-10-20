@@ -199,6 +199,149 @@ Multiple optimization passes were performed across the codebase focusing on:
 4. Verify no behavioral changes in gameplay systems
 5. Test edge cases in placement systems
 
+### 19. Timer.luau (Shared/Utilities)
+
+**Changes:**
+- **stepAllTimers()**: Added early exit when ActiveTimerList is empty, avoiding unnecessary loop iteration
+- Cached `getCurrentServerTime()` result outside loop to avoid repeated function calls
+- Moved connection cleanup check to start of function for faster early exit
+- Cached list size to avoid repeated `#` operator calls
+
+**Performance Impact:** Moderate - Called every frame while timers are active, reducing overhead when no timers exist
+
+### 20. Queue.luau (Shared/Utilities)
+
+**Changes:**
+- **Size()**: Added `math.max(0, ...)` to ensure non-negative results
+- **Drain()**: Optimized to cache `queue.Head` and avoid repeated property access
+- Early exit check moved before calculating availableCount
+- Simplified conditional expression using `if-then-else`
+
+**Performance Impact:** Low to Moderate - Called during queue operations
+
+### 21. RateLimiter.luau (Shared/Utilities)
+
+**Changes:**
+- **Allow()**: Reordered to get `userId` before calling `os.clock()` for better instruction ordering
+- **GetTokens()**: Cached `self.Config` access, early return for nil state
+- **SecondsUntilNextToken()**: Similar reordering of operations for better cache locality
+- **TimeUntilAllow()**: Simplified `missingTokens` calculation by removing redundant `math.max`
+
+**Performance Impact:** High - These methods are called frequently during rate limit checks
+
+### 22. ResidentService.luau (Server/Services)
+
+**Changes:**
+- **Load()**: Cached `PlayersResidents[userId]` and `NameToIndexMap[userId]` outside loop
+- Reduced repeated table lookups and string concatenations
+- Created local variables for reused values (`residentName`, `residentState`)
+- **CreateResident()**: Replaced `table.insert` with direct array indexing
+- Cached `newResidentData.Name` to avoid repeated property access
+
+**Performance Impact:** Moderate - Called during resident loading and creation
+
+### 23. WorldPlacer.luau (Server/Utilities)
+
+**Changes:**
+- **Spawn()**: Cached `tostring(facing)` result to avoid calling it twice
+- Restructured attribute setting to group related operations
+- **Despawn()**: Moved `tostring(facing)` call after early exit checks
+- Combined multiple GetAttribute calls into single conditional expression
+
+**Performance Impact:** Moderate - Called during object placement and removal
+
+### 24. ObjectSelector.luau (Client/Modules)
+
+**Changes:**
+- Cached `ObjectSelectorContext.SelectObject` and `ObjectSelectorContext.Toggle` at module level
+- Reduced repeated property access through cached references
+- Simplified code by using cached action references throughout
+
+**Performance Impact:** Low - Reduces property access overhead during initialization and state changes
+
+### 25. PlotBuilder.luau (Client/Modules)
+
+**Changes:**
+- Cached `PlotBuilderGui.Main`, `BuildContext.ToggleBuildMode`, and `BuildContext.PlacePreview`
+- **Show()/Hide()**: Simplified visibility toggling using cached reference
+- **PlaceFloorSelection()**: Moved `CanPlace` check to first line for early exit
+- Combined multiple `typeof` checks into single conditional
+- **PlaceWallStrip()**: Similar early exit and validation optimizations
+- Combined orientation validation checks into single conditional
+
+**Performance Impact:** Low to Moderate - Reduces overhead during build mode operations
+
+### 26. ResidentController.luau (Client/Modules)
+
+**Changes:**
+- **RequestMoveToLocation()**: Removed unnecessary `pcall` wrapper
+- Direct call to packet Fire method with error handling simplified
+
+**Performance Impact:** Low - Reduces function call overhead for move requests
+
+### 27. Renderer.luau (Client/Modules/ObjectPreview)
+
+**Changes:**
+- **PreviewWall()**: Reordered code to compute scaling check before getting rootPart
+- Only gets rootPart if scaling is needed, avoiding unnecessary lookups
+- **computeWallSpan()**: Simplified ternary operator using `if-then-else` syntax
+
+**Performance Impact:** Low - Called during object preview rendering
+
+### 28. PlotExpansion.luau (Client/Modules)
+
+**Changes:**
+- Cached frequently accessed UI elements at module level:
+  - `ToggleExpansionAction`, `ToggleClickPurchaseAction`
+  - `VisualToolsFolder`
+- Reduced repeated property access throughout the module
+
+**Performance Impact:** Low - Reduces property access overhead during plot expansion mode
+
+### 29. PlotService.luau (Server/Services)
+
+**Changes:**
+- **flattenPlacedObjects()**: Cached `#keys` to avoid repeated length calculations
+- Simplified spec access using nested ternary operators
+- Removed redundant type cast on facing string
+- **Load()**: Cached `PlayerStations[userId]` outside loop to avoid repeated lookups
+- Optimized station initialization by reducing continue statements
+- **RemoveStationForPlayer()**: Added early exit if removed is nil
+- Reduced conditional nesting
+
+**Performance Impact:** Moderate - Called during plot loading and station management
+
+### 30. GigManager.luau (Client/Modules)
+
+**Changes:**
+- **StartGig()**: Changed `type()` to `typeof()` for consistency with Luau conventions
+
+**Performance Impact:** Negligible - Improves type safety
+
+### 31. Debounce.luau (Shared/Utilities)
+
+**Changes:**
+- **RunIfAvailable()**: Inverted condition for early exit pattern
+- Removed unnecessary anonymous function wrapper in pcall
+- **getActiveExpiration()**: Replaced `clearKey()` call with direct `state[scopedKey] = nil`
+- Changed `expirationTime == nil` to `not expirationTime` for consistency
+
+**Performance Impact:** Low to Moderate - Called frequently for debounced actions
+
+## Summary Statistics (Updated)
+
+- **Files Modified:** 31 (13 new)
+- **Lines Changed:** ~500 (mix of additions and deletions)
+- **Primary Focus Areas:**
+  - Loop optimizations
+  - Reduced allocations
+  - Cached lookups
+  - Algorithmic improvements
+  - String manipulation caching
+  - Pre-allocation patterns
+  - Early exit optimizations
+  - Reduced property access overhead
+
 ## Notes
 
 - All optimizations maintain existing functionality
