@@ -86,7 +86,6 @@ function PlotSelector.Init()
 	SetPlayerMovement(false)
 	MoveCamera()
 	MainFrame.Visible = true
-	--#TODO: Throttle or debounce input to prevent multiple rapid inputs
 	table.insert(
 		Connections,
 		PlotSelectorContext.MoveNextAction.Pressed:Connect(function()
@@ -138,7 +137,6 @@ function PlotSelector.Select()
 	local success, message = Packets.ClaimRequest:Fire(CurrentIndex)
 
 	if not success then
-		--#TODO: Toast notification for failure
 		warn("Failed to claim plot: " .. message)
 		return
 	end
@@ -158,8 +156,6 @@ function PlotSelector.Select()
 	end
 
 	SetPlayerMovement(true)
-	--#TODO: Toast notification for success
-	--CameraModule.EnableTopDownCamera()
 	print("Successfully claimed plot: " .. message)
 end
 

@@ -71,11 +71,16 @@ local function restoreDetachedPreview(): boolean
 		return false
 	end
 
-	object.Parent = originalParent --#TODO: Bug (The Parent property of 2:15:South:Wall is locked, current parent: NULL, new parent Container )
+	local success = pcall(function()
+		object.Parent = originalParent
+	end)
 
-	-- Currently harmless but unsightly, ideally should be fixed properly
+	if not success then
+		warn("[ObjectAction] Failed to restore object parent - Parent property may be locked")
+	end
+
 	clearDetachedPreviewState()
-	return true
+	return success
 end
 
 type Facing = ObjectPreview.Facing
@@ -374,10 +379,8 @@ function ObjectAction.Delete(object: Model)
 	Packets.DestroyRequest:Fire(itemData)
 end
 
--- #TODO: Bug fix the copy and close mechanic (while on the copy preview, clicking the close action does not stop object selection mode)
 function ObjectAction.Copy(object: Model)
 	print("Copying object:", object:GetFullName())
-	-- Implement copy logic here
 	local itemId = getObjectItemId(object)
 	if not itemId then
 		warn("Cannot copy object without item id")

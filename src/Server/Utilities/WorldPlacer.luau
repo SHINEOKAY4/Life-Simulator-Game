@@ -173,15 +173,14 @@ function WorldPlacer.Despawn(player: Player, itemId: string, cellX: number, cell
 		return
 	end
 
-	--#TODO optimize: if many items, this could be slow.
-	for _, inst in container:GetChildren() do
-		local matchesItem = inst:GetAttribute("ItemId") == itemId
-		local matchesCellX = inst:GetAttribute("CellX") == cellX
-		local matchesCellZ = inst:GetAttribute("CellZ") == cellZ
-		local matchesFacing = inst:GetAttribute("Facing") == desiredFacing
+	for _, instance in container:GetChildren() do
+		local matchesItem = instance:GetAttribute("ItemId") == itemId
+		local matchesCellX = instance:GetAttribute("CellX") == cellX
+		local matchesCellZ = instance:GetAttribute("CellZ") == cellZ
+		local matchesFacing = instance:GetAttribute("Facing") == desiredFacing
 
 		if matchesItem and matchesCellX and matchesCellZ and matchesFacing then
-			inst:Destroy()
+			instance:Destroy()
 			break
 		end
 	end

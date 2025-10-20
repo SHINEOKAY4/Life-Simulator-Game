@@ -106,7 +106,6 @@ function BillboardRadialUI.Init()
 		end
 
 		ObjectAction.Move(AdorneeModel, Vector3.new(0, 0, 0))
-		--#TODO: You can add functionality here to handle the move action
 	end)
 
 	ObjectSelectorContext.RotateObject.Pressed:Connect(function()

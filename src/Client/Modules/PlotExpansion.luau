@@ -31,23 +31,30 @@ local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEn
 local camera = Workspace.CurrentCamera :: Camera
 
 local PlotExpansion = {}
+
 local INPUT_DEBOUNCE_SECONDS = 0.25
+local RAYCAST_DISTANCE_STUDS = 1000
+local CHUNK_PRICE = 400
+local SUCCESS_HIGHLIGHT_COLOR = Color3.fromRGB(0, 255, 0)
+local SUCCESS_OUTLINE_COLOR = Color3.fromRGB(0, 100, 0)
+local FAILURE_HIGHLIGHT_COLOR = Color3.fromRGB(255, 0, 0)
+local FAILURE_OUTLINE_COLOR = Color3.fromRGB(100, 0, 0)
 
 local function runDebounced(actionName: string, callback: () -> ()): ()
 	local key = string.format("PlotExpansion/%s", actionName)
 	Debounce.RunIfAvailable(key, INPUT_DEBOUNCE_SECONDS, callback, Player.UserId)
 end
 
-local Connection: RBXScriptConnection? = nil
-local _HoveredCover: BasePart? = nil
+local renderConnection: RBXScriptConnection? = nil
+local hoveredChunkCover: BasePart? = nil
 
-local function ClearEffects()
-	_HoveredCover = nil
+local function clearVisualEffects()
+	hoveredChunkCover = nil
 	ChunkHighlight.Adornee = nil
 	PriceTag.Adornee = AssetsFolder.VisualTools
 end
 
-local function BuildParams(coversFolder: Folder): RaycastParams
+local function createRaycastParameters(coversFolder: Folder): RaycastParams
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
 	params.FilterDescendantsInstances = { coversFolder }
@@ -94,29 +101,24 @@ function PlotExpansion.Init()
 
 	PlotContext.ToggleClickPurchase.Pressed:Connect(function()
 		runDebounced("Purchase", function()
-			print("ToggleClickPurchase pressed")
 			local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 			local plotModel = PlotFinder.FindPlot(plotIndex)
 			local coversFolder = plotModel and plotModel:FindFirstChild("Covers") :: Folder
 
-			local params = BuildParams(coversFolder)
-			local mouse = UserInputService:GetMouseLocation()
-			local ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
-			local result = Workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
+			local params = createRaycastParameters(coversFolder)
+			local mouseLocation = UserInputService:GetMouseLocation()
+			local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+			local result = Workspace:Raycast(ray.Origin, ray.Direction * RAYCAST_DISTANCE_STUDS, params)
 
 			if not result or not result.Instance or not result.Instance:IsA("BasePart") then
 				return
 			end
 
 			local hitCover = result.Instance
-			if hitCover == _HoveredCover then
+			if hitCover == hoveredChunkCover then
 				local chunkX = hitCover:GetAttribute("ChunkX") :: number
 				local chunkZ = hitCover:GetAttribute("ChunkZ") :: number
 				local success, message = PlotStateStore.RequestPurchase(chunkX, chunkZ)
-				if success then
-					print("Toast notification UI implementation needed")
-				end
-				--#TODO: Toast notification for success/failure
 				print("Purchase result:", success, message)
 			end
 		end)
@@ -140,16 +142,16 @@ function PlotExpansion.Show()
 	PriceTag.Enabled = true
 	PriceTag.Parent = container
 
-	local params = BuildParams(coversFolder)
+	local params = createRaycastParameters(coversFolder)
 	PlotFinder.StartTracking(Player)
 
-	Connection = RunService.PreRender:Connect(function(_deltaTime)
-		local mouse = UserInputService:GetMouseLocation()
-		local ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
-		local result = Workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
+	renderConnection = RunService.PreRender:Connect(function(_deltaTime)
+		local mouseLocation = UserInputService:GetMouseLocation()
+		local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+		local result = Workspace:Raycast(ray.Origin, ray.Direction * RAYCAST_DISTANCE_STUDS, params)
 
 		if not result or not result.Instance or not result.Instance:IsA("BasePart") then
-			ClearEffects()
+			clearVisualEffects()
 			return
 		end
 
@@ -157,18 +159,17 @@ function PlotExpansion.Show()
 		local chunkX = hitCover:GetAttribute("ChunkX") :: number
 		local chunkZ = hitCover:GetAttribute("ChunkZ") :: number
 
-		if hitCover == _HoveredCover then
+		if hitCover == hoveredChunkCover then
 			return
 		end
 
-		local success, message = PlotStateStore.CanPurchaseChunk(chunkX, chunkZ)
-		--#TODO: Add Additional visual effects
-		_HoveredCover = hitCover
+		local canPurchase, message = PlotStateStore.CanPurchaseChunk(chunkX, chunkZ)
+		hoveredChunkCover = hitCover
 		ChunkHighlight.Adornee = hitCover
 		PriceTag.Adornee = hitCover
-		PriceLabel.Text = if not success then message else "$" .. "400" -- #TODO: pricing logic
-		ChunkHighlight.FillColor = if success then Color3.fromRGB(0, 255, 0) else Color3.fromRGB(255, 0, 0)
-		ChunkHighlight.OutlineColor = if success then Color3.fromRGB(0, 100, 0) else Color3.fromRGB(100, 0, 0)
+		PriceLabel.Text = if not canPurchase then message else "$" .. tostring(CHUNK_PRICE)
+		ChunkHighlight.FillColor = if canPurchase then SUCCESS_HIGHLIGHT_COLOR else FAILURE_HIGHLIGHT_COLOR
+		ChunkHighlight.OutlineColor = if canPurchase then SUCCESS_OUTLINE_COLOR else FAILURE_OUTLINE_COLOR
 	end)
 end
 
@@ -177,12 +178,12 @@ function PlotExpansion.Hide()
 	PlotContext.ToggleClickPurchase.Enabled = false
 	PriceTag.Parent = AssetsFolder.VisualTools
 	PriceTag.Enabled = false
-	if Connection then
-		Connection:Disconnect()
-		Connection = nil
+	if renderConnection then
+		renderConnection:Disconnect()
+		renderConnection = nil
 	end
 
-	ClearEffects()
+	clearVisualEffects()
 end
 
 return PlotExpansion

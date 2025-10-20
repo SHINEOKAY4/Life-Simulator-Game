@@ -101,14 +101,7 @@ function ObjectSelector.Init()
 		end
 	end)
 
-	--ObjectPreviewEnabled.Changed:Connect(function()
-	--	if ObjectPreviewEnabled.Value and ObjectSelectorEnabled.Value then
-	--ObjectSelector.Hide()
-	--	end
-	--end)
-
 	ObjectSelectorContext.SelectObject.Pressed:Connect(function()
-		--#TODO: Add a debounce here to prevent multiple rapid clicks
 		if RadialBillboardButtonEnabled.Value then
 			return
 		end

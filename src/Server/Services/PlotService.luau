@@ -287,8 +287,6 @@ function PlotService.UnlockArea(player: Player, chunkX: number, chunkZ: number):
 		return false, "Chunk not adjacent to unlocked area"
 	end
 
-	--#TODO: integrate cost check (currency / cash module)
-
 	local success = runtimeState:UnlockChunk(chunkX, chunkZ)
 	if not success then
 		return false, "Already unlocked"
