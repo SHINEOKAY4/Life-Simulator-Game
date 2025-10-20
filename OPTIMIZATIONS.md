@@ -121,15 +121,68 @@ Multiple optimization passes were performed across the codebase focusing on:
 
 **Performance Impact:** Moderate - Called during resident autonomy evaluation
 
+### 13. Chunks.luau (Server/Classes/PlotState)
+
+**Changes:**
+- **HasAdjacentUnlocked()**: Converted multi-return pattern to single boolean expression with short-circuit evaluation
+- Reduced from 5 return statements to 1 expression
+- More functional programming style
+
+**Performance Impact:** Low - Called during chunk unlocking validation
+
+### 14. Floors.luau (Server/Classes/PlotState)
+
+**Changes:**
+- **MoveFloor()**: Changed pcall usage from wrapping anonymous functions to direct method references
+- Eliminates function allocation overhead while maintaining error handling
+
+**Performance Impact:** Low to Moderate - Called during floor movement operations
+
+### 15. Roofs.luau (Server/Classes/PlotState)
+
+**Changes:**
+- **MoveRoof()**: Changed pcall usage from wrapping anonymous functions to direct method references
+- Consistent with Floors.luau and CellObjects.luau optimizations
+
+**Performance Impact:** Low to Moderate - Called during roof movement operations
+
+### 16. ResidentMovement.luau (Server/Utilities)
+
+**Changes:**
+- **normalizeAxisSpecifier()**: Added memoization cache to avoid repeated string manipulation
+- **shouldRunToTarget()**: Cached hunger and energy need definitions at module level instead of fetching each call
+- **computePathWithVariants()**: Pre-allocated attemptsMeta array with `table.create()` and optimized pcall pattern
+- Combined multiple `gsub()` calls into single chained operation
+
+**Performance Impact:** High - This module handles all resident pathfinding, called multiple times per resident movement
+
+### 17. ActionQueue.luau (Server/Services/ResidentAutonomyService)
+
+**Changes:**
+- **buildAssignment()**: Optimized to conditionally add `RestModeOverride` field only when present
+- Reduces unnecessary nil assignments in table construction
+
+**Performance Impact:** Moderate - Called every time a resident queues a need action
+
+### 18. StationManager.luau (Server/Services/ResidentAutonomyService)
+
+**Changes:**
+- **findAvailableStation()**: Improved conditional checks to avoid unnecessary stationMap lookups
+- Added nil check before caching item specs to prevent caching nil values
+
+**Performance Impact:** High - Called during need evaluation for every resident
+
 ## Summary Statistics
 
-- **Files Modified:** 12
-- **Lines Changed:** ~200 (mix of additions and deletions)
+- **Files Modified:** 18
+- **Lines Changed:** ~300 (mix of additions and deletions)
 - **Primary Focus Areas:**
   - Loop optimizations
   - Reduced allocations
   - Cached lookups
   - Algorithmic improvements
+  - String manipulation caching
+  - Pre-allocation patterns
 
 ## Performance Benefits
 
