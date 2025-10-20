@@ -50,7 +50,7 @@ local NewResidentUI = require(script.Parent.UserInterface.NewResidentUI)
 ResidentsStore.Init()
 NewResidentUI.Init()
 
-local function SetCollisionGroup(character: Model)
+local function setCharacterCollisionGroup(character: Model)
 	for _, descendant in ipairs(character:GetDescendants()) do
 		if descendant:IsA("BasePart") then
 			descendant.CollisionGroup = "Players"
@@ -58,17 +58,17 @@ local function SetCollisionGroup(character: Model)
 	end
 end
 
-SetCollisionGroup(Character)
+setCharacterCollisionGroup(Character)
 
-LocalPlayer.CharacterAdded:Connect(SetCollisionGroup)
+LocalPlayer.CharacterAdded:Connect(setCharacterCollisionGroup)
 
 for _, player in ipairs(Players:GetPlayers()) do
 	if player ~= LocalPlayer and player.Character then
-		SetCollisionGroup(player.Character)
-		player.CharacterAdded:Connect(SetCollisionGroup)
+		setCharacterCollisionGroup(player.Character)
+		player.CharacterAdded:Connect(setCharacterCollisionGroup)
 	end
 end
 
 Players.PlayerAdded:Connect(function(player: Player)
-	player.CharacterAdded:Connect(SetCollisionGroup)
+	player.CharacterAdded:Connect(setCharacterCollisionGroup)
 end)

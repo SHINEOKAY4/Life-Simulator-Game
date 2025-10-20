@@ -38,11 +38,7 @@ EconomyCycleService.Start()
 
 ResidentNeedService.UpdateRegisteredResidentsNeeds()
 ResidentCollapseService.Refresh()
-local function OnPlayerAdded(player: Player)
-	print("Player added: " .. player.Name)
-	print(PlayerSession.GetDataAwait(player))
-	--PlayerSession.ClearData(player)
-	local character = player.Character or player.CharacterAdded:Wait()
+local function setCharacterCollisionGroup(character: Model)
 	for _, part in pairs(character:GetDescendants()) do
 		if part:IsA("BasePart") then
 			part.CollisionGroup = "Players"
@@ -50,19 +46,20 @@ local function OnPlayerAdded(player: Player)
 	end
 end
 
+local function OnPlayerAdded(player: Player)
+	print("Player added: " .. player.Name)
+	print(PlayerSession.GetDataAwait(player))
+	local character = player.Character or player.CharacterAdded:Wait()
+	setCharacterCollisionGroup(character)
+end
+
 local function OnPlayerRemoving(player: Player)
 	print("Player removing: " .. player.Name)
-	-- For now unload order matters, unloading plot service while other services still uses the plot will cause issues
-
-	ResidentService.Unload(player) -- This should always be higher in the unload order
-	PlotService.Unclaim(player) -- This should always be lower in the unload order
+	ResidentService.Unload(player)
+	PlotService.Unclaim(player)
 end
 
 Players.PlayerAdded:Connect(OnPlayerAdded)
 Players.PlayerRemoving:Connect(OnPlayerRemoving)
 
 local _ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
-
---_ResidentDebug.SetChannelEnabled("Movement", true)
---_ResidentDebug.SetChannelEnabled("Action", true)
---_ResidentDebug.SetChannelEnabled("Effects", true)
