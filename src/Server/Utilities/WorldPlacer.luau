@@ -76,18 +76,23 @@ function WorldPlacer.Spawn(
 	if not model then
 		return
 	end
+	
+	local facingString = tostring(facing)
 	model:SetAttribute("ItemId", itemId)
 	model:SetAttribute("CellX", cellX)
 	model:SetAttribute("CellZ", cellZ)
-	model:SetAttribute("Facing", tostring(facing))
+	model:SetAttribute("Facing", facingString)
 	model:SetAttribute("WidthCells", footprintWidth)
 	model:SetAttribute("DepthCells", footprintDepth)
-	if options and options.previousWallId then
-		model:SetAttribute("PreviousWallId", options.previousWallId)
-	elseif options and options.metadata then
-		local metaPrev = options.metadata.PreviousId
-		if typeof(metaPrev) == "string" and metaPrev ~= "" then
-			model:SetAttribute("PreviousWallId", metaPrev)
+	
+	if options then
+		if options.previousWallId then
+			model:SetAttribute("PreviousWallId", options.previousWallId)
+		elseif options.metadata then
+			local metaPrev = options.metadata.PreviousId
+			if typeof(metaPrev) == "string" and metaPrev ~= "" then
+				model:SetAttribute("PreviousWallId", metaPrev)
+			end
 		end
 	end
 
@@ -162,7 +167,6 @@ function WorldPlacer.Spawn(
 end
 
 function WorldPlacer.Despawn(player: Player, itemId: string, cellX: number, cellZ: number, facing: Facing)
-	local desiredFacing = tostring(facing)
 	local plotIndex = player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
 	if not plotModel then
@@ -173,14 +177,12 @@ function WorldPlacer.Despawn(player: Player, itemId: string, cellX: number, cell
 		return
 	end
 
-	--#TODO optimize: if many items, this could be slow.
+	local desiredFacing = tostring(facing)
 	for _, inst in container:GetChildren() do
-		local matchesItem = inst:GetAttribute("ItemId") == itemId
-		local matchesCellX = inst:GetAttribute("CellX") == cellX
-		local matchesCellZ = inst:GetAttribute("CellZ") == cellZ
-		local matchesFacing = inst:GetAttribute("Facing") == desiredFacing
-
-		if matchesItem and matchesCellX and matchesCellZ and matchesFacing then
+		if inst:GetAttribute("ItemId") == itemId 
+			and inst:GetAttribute("CellX") == cellX 
+			and inst:GetAttribute("CellZ") == cellZ 
+			and inst:GetAttribute("Facing") == desiredFacing then
 			inst:Destroy()
 			break
 		end

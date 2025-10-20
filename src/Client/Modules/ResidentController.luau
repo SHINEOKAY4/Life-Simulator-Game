@@ -17,17 +17,10 @@ function ResidentController.RequestMoveToLocation(residentModel: Model, targetPo
 	end
 
 	local residentName = residentModel.Name
-	local ok, success, message = pcall(function()
-		return ResidentsPackets.RequestResidentMove:Fire(residentName, targetPosition)
-	end)
-
-	if not ok then
-		warn("ResidentController.RequestMoveToLocation failed:", success)
-		return false, "Failed to send move request"
-	end
+	local success, message = ResidentsPackets.RequestResidentMove:Fire(residentName, targetPosition)
 
 	if not success then
-		warn(("Move request rejected for %s: %s"):format(residentName, message))
+		warn(("Move request rejected for %s: %s"):format(residentName, message or "Unknown error"))
 	end
 
 	return success, message

@@ -14,6 +14,8 @@ local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
 local ObjectSelectorContext = InputContextsFolder:WaitForChild("ObjectSelectorContext")
+local SelectObjectAction = ObjectSelectorContext.SelectObject
+local ToggleAction = ObjectSelectorContext.Toggle
 
 local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
 local SelectionHighlight = AssetsFolder.VisualTools:WaitForChild("SelectionHighlight") :: Highlight
@@ -107,7 +109,7 @@ function ObjectSelector.Init()
 	--	end
 	--end)
 
-	ObjectSelectorContext.SelectObject.Pressed:Connect(function()
+	SelectObjectAction.Pressed:Connect(function()
 		--#TODO: Add a debounce here to prevent multiple rapid clicks
 		if RadialBillboardButtonEnabled.Value then
 			return
@@ -118,7 +120,7 @@ function ObjectSelector.Init()
 		end)
 	end)
 
-	ObjectSelectorContext.Toggle.Pressed:Connect(function()
+	ToggleAction.Pressed:Connect(function()
 		runDebounced("Toggle", function()
 			print("Toggling Object Selector")
 			if not PlotFinder.IsWithinBounds(Player) then
@@ -148,13 +150,13 @@ end
 
 function ObjectSelector.Show()
 	ObjectSelectorEnabled.Value = true
-	ObjectSelectorContext.SelectObject.Enabled = true
+	SelectObjectAction.Enabled = true
 	PlotFinder.StartTracking(Player)
 end
 
 function ObjectSelector.Hide()
 	ObjectSelectorEnabled.Value = false -- Do not put this in Clear selection function so we can call ClearSelection without disabling the selector
-	ObjectSelectorContext.SelectObject.Enabled = false
+	SelectObjectAction.Enabled = false
 	ClearSelection()
 end
 return ObjectSelector
