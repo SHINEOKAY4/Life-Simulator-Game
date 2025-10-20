@@ -151,24 +151,29 @@ local function getNeedValue(residentState: any, needName: string): number
 	return 100
 end
 
+local CACHED_HUNGER_DEF = NeedConfig.Needs.Hunger
+local CACHED_ENERGY_DEF = NeedConfig.Needs.Energy
+
 local function shouldRunToTarget(residentState: any, origin: Vector3, destination: Vector3): boolean
 	local distance = (origin - destination).Magnitude
 	if distance < RUN_DISTANCE_THRESHOLD then
 		return false
 	end
-	local hungerDef = NeedConfig.Needs.Hunger
-	local energyDef = NeedConfig.Needs.Energy
-	local hunger = getNeedValue(residentState, "Hunger")
-	local energy = getNeedValue(residentState, "Energy")
-	if hungerDef and hunger <= hungerDef.Critical then
-		return false
+	
+	if CACHED_HUNGER_DEF then
+		local hunger = getNeedValue(residentState, "Hunger")
+		if hunger <= CACHED_HUNGER_DEF.Critical then
+			return false
+		end
 	end
-	if energyDef and energy <= energyDef.Critical then
-		return false
+	
+	if CACHED_ENERGY_DEF then
+		local energy = getNeedValue(residentState, "Energy")
+		if energy <= CACHED_ENERGY_DEF.Critical or energy <= CACHED_ENERGY_DEF.Low then
+			return false
+		end
 	end
-	if energyDef and energy <= energyDef.Low then
-		return false
-	end
+	
 	return true
 end
 
@@ -180,19 +185,20 @@ local function pickTravelSpeed(residentState: any, origin: Vector3, destination:
 end
 
 local function computePathWithVariants(origin: Vector3, destination: Vector3): (Path?, { [number]: { [string]: any } })
-	local attemptsMeta = {}
+	local attemptsMeta = table.create(#PATH_VARIANTS)
+	local metaIndex = 0
+	
 	for _, params in ipairs(PATH_VARIANTS) do
 		local path = PathfindingService:CreatePath(params)
-		local ok, computeError = pcall(function()
-			path:ComputeAsync(origin, destination)
-		end)
+		local ok, computeError = pcall(path.ComputeAsync, path, origin, destination)
 		local statusName = if ok then path.Status.Name else "ComputeError"
 		local waypointsCount = 0
 		if ok and path.Status == Enum.PathStatus.Success then
 			local waypoints = path:GetWaypoints()
 			waypointsCount = #waypoints
 		end
-		attemptsMeta[#attemptsMeta + 1] = {
+		metaIndex += 1
+		attemptsMeta[metaIndex] = {
 			AgentHeight = params.AgentHeight,
 			AgentRadius = params.AgentRadius,
 			WaypointSpacing = params.WaypointSpacing,
@@ -480,16 +486,20 @@ local function selectEntryAttachment(
 	return attachments[1].Attachment
 end
 
+local AXIS_SPECIFIER_CACHE = {} :: { [string]: string? }
+
 local function normalizeAxisSpecifier(value: string): string?
+	local cached = AXIS_SPECIFIER_CACHE[value]
+	if cached ~= nil then
+		return cached
+	end
+	
 	local trimmed = value:gsub("%s+", ""):upper()
-	trimmed = trimmed:gsub("PLUS", "+")
-	trimmed = trimmed:gsub("POSITIVE", "+")
-	trimmed = trimmed:gsub("MINUS", "-")
-	trimmed = trimmed:gsub("NEGATIVE", "-")
+	trimmed = trimmed:gsub("PLUS", "+"):gsub("POSITIVE", "+"):gsub("MINUS", "-"):gsub("NEGATIVE", "-")
+	
 	if trimmed == "X" or trimmed == "Y" or trimmed == "Z" then
 		trimmed = "+" .. trimmed
-	end
-	if trimmed == "FRONT" then
+	elseif trimmed == "FRONT" then
 		trimmed = "-Z"
 	elseif trimmed == "BACK" then
 		trimmed = "+Z"
@@ -498,7 +508,10 @@ local function normalizeAxisSpecifier(value: string): string?
 	elseif trimmed == "RIGHT" then
 		trimmed = "+X"
 	end
-	return FRONT_AXIS_MAP[trimmed] and trimmed or nil
+	
+	local result = FRONT_AXIS_MAP[trimmed] and trimmed or nil
+	AXIS_SPECIFIER_CACHE[value] = result
+	return result
 end
 
 local function resolveFrontVector(stationModel: Model, bboxCFrame: CFrame): (Vector3, Vector3)
