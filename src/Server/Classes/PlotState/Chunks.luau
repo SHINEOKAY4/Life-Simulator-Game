@@ -27,19 +27,10 @@ function Chunks.attach(PlotState)
 	end
 
 	function PlotState:HasAdjacentUnlocked(chunkX: number, chunkZ: number): boolean
-		if chunkX > 1 and self:IsChunkUnlocked(chunkX - 1, chunkZ) then
-			return true
-		end
-		if chunkX < self.ChunkColumns and self:IsChunkUnlocked(chunkX + 1, chunkZ) then
-			return true
-		end
-		if chunkZ > 1 and self:IsChunkUnlocked(chunkX, chunkZ - 1) then
-			return true
-		end
-		if chunkZ < self.ChunkRows and self:IsChunkUnlocked(chunkX, chunkZ + 1) then
-			return true
-		end
-		return false
+		return (chunkX > 1 and self:IsChunkUnlocked(chunkX - 1, chunkZ))
+			or (chunkX < self.ChunkColumns and self:IsChunkUnlocked(chunkX + 1, chunkZ))
+			or (chunkZ > 1 and self:IsChunkUnlocked(chunkX, chunkZ - 1))
+			or (chunkZ < self.ChunkRows and self:IsChunkUnlocked(chunkX, chunkZ + 1))
 	end
 end
 

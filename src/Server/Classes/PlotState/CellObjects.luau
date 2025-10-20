@@ -266,9 +266,7 @@ function CellObjects.attach(PlotState)
 				)
 		end
 
-		local okFrom, fromCells = pcall(function()
-			return self.Grid:FootprintCells(fromX, fromZ, width, depth, fromF)
-		end)
+		local okFrom, fromCells = pcall(self.Grid.FootprintCells, self.Grid, fromX, fromZ, width, depth, fromF)
 		local fromCellsArray: { number }
 		if okFrom then
 			fromCellsArray = fromCells :: { number }
@@ -276,9 +274,7 @@ function CellObjects.attach(PlotState)
 			return false, ("Source footprint invalid: %s"):format(fromCells)
 		end
 
-		local okTo, toCells = pcall(function()
-			return self.Grid:FootprintCells(toX, toZ, width, depth, toF)
-		end)
+		local okTo, toCells = pcall(self.Grid.FootprintCells, self.Grid, toX, toZ, width, depth, toF)
 		local toCellsArray: { number }
 		if okTo then
 			toCellsArray = toCells :: { number }

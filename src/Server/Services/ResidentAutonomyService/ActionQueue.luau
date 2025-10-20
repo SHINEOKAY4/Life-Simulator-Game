@@ -17,7 +17,7 @@ export type NeedDecision = {
 local ActionQueue = {}
 
 local function buildAssignment(player: Player, residentName: string, resident: ResidentState, decision: NeedDecision)
-	return {
+	local assignment = {
 		Player = player,
 		ResidentName = residentName,
 		ResidentState = resident,
@@ -28,8 +28,11 @@ local function buildAssignment(player: Player, residentName: string, resident: R
 		StationRecord = decision.StationRecord,
 		StationModel = decision.StationModel,
 		NeedName = decision.NeedName,
-		RestModeOverride = decision.RestModeOverride,
 	}
+	if decision.RestModeOverride then
+		assignment.RestModeOverride = decision.RestModeOverride
+	end
+	return assignment
 end
 
 function ActionQueue.enqueueNeedAction(

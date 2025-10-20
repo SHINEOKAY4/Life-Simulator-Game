@@ -58,10 +58,7 @@ end
 
 function ItemFinder.HasTag(itemId: string, tag: string): boolean
 	local tagSet = TagSetsById[itemId]
-	if not tagSet then
-		return false
-	end
-	return tagSet[tag] == true
+	return tagSet ~= nil and tagSet[tag] == true
 end
 
 function ItemFinder.AnyTag(itemId: string, tags: { string }): boolean

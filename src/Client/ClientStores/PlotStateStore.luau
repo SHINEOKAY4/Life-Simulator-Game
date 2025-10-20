@@ -173,21 +173,13 @@ function PlotStateStore.HasAdjacentUnlocked(chunkX: number, chunkZ: number): boo
 	end
 	local info = StateSnapshot.ChunkInfo
 	local unlocked = StateSnapshot.ChunkUnlocked
-	local columns, rows = info.ChunkColumns, info.ChunkRows
+	local columns = info.ChunkColumns
+	local rows = info.ChunkRows
 
-	if chunkX > 1 and unlocked[ChunkToIndex(chunkX - 1, chunkZ, columns)] then
-		return true
-	end
-	if chunkX < columns and unlocked[ChunkToIndex(chunkX + 1, chunkZ, columns)] then
-		return true
-	end
-	if chunkZ > 1 and unlocked[ChunkToIndex(chunkX, chunkZ - 1, columns)] then
-		return true
-	end
-	if chunkZ < rows and unlocked[ChunkToIndex(chunkX, chunkZ + 1, columns)] then
-		return true
-	end
-	return false
+	return (chunkX > 1 and unlocked[ChunkToIndex(chunkX - 1, chunkZ, columns)] == true)
+		or (chunkX < columns and unlocked[ChunkToIndex(chunkX + 1, chunkZ, columns)] == true)
+		or (chunkZ > 1 and unlocked[ChunkToIndex(chunkX, chunkZ - 1, columns)] == true)
+		or (chunkZ < rows and unlocked[ChunkToIndex(chunkX, chunkZ + 1, columns)] == true)
 end
 
 function PlotStateStore.CanPurchaseChunk(chunkX: number, chunkZ: number): (boolean, string)

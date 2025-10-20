@@ -123,15 +123,13 @@ if RunService:IsClient() then
 		@param player Player The player to track.
 	]=]
 	PlotFinder.StartTracking = function(player: Player)
-		if TrackingEnabled then
-			return
-		end
-		if not player then
+		if TrackingEnabled or not player then
 			return
 		end
 
 		TrackingEnabled = true
 		local accumulatedTime = 0
+		local lastWithinState = false
 
 		Connection = RunService.Heartbeat:Connect(function(deltaTime)
 			accumulatedTime += deltaTime
@@ -139,12 +137,14 @@ if RunService:IsClient() then
 			if accumulatedTime >= 0.5 then
 				accumulatedTime = 0
 
-				if PlotFinder.IsWithinBounds(player) then
-					if player:GetAttribute("WithinPlot") then
-						return
+				local isWithin = PlotFinder.IsWithinBounds(player)
+				if isWithin then
+					if not lastWithinState then
+						lastWithinState = true
+						player:SetAttribute("WithinPlot", true)
 					end
-					player:SetAttribute("WithinPlot", true)
 				else
+					lastWithinState = false
 					StopTracking(player)
 				end
 			end

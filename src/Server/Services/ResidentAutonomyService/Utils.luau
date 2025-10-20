@@ -65,7 +65,7 @@ function Utils.hasBlockingCriticalNeed(
 		if needName ~= ignoreNeed then
 			local value = resident:GetNeed(needName)
 			if value <= def.Critical then
-				if State.SurvivalNeeds[needName] == true then
+				if State.SurvivalNeeds[needName] then
 					return true
 				end
 				local stationType = State.NeedToStationType[needName]
@@ -73,9 +73,11 @@ function Utils.hasBlockingCriticalNeed(
 					if not DirectActionService.HasHandler(stationType) then
 						return true
 					end
-					local scope = cache and cache[stationType]
-					if scope and next(scope) ~= nil then
-						return true
+					if cache then
+						local scope = cache[stationType]
+						if scope and next(scope) ~= nil then
+							return true
+						end
 					end
 				else
 					return true
@@ -110,20 +112,17 @@ function Utils.shouldBlockRoam(player: Player, resident: ResidentState, stationC
 	for needName, def in pairs(needs) do
 		local value = resident:GetNeed(needName)
 		if value <= def.Critical then
-			if State.SurvivalNeeds[needName] == true then
+			if State.SurvivalNeeds[needName] then
 				return true
 			end
 			local stationType = State.NeedToStationType[needName]
 			if stationType then
-				if DirectActionService.HasHandler(stationType) then
-					if hasStationsForNeed(cache, stationType) then
-						return true
-					end
-				else
+				if DirectActionService.HasHandler(stationType) and hasStationsForNeed(cache, stationType) then
+					return true
+				elseif not DirectActionService.HasHandler(stationType) then
 					return true
 				end
 			else
-				-- Needs without a mapped station fall back to other systems; block roam by default.
 				return true
 			end
 		end

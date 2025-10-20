@@ -208,17 +208,13 @@ function Floors.attach(PlotState)
 			end
 		end
 
-		local okFrom, fromCellsResult = pcall(function()
-			return self.Grid:FootprintCells(fromX, fromZ, width, depth, facing)
-		end)
+		local okFrom, fromCellsResult = pcall(self.Grid.FootprintCells, self.Grid, fromX, fromZ, width, depth, facing)
 		if not okFrom then
 			return false, ("Source footprint invalid: %s"):format(tostring(fromCellsResult))
 		end
 		local fromCells = fromCellsResult :: { number }
 
-		local okTo, toCellsResult = pcall(function()
-			return self.Grid:FootprintCells(toX, toZ, width, depth, facing)
-		end)
+		local okTo, toCellsResult = pcall(self.Grid.FootprintCells, self.Grid, toX, toZ, width, depth, facing)
 		if not okTo then
 			return false, ("Destination footprint invalid: %s"):format(tostring(toCellsResult))
 		end

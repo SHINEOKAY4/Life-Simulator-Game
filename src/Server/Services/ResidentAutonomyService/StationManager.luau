@@ -117,15 +117,17 @@ function StationManager.findAvailableStation(
 		if iterator.index > total then
 			iterator.index = 1
 		end
-		if uniqueId then
-			local station = if stationMap then stationMap[uniqueId] :: StationRecord? else nil
+		if uniqueId and stationMap then
+			local station = stationMap[uniqueId] :: StationRecord?
 			if station and not table.find(station.Residents, residentName) then
 				local activeOverride = station.ActiveOverride
 				if activeOverride == nil or activeOverride == residentName then
 					local itemSpec = State.ItemSpecCache[station.Id]
 					if itemSpec == nil then
 						itemSpec = ItemFinder.FindItemById(station.Id)
-						State.ItemSpecCache[station.Id] = itemSpec
+						if itemSpec then
+							State.ItemSpecCache[station.Id] = itemSpec
+						end
 					end
 					if itemSpec then
 						local capacity = 1
