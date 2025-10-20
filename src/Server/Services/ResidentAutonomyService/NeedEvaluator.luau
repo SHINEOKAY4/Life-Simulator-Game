@@ -41,41 +41,6 @@ local function tryComplainAboutMissingStation(resident: ResidentState, needName:
 	end
 end
 
-local function computeNeedScore(
-	resident: ResidentState,
-	needName: string,
-	def: NeedConfig.NeedDef,
-	value: number,
-	clockTime: number,
-	nowClock: number
-): number
-	if needName == "Energy" and value > def.Critical and not Utils.isNight(clockTime) then
-		return 0
-	end
-	local deficit = math.max(0, def.Low - value)
-	if deficit <= 0 then
-		return 0
-	end
-	local score = math.clamp(deficit / math.max(1, def.Low), 0, 1)
-	if value <= def.Critical then
-		score += 1
-	end
-	if needName == "Energy" and Utils.isNight(clockTime) then
-		score *= 1 + State.getCircadian().SleepBias
-	end
-	local traitBias = TraitUtils.GetNeedScoreBias(resident:GetTraits(), needName)
-	local moodBias = resident:GetMoodBias(needName, nowClock)
-	local biasTotal = traitBias + moodBias
-	if biasTotal ~= 0 then
-		local multiplier = 1 + biasTotal
-		if multiplier <= 0 then
-			return 0
-		end
-		score *= multiplier
-	end
-	return score
-end
-
 local function chooseRestMode(def: NeedConfig.NeedDef, energyValue: number, clockTime: number): string
 	if energyValue <= def.Critical then
 		return "Sleep"
@@ -124,6 +89,8 @@ function NeedEvaluator.evaluate(
 
 	local bestDecision: NeedDecision? = nil
 	local bestScore = 0
+	
+	local residentTraits = resident:GetTraits()
 
 	for _, needName in ipairs(State.NeedEvaluationOrder) do
 		local def = needs[needName]
@@ -168,42 +135,63 @@ function NeedEvaluator.evaluate(
 					State.clearNonSurvivalSuppression(resident, stationType)
 				end
 
-				local score = computeNeedScore(resident, needName, def, value, clockTime, nowClock)
-				if score > 0 then
-					local cooldownSeconds = State.getNeedCooldownSeconds(needName, def)
-					local onCooldown = State.isNeedOnCooldown(resident, needName, cooldownSeconds, nowClock)
-					if onCooldown and needName == "Energy" and energyDef and energyValue ~= nil then
-						local bypass = value <= def.Critical
-						if not bypass and value < def.Low and Utils.isNight(clockTime) then
-							bypass = true
-						end
-						if bypass then
-							onCooldown = false
+				local deficit = math.max(0, def.Low - value)
+				if deficit > 0 then
+					local score = math.clamp(deficit / math.max(1, def.Low), 0, 1)
+					if value <= def.Critical then
+						score += 1
+					end
+					if needName == "Energy" and Utils.isNight(clockTime) then
+						score *= 1 + State.getCircadian().SleepBias
+					end
+					local traitBias = TraitUtils.GetNeedScoreBias(residentTraits, needName)
+					local moodBias = resident:GetMoodBias(needName, nowClock)
+					local biasTotal = traitBias + moodBias
+					if biasTotal ~= 0 then
+						local multiplier = 1 + biasTotal
+						if multiplier > 0 then
+							score *= multiplier
+						else
+							score = 0
 						end
 					end
-					if not onCooldown then
-						local uniqueId, stationRecord, itemSpec, stationModel =
-							StationManager.findAvailableStation(player, stationType, residentName, stationCache)
-						if uniqueId and stationRecord and itemSpec and stationModel then
-							if score > bestScore then
-								bestScore = score
-								local restOverride = if needName == "Energy"
-										and energyDef
-										and energyValue ~= nil
-									then chooseRestMode(energyDef, energyValue, clockTime)
-									else nil
-								bestDecision = {
-									StationType = stationType,
-									UniqueId = uniqueId,
-									StationRecord = stationRecord,
-									ItemSpec = itemSpec,
-									StationModel = stationModel,
-									NeedName = needName,
-									RestModeOverride = restOverride,
-								}
+					
+					if score > 0 then
+						local cooldownSeconds = State.getNeedCooldownSeconds(needName, def)
+						local onCooldown = State.isNeedOnCooldown(resident, needName, cooldownSeconds, nowClock)
+						if onCooldown and needName == "Energy" and energyDef and energyValue ~= nil then
+							local bypass = value <= def.Critical
+							if not bypass and value < def.Low and Utils.isNight(clockTime) then
+								bypass = true
 							end
-						elseif not isSurvival then
-							State.clearNonSurvivalSuppression(resident, stationType)
+							if bypass then
+								onCooldown = false
+							end
+						end
+						if not onCooldown then
+							local uniqueId, stationRecord, itemSpec, stationModel =
+								StationManager.findAvailableStation(player, stationType, residentName, stationCache)
+							if uniqueId and stationRecord and itemSpec and stationModel then
+								if score > bestScore then
+									bestScore = score
+									local restOverride = if needName == "Energy"
+											and energyDef
+											and energyValue ~= nil
+										then chooseRestMode(energyDef, energyValue, clockTime)
+										else nil
+									bestDecision = {
+										StationType = stationType,
+										UniqueId = uniqueId,
+										StationRecord = stationRecord,
+										ItemSpec = itemSpec,
+										StationModel = stationModel,
+										NeedName = needName,
+										RestModeOverride = restOverride,
+									}
+								end
+							elseif not isSurvival then
+								State.clearNonSurvivalSuppression(resident, stationType)
+							end
 						end
 					end
 				end

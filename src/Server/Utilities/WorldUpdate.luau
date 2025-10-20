@@ -15,6 +15,7 @@ type Task = {
 local WorldUpdate = {}
 local _tasks: { [string]: Task } = {}
 local _connection: RBXScriptConnection? = nil
+local _taskCount = 0
 
 local function safeInvoke(name: string, callback: (dt: number) -> (), dt: number)
 	local ok, err = (pcall :: any)(callback, dt)
@@ -43,7 +44,7 @@ local function ensureConnection()
 		end
 
 		-- Auto-shutdown when no tasks remain.
-		if next(_tasks) == nil then
+		if _taskCount == 0 then
 			if _connection then
 				_connection:Disconnect()
 				_connection = nil
@@ -70,6 +71,8 @@ function WorldUpdate.Subscribe(name: string, intervalSeconds: number, callback: 
 
 	if _tasks[name] then
 		warn(string.format("[WorldUpdate] Task '%s' is already registered; replacing with new callback", name))
+	else
+		_taskCount += 1
 	end
 
 	_tasks[name] = {
@@ -83,6 +86,9 @@ end
 
 --- Unsubscribes a previously registered callback.
 function WorldUpdate.Unsubscribe(name: string)
+	if _tasks[name] then
+		_taskCount -= 1
+	end
 	_tasks[name] = nil
 end
 
@@ -93,16 +99,13 @@ end
 
 --- Returns the number of registered tasks.
 function WorldUpdate.GetTaskCount(): number
-	local count = 0
-	for _ in pairs(_tasks) do
-		count += 1
-	end
-	return count
+	return _taskCount
 end
 
 --- Immediately clears all tasks and stops the heartbeat.
 function WorldUpdate.ClearAll()
 	table.clear(_tasks)
+	_taskCount = 0
 	if _connection then
 		_connection:Disconnect()
 		_connection = nil

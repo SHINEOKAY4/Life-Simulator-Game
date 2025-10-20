@@ -14,11 +14,20 @@ local Doors = require(ReplicatedStorage.Shared.Definitions.Catalog.Doors)
 local ItemFinder = {}
 local ItemsById = {}
 local NoTagModels = {}
+local TagSetsById = {}
 
 local function merge(group: { [string]: any })
 	for id, spec in group do
 		assert(ItemsById[id] == nil, ("Duplicate item id: %s"):format(id))
 		ItemsById[id] = spec
+		
+		if spec.Tags then
+			local tagSet = {}
+			for i = 1, #spec.Tags do
+				tagSet[spec.Tags[i]] = true
+			end
+			TagSetsById[id] = tagSet
+		end
 	end
 end
 
@@ -48,33 +57,22 @@ function ItemFinder.Exists(itemId: string): boolean
 end
 
 function ItemFinder.HasTag(itemId: string, tag: string): boolean
-	local spec = ItemsById[itemId]
-
-	if not spec or not spec.Tags then
+	local tagSet = TagSetsById[itemId]
+	if not tagSet then
 		return false
 	end
-
-	for i = 1, #spec.Tags do
-		if spec.Tags[i] == tag then
-			return true
-		end
-	end
-
-	return false
+	return tagSet[tag] == true
 end
 
 function ItemFinder.AnyTag(itemId: string, tags: { string }): boolean
-	local spec = ItemsById[itemId]
-
-	if not spec or not spec.Tags then
+	local tagSet = TagSetsById[itemId]
+	if not tagSet then
 		return false
 	end
 
 	for i = 1, #tags do
-		for j = 1, #spec.Tags do
-			if spec.Tags[j] == tags[i] then
-				return true
-			end
+		if tagSet[tags[i]] then
+			return true
 		end
 	end
 
