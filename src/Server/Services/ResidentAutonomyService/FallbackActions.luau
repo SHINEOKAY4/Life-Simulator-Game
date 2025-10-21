@@ -132,7 +132,7 @@ function FallbackActions.evaluateResidentJob(
 	stationCache: StationCache?
 ): boolean
 	if not resident.AutoJobEnabled then
-		return false
+		return FallbackActions.enqueueRoamAction(player, residentName, resident)
 	end
 	local save = resident.Save
 	local currentCareerId = if save then save.CurrentCareerId else nil

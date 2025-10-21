@@ -1,5 +1,5 @@
 --!strict
--- ServerScriptService/Client/Modules/ResidentSelector.lua
+-- StarterPlayerScripts/Client/Modules/ResidentMover.lua
 
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
@@ -8,7 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local ResidentController = require(script.Parent.ResidentController)
 local StationRadialUI = require(script.Parent.Parent.UserInterface.StationRadialUI)
-local ResidentUI = require(script.Parent.Parent.UserInterface.ResidentUI)
+local ResidentNeedsUI = require(script.Parent.Parent.UserInterface.ResidentNeedsUI)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
@@ -27,11 +27,11 @@ local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEn
 local _ResidentRadialEnabled = ActiveQueryFolder:FindFirstChild("ResidentRadialEnabled") :: BoolValue
 --local ObjectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled") :: BoolValue
 
-local ResidentSelector = {}
+local ResidentMover = {}
 
 local INPUT_DEBOUNCE_SECONDS = 0.2
 local function runDebounced(actionName: string, callback: () -> ()): ()
-	local key = string.format("ResidentSelector/%s", actionName)
+	local key = string.format("ResidentMover/%s", actionName)
 	Debounce.RunIfAvailable(key, INPUT_DEBOUNCE_SECONDS, callback, Player.UserId)
 end
 
@@ -50,7 +50,7 @@ local function isWithinDoubleClickWindow(): boolean
 		return false
 	end
 
-	local selectedResident = ResidentUI.GetCurrentSelectedResident()
+	local selectedResident = ResidentNeedsUI.GetCurrentSelectedResident()
 	if selectedResident ~= pending.Resident then
 		return false
 	end
@@ -103,40 +103,7 @@ local function OnWorldClick()
 		return
 	end
 
-	local unitRay = Player:GetMouse().UnitRay
-	local residentFolder = plotModel:FindFirstChild("Residents")
-	local residentParams = RaycastParams.new()
-	residentParams.FilterType = Enum.RaycastFilterType.Include
-	residentParams.FilterDescendantsInstances = if residentFolder then { residentFolder } else {}
-	residentParams.IgnoreWater = true
-
-	local residentHit = if residentFolder
-		then Workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, residentParams)
-		else nil
-
-	if residentHit and residentHit.Instance then
-		local selectedModel = residentHit.Instance:FindFirstAncestorOfClass("Model")
-		if not selectedModel or not selectedModel:FindFirstChildOfClass("Humanoid") then
-			return
-		end
-
-		resetPendingMove()
-		ResidentUI.Show(selectedModel)
-		return
-	end
-
-	local residentModel = ResidentUI.GetCurrentSelectedResident()
-
-	if residentModel then
-		local stationModel, stationType = findStationUnderCursor(unitRay, plotModel)
-		if stationModel then
-			print("Station selected:", stationModel:GetFullName())
-			resetPendingMove()
-			StationRadialUI.Show(stationModel, stationType)
-			return
-		end
-	end
-
+	local residentModel = ResidentNeedsUI.GetCurrentSelectedResident()
 	if not residentModel then
 		warn("No resident currently selected to move.")
 		resetPendingMove()
@@ -144,8 +111,17 @@ local function OnWorldClick()
 		return
 	end
 
-	local activeResident = residentModel :: Model
+	local unitRay = Player:GetMouse().UnitRay
+	local stationModel, stationType = findStationUnderCursor(unitRay, plotModel)
+	if stationModel then
+		resetPendingMove()
+		StationRadialUI.Show(stationModel, stationType)
+		return
+	end
 
+	StationRadialUI.Hide()
+
+	local residentFolder = plotModel:FindFirstChild("Residents")
 	local ignoreList = {}
 	if Player.Character then
 		table.insert(ignoreList, Player.Character)
@@ -153,6 +129,7 @@ local function OnWorldClick()
 	if residentFolder then
 		table.insert(ignoreList, residentFolder)
 	end
+
 	local movementParams = RaycastParams.new()
 	movementParams.FilterType = Enum.RaycastFilterType.Exclude
 	movementParams.FilterDescendantsInstances = ignoreList
@@ -161,6 +138,7 @@ local function OnWorldClick()
 	local movementHit = Workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, movementParams)
 	local targetPosition = if movementHit then movementHit.Position else (unitRay.Origin + unitRay.Direction * 100)
 
+	local activeResident = residentModel :: Model
 	local now = os.clock()
 	local pending = pendingMove
 	if pending and pending.Resident == activeResident then
@@ -180,51 +158,7 @@ local function OnWorldClick()
 	}
 end
 
-function ResidentSelector.Init()
-	ObjectSelectorEnabled.Changed:Connect(function()
-		if ObjectSelectorEnabled.Value and ResidentSelectorContext.Enabled then
-			ResidentSelectorContext.Enabled = false
-			ResidentUI.Hide()
-		else
-			ResidentSelectorContext.Enabled = true
-		end
-	end)
-
-	JobSelectionUIEnabled.Changed:Connect(function()
-		if JobSelectionUIEnabled.Value and ResidentSelectorContext.Enabled then
-			ResidentSelectorContext.Enabled = false
-			ResidentUI.Hide(true)
-		else
-			ResidentSelectorContext.Enabled = true
-		end
-	end)
-	PlotBuilderEnabled.Changed:Connect(function()
-		if PlotBuilderEnabled.Value and ResidentSelectorContext.Enabled then
-			ResidentSelectorContext.Enabled = false
-			ResidentUI.Hide()
-		else
-			ResidentSelectorContext.Enabled = true
-		end
-	end)
-
-	PlotExpansionEnabled.Changed:Connect(function()
-		if PlotExpansionEnabled.Value and ResidentSelectorContext.Enabled then
-			ResidentSelectorContext.Enabled = false
-			ResidentUI.Hide()
-		else
-			ResidentSelectorContext.Enabled = true
-		end
-	end)
-
-	RadialBillboardButtonEnabled.Changed:Connect(function()
-		if RadialBillboardButtonEnabled.Value and ResidentSelectorContext.Enabled then
-			ResidentSelectorContext.Enabled = false
-			ResidentUI.Hide()
-		else
-			ResidentSelectorContext.Enabled = true
-		end
-	end)
-
+function ResidentMover.Init()
 	ResidentSelectorContext.SelectResident.Pressed:Connect(function()
 		-- Add all the conditions that would block resident selection here
 		if
@@ -248,8 +182,8 @@ function ResidentSelector.Init()
 	end)
 end
 
-function ResidentSelector.Show() end
+function ResidentMover.Show() end
 
-function ResidentSelector.Hide() end
+function ResidentMover.Hide() end
 
-return ResidentSelector
+return ResidentMover

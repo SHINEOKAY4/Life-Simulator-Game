@@ -4,7 +4,7 @@ local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local ResidentUI = require(script.Parent.ResidentUI)
+local ResidentNeedsUI = require(script.Parent.ResidentNeedsUI)
 local ResidentController = require(script.Parent.Parent.Modules.ResidentController)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
@@ -98,7 +98,7 @@ function StationRadialUI.Init()
 	StationSelectorContext.AssignResident.Pressed:Connect(function()
 		runDebounced("Assign", function()
 			local currentStation = StationRadialUI.GetCurrentSelectedStation()
-			local residentModel = ResidentUI.GetCurrentSelectedResident()
+			local residentModel = ResidentNeedsUI.GetCurrentSelectedResident()
 			local currentStationName = currentStation and currentStation.Name or "None"
 			local residentName = residentModel and residentModel.Name or "None"
 

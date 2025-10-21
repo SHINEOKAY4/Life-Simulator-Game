@@ -3,7 +3,21 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+
+export type ResidentData = {
+	Name: string,
+	Age: number,
+	Gender: string,
+	Needs: { [string]: number },
+	Traits: { string },
+	Occupation: string,
+	Statistics: { [string]: number }?,
+	CurrentCareerId: string?,
+	CareerStreak: number?,
+	MomentumExpireClock: number?,
+}
 
 local ResidentPlacer = {}
 
@@ -23,6 +37,44 @@ local function getHiddenFolder(): Folder
 	return container
 end
 
+local function hydrateNeeds(save: ResidentData)
+	local needs = save.Needs
+	if typeof(needs) ~= "table" then
+		needs = {}
+		save.Needs = needs
+	end
+
+	for needName, definition in pairs(NeedConfig.Needs) do
+		local value = needs[needName]
+		if typeof(value) ~= "number" then
+			needs[needName] = definition.Max
+		else
+			needs[needName] = math.clamp(value, definition.Min, definition.Max)
+		end
+	end
+
+	return needs
+end
+
+local function LoadResidentAppearance(residentState: any)
+	local AssetsFolder = ReplicatedStorage.Assets
+	local ResidentsTemplateFolder = AssetsFolder.Residents
+	local needs = hydrateNeeds(residentState.Save)
+	local ResidentOffsite = getHiddenFolder()
+	local model = ResidentsTemplateFolder:FindFirstChild(residentState.Save.Gender):Clone() :: Model
+	model.Name = residentState.Save.Name
+	model.Parent = ResidentOffsite
+
+	--#TODO Future stub for handling resident clothes, accessories for character appearance
+	-- After appearance is set we can clone the model for other systems to use like viewport
+
+	----========----
+	for needName, value in pairs(needs) do
+		model:SetAttribute(needName, value)
+	end
+	residentState.Model = model
+	return model
+end
 function ResidentPlacer.Spawn(player, residentState)
 	local plotIndex = player:GetAttribute("OwnedPlotIndex") :: number
 	if not plotIndex then
@@ -31,21 +83,21 @@ function ResidentPlacer.Spawn(player, residentState)
 	end
 
 	local plotModel = PlotFinder.FindPlot(plotIndex)
-	local humanoidRootPart = residentState.Model:FindFirstChild("HumanoidRootPart") :: BasePart
+	local plotResidentsFolder = plotModel:FindFirstChild("Residents") :: Folder
+	local spawnLocation = plotModel:FindFirstChild("Spawn") :: BasePart
+
+	local loadedResidentModel = LoadResidentAppearance(residentState)
+
+	local humanoidRootPart = loadedResidentModel:FindFirstChild("HumanoidRootPart") :: BasePart
 	if not humanoidRootPart then
 		warn("Resident model is missing HumanoidRootPart:", residentState.Name)
 		return
 	end
-	local plotResidentsFolder = plotModel:FindFirstChild("Residents") :: Folder
-	local spawnLocation = plotModel:FindFirstChild("Spawn") :: BasePart
-	local residentModel = residentState.Model :: Model
 
-	residentModel:PivotTo(spawnLocation.CFrame)
-	residentModel.Parent = plotResidentsFolder
+	loadedResidentModel:PivotTo(spawnLocation.CFrame)
+	loadedResidentModel.Parent = plotResidentsFolder
 
 	humanoidRootPart:SetNetworkOwner(nil)
-
-	--#TODO Future stub for handling resident clothes, accessories for character appearance
 end
 
 function ResidentPlacer.Despawn(residentState) -- Only moves parent to nil, does not destroy

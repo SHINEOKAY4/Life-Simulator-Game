@@ -6,7 +6,7 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local ResidentUI = require(script.Parent.ResidentUI)
+local ResidentNeedsUI = require(script.Parent.ResidentNeedsUI)
 local GigManager = require(script.Parent.Parent.Modules.GigManager)
 local JobPackets = require(ReplicatedStorage.Network.JobPackets)
 local JobCatalog = require(ReplicatedStorage.Shared.Configurations.JobCatalog)
@@ -395,7 +395,7 @@ function JobSelectionUI.Init()
 						JobSelectionUI.Hide()
 						return
 					end
-					local residentModel = ResidentUI.GetCurrentSelectedResident()
+					local residentModel = ResidentNeedsUI.GetCurrentSelectedResident()
 					local residentName = if residentModel then residentModel.Name else nil
 					if not residentName then
 						warn("No resident selected to apply for job.")
@@ -409,7 +409,7 @@ function JobSelectionUI.Init()
 						return
 					end
 					JobSelectionUI.Hide()
-					ResidentUI.Hide(false) -- false to clear selection
+					ResidentNeedsUI.Hide(false) -- false to clear selection
 				else
 					warn("No job info found for selected job ID:", jobId)
 				end
