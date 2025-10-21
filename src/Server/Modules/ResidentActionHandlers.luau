@@ -575,6 +575,44 @@ local function applyRestProfile(behavior: Behavior, mode: string?)
 	behavior.Moodlets = if profile.Moodlets then copyMoodlets(profile.Moodlets) else nil
 	behavior.ChatPhrases = if profile.ChatPhrases then copyChatPhrases(profile.ChatPhrases) else nil
 	behavior.RestProfileKey = activeMode
+	local existingGuards = behavior.EmergencyGuards
+	local hungerGuard = if existingGuards then existingGuards.Hunger else nil
+	local energyNeedDef = Needs.Energy
+	local guardTable: { [string]: EmergencyGuard }
+	if existingGuards then
+		guardTable = existingGuards
+	else
+		guardTable = {}
+	end
+	guardTable.Hunger = function(residentState, hungerValue, hungerDef)
+		if hungerGuard then
+			local ok, suppress = pcall(hungerGuard, residentState, hungerValue, hungerDef)
+			if ok and suppress then
+				return true
+			end
+		end
+		if not energyNeedDef then
+			return false
+		end
+		if residentState == nil or typeof(residentState.GetNeed) ~= "function" then
+			return false
+		end
+		local okEnergy, energyValue = pcall(function()
+			return residentState:GetNeed("Energy")
+		end)
+		if not okEnergy or typeof(energyValue) ~= "number" then
+			return false
+		end
+		local threshold = 0
+		if typeof(energyNeedDef.Low) == "number" then
+			threshold = energyNeedDef.Low
+		end
+		if typeof(energyNeedDef.Critical) == "number" then
+			threshold = math.max(threshold, energyNeedDef.Critical)
+		end
+		return energyValue <= threshold
+	end
+	behavior.EmergencyGuards = guardTable
 end
 
 local function mergeBehavior(stationType: string, itemSpec: { [string]: any }): Behavior

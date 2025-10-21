@@ -106,6 +106,7 @@ local function releaseCollapseHold(residentState: any)
 	AutonomyState.setPending(residentState, nil)
 	setCollapseAttribute(residentState, false)
 	releaseEnergyPause(residentState)
+	ResidentMovement.ClearRestPose(residentState)
 	residentState._EnergyCollapseRelease = nil
 end
 

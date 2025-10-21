@@ -190,6 +190,7 @@ local function evaluateEmergencyNeeds(
 	local worstDeficit = -math.huge
 	local zeroCount = 0
 	local targetsHunger = positiveTargets.Hunger == true
+	local prioritizingSurvival = targetsHunger or positiveTargets.Energy == true
 	local stationCacheLoaded = false
 	local stationCache: { [string]: { [string]: any } }? = nil
 
@@ -235,6 +236,10 @@ local function evaluateEmergencyNeeds(
 			end
 		end
 		local isPositiveTarget = positiveTargets[needName] == true
+		local isSurvival = isSurvivalNeed(needName)
+		if prioritizingSurvival and not isSurvival then
+			continue
+		end
 		local consider = false
 		if needName == "Hunger" then
 			if not isPositiveTarget and value <= def.Critical then
@@ -247,7 +252,7 @@ local function evaluateEmergencyNeeds(
 				end
 			end
 		elseif not isPositiveTarget and value <= def.Critical then
-			if isSurvivalNeed(needName) then
+			if isSurvival then
 				consider = true
 			else
 				if hasStationsForNeed(needName) then
@@ -270,6 +275,9 @@ local function evaluateEmergencyNeeds(
 		return true, "NeedUrgent:" .. worstNeed, worstNeed
 	end
 	if zeroCount >= 2 then
+		if prioritizingSurvival then
+			return false, nil, nil
+		end
 		return true, "NeedUrgent:MultipleNeeds", worstNeed
 	end
 	return false, nil, nil

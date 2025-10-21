@@ -2,8 +2,8 @@ Prioritize elegant, Maintainable, Readable Code.
 
 Never abbreviate variables. 
 
-Always use YAGNI when writing code to avoid unnecessary fluff.
+Avoid unnecessary fluff.
 
-Never include bad practices and prioritze a more efficient approach.
+Never include bad practices and prioritize a more efficient approach.
 
-Use most up to date Roblox API.
+Use the most up-to-date Roblox API.

@@ -23,7 +23,7 @@ type PlacedObjectSnapshot = {
 	WidthCells: number,
 	DepthCells: number,
 }
-type Facing = WorldPlacer.Facing
+type Facing = PlotState.Facing
 type StationOccupancy = {
 	Id: string,
 	Residents: { [number]: string },
@@ -76,11 +76,12 @@ local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapsho
 			if not depthCells or depthCells <= 0 then
 				depthCells = if spec then (spec.DepthCells or spec.Depth or 1) else 1
 			end
+			local facing: string = (saved.facing or "North") :: string
 			result[index] = {
 				id = saved.id,
 				cellX = saved.cellX,
 				cellZ = saved.cellZ,
-				facing = saved.facing or "North",
+				facing = facing,
 				WidthCells = widthCells,
 				DepthCells = depthCells,
 			}
@@ -372,7 +373,7 @@ function PlotService.RemoveStationForPlayer(player: Player, stationName: string,
 	if not removed then
 		return
 	end
-	
+
 	local occupants: { string } = {}
 	if typeof(removed.Residents) == "table" then
 		for _, residentName in ipairs(removed.Residents) do
@@ -390,7 +391,6 @@ function PlotService.RemoveStationForPlayer(player: Player, stationName: string,
 	end
 
 	PlotService.StationRemoved:Fire(player, stationName, uniqueId, occupants)
-end
 end
 
 function PlotService.GetStationVersion(player: Player, stationType: string): number

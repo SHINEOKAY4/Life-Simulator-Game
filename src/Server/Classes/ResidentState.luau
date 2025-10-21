@@ -119,6 +119,14 @@ end
 function ResidentState.new(save: ResidentData)
 	local AssetsFolder = ReplicatedStorage.Assets
 	local ResidentsTemplateFolder = AssetsFolder.Residents
+	local ResidentOffsite = ReplicatedStorage:FindFirstChild("ResidentOffsite") :: Folder?
+	if not ResidentOffsite then
+		local newFolder = Instance.new("Folder")
+		newFolder.Name = "ResidentOffsite"
+		newFolder.Parent = ReplicatedStorage
+		ResidentOffsite = newFolder
+	end
+
 	local self = setmetatable({}, ResidentState)
 
 	self.Save = save
@@ -151,6 +159,7 @@ function ResidentState.new(save: ResidentData)
 	self.ActiveMoodlets = {} :: { [string]: MoodletRuntime }
 	self.Model = ResidentsTemplateFolder:FindFirstChild(self.Save.Gender):Clone() :: Model
 	self.Model.Name = self.Save.Name
+	self.Model.Parent = ResidentOffsite
 	for needName, value in pairs(needs) do
 		self.Model:SetAttribute(needName, value)
 	end

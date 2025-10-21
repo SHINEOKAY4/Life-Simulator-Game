@@ -171,7 +171,11 @@ local function ensureCollapseReleased(residentState: any, timeoutSeconds: number
 		return true, nil
 	end
 	local energyValue = residentState:GetNeed("Energy")
-	if typeof(energyValue) ~= "number" or energyValue < COLLAPSE_RELEASE_ENERGY then
+	if typeof(energyValue) ~= "number" then
+		return false, "Resident is collapsed"
+	end
+	local releaseThreshold = COLLAPSE_RELEASE_ENERGY - 0.25
+	if energyValue < releaseThreshold then
 		return false, "Resident is collapsed"
 	end
 	releaseFn()
@@ -182,8 +186,13 @@ local function ensureCollapseReleased(residentState: any, timeoutSeconds: number
 		return true, nil
 	end
 	forceClearActions(residentState, "ManualOverride")
+	ResidentMovement.ClearRestPose(residentState)
 	local cleared = residentState:WaitUntilIdle(timeoutSeconds)
-	return cleared, if cleared then nil else "Resident is busy"
+	if cleared then
+		residentState:ResetCancelToken()
+		return true, nil
+	end
+	return false, "Resident is busy"
 end
 
 local function prepareResidentForOverride(residentState: any, timeoutSeconds: number?): (boolean, string?)

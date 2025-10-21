@@ -44,6 +44,8 @@ function ResidentPlacer.Spawn(player, residentState)
 	residentModel.Parent = plotResidentsFolder
 
 	humanoidRootPart:SetNetworkOwner(nil)
+
+	--#TODO Future stub for handling resident clothes, accessories for character appearance
 end
 
 function ResidentPlacer.Despawn(residentState) -- Only moves parent to nil, does not destroy

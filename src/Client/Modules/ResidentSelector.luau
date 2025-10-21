@@ -140,6 +140,7 @@ local function OnWorldClick()
 	if not residentModel then
 		warn("No resident currently selected to move.")
 		resetPendingMove()
+		StationRadialUI.Hide()
 		return
 	end
 
