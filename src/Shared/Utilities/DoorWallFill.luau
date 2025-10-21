@@ -52,7 +52,7 @@ local function getWallVisualInfo(wallId: string): WallVisualInfo?
 
 	local _, wallSize = wallModel:GetBoundingBox()
 	local samplePart = findFirstBasePart(wallModel)
-	
+
 	local defaultMaterial = Enum.Material.SmoothPlastic
 	local defaultColor = Color3.fromRGB(255, 255, 255)
 
@@ -75,13 +75,7 @@ local function ensureDoorAttributes(model: Model)
 		return
 	end
 
-	local ok, pivotCF = pcall(function()
-		return model:GetPivot()
-	end)
-	if not ok then
-		return
-	end
-
+	local pivotCF = model:GetPivot()
 	local bboxCF, bboxSize = model:GetBoundingBox()
 	local offset = pivotCF:PointToObjectSpace(bboxCF.Position)
 
@@ -92,13 +86,7 @@ local function ensureDoorAttributes(model: Model)
 end
 
 local function computeDoorCenterWorld(model: Model): CFrame?
-	local ok, pivotCF = pcall(function()
-		return model:GetPivot()
-	end)
-	if not ok then
-		return nil
-	end
-
+	local pivotCF = model:GetPivot()
 	local rawX = model:GetAttribute("DoorWallFillCenterOffsetX")
 	local rawY = model:GetAttribute("DoorWallFillCenterOffsetY")
 	local rawZ = model:GetAttribute("DoorWallFillCenterOffsetZ")

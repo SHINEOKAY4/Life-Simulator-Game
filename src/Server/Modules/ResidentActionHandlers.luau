@@ -585,11 +585,8 @@ local function applyRestProfile(behavior: Behavior, mode: string?)
 		guardTable = {}
 	end
 	guardTable.Hunger = function(residentState, hungerValue, hungerDef)
-		if hungerGuard then
-			local ok, suppress = pcall(hungerGuard, residentState, hungerValue, hungerDef)
-			if ok and suppress then
-				return true
-			end
+		if hungerGuard and hungerGuard(residentState, hungerValue, hungerDef) then
+			return true
 		end
 		if not energyNeedDef then
 			return false
@@ -597,10 +594,8 @@ local function applyRestProfile(behavior: Behavior, mode: string?)
 		if residentState == nil or typeof(residentState.GetNeed) ~= "function" then
 			return false
 		end
-		local okEnergy, energyValue = pcall(function()
-			return residentState:GetNeed("Energy")
-		end)
-		if not okEnergy or typeof(energyValue) ~= "number" then
+		local energyValue = residentState:GetNeed("Energy")
+		if typeof(energyValue) ~= "number" then
 			return false
 		end
 		local threshold = 0

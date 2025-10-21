@@ -106,7 +106,11 @@ local function releaseCollapseHold(residentState: any)
 	AutonomyState.setPending(residentState, nil)
 	setCollapseAttribute(residentState, false)
 	releaseEnergyPause(residentState)
-	ResidentMovement.ClearRestPose(residentState)
+	local currentAction = if residentState then residentState.CurrentAction else nil
+	local isCollapseAction = typeof(currentAction) == "string" and currentAction == "Forced:EnergyCollapse"
+	if not isCollapseAction then
+		ResidentMovement.ClearRestPose(residentState)
+	end
 	residentState._EnergyCollapseRelease = nil
 end
 
@@ -242,6 +246,9 @@ local function startCollapse(residentState: any, context: { UserId: number?, Nam
 		else
 			releaseCollapseHold(residentState)
 		end
+		if restPoseApplied and not activeCollapse[residentState] then
+			ResidentMovement.ClearRestPose(residentState)
+		end
 
 		local succeeded = ok and result == true
 		if succeeded then
@@ -333,6 +340,7 @@ local function cleanupResident(residentState: any)
 	releaseCollapseHold(residentState)
 	releaseEnergyPause(residentState)
 	releaseReasons[residentState] = nil
+	ResidentMovement.ClearRestPose(residentState)
 end
 
 function ResidentCollapseService.Refresh()

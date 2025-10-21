@@ -137,10 +137,8 @@ end
 
 local function getNeedValue(residentState: any, needName: string): number
 	if residentState and typeof(residentState.GetNeed) == "function" then
-		local ok, value = pcall(function()
-			return residentState:GetNeed(needName)
-		end)
-		if ok and typeof(value) == "number" then
+		local value = residentState:GetNeed(needName)
+		if typeof(value) == "number" then
 			return value
 		end
 	end
@@ -159,21 +157,21 @@ local function shouldRunToTarget(residentState: any, origin: Vector3, destinatio
 	if distance < RUN_DISTANCE_THRESHOLD then
 		return false
 	end
-	
+
 	if CACHED_HUNGER_DEF then
 		local hunger = getNeedValue(residentState, "Hunger")
 		if hunger <= CACHED_HUNGER_DEF.Critical then
 			return false
 		end
 	end
-	
+
 	if CACHED_ENERGY_DEF then
 		local energy = getNeedValue(residentState, "Energy")
 		if energy <= CACHED_ENERGY_DEF.Critical or energy <= CACHED_ENERGY_DEF.Low then
 			return false
 		end
 	end
-	
+
 	return true
 end
 
@@ -187,7 +185,7 @@ end
 local function computePathWithVariants(origin: Vector3, destination: Vector3): (Path?, { [number]: { [string]: any } })
 	local attemptsMeta = table.create(#PATH_VARIANTS)
 	local metaIndex = 0
-	
+
 	for _, params in ipairs(PATH_VARIANTS) do
 		local path = PathfindingService:CreatePath(params)
 		local ok, computeError = pcall(path.ComputeAsync, path, origin, destination)
@@ -493,10 +491,10 @@ local function normalizeAxisSpecifier(value: string): string?
 	if cached ~= nil then
 		return cached
 	end
-	
+
 	local trimmed = value:gsub("%s+", ""):upper()
 	trimmed = trimmed:gsub("PLUS", "+"):gsub("POSITIVE", "+"):gsub("MINUS", "-"):gsub("NEGATIVE", "-")
-	
+
 	if trimmed == "X" or trimmed == "Y" or trimmed == "Z" then
 		trimmed = "+" .. trimmed
 	elseif trimmed == "FRONT" then
@@ -508,7 +506,7 @@ local function normalizeAxisSpecifier(value: string): string?
 	elseif trimmed == "RIGHT" then
 		trimmed = "+X"
 	end
-	
+
 	local result = FRONT_AXIS_MAP[trimmed] and trimmed or nil
 	AXIS_SPECIFIER_CACHE[value] = result
 	return result
@@ -646,13 +644,7 @@ function ResidentMovement.ApplyRestPose(residentState: any, options: RestPoseOpt
 	end
 	local record = restPoseState[residentState]
 	if not record then
-		local networkOwner: Player? = nil
-		local ownerOk, owner = pcall(function()
-			return root:GetNetworkOwner()
-		end)
-		if ownerOk then
-			networkOwner = owner
-		end
+		local networkOwner: Player? = root:GetNetworkOwner()
 		record = {
 			AutoRotate = humanoid.AutoRotate,
 			PlatformStand = humanoid.PlatformStand,
@@ -752,9 +744,7 @@ function ResidentMovement.ApplyRestPose(residentState: any, options: RestPoseOpt
 	root.AssemblyLinearVelocity = Vector3.new()
 	root.AssemblyAngularVelocity = Vector3.new()
 	root.CFrame = finalCFrame
-	local _ = pcall(function()
-		root:SetNetworkOwner(nil)
-	end)
+	root:SetNetworkOwner(nil)
 	root.Anchored = true
 	humanoid:Move(Vector3.zero)
 	humanoid.Sit = false
@@ -799,13 +789,9 @@ function ResidentMovement.ClearRestPose(residentState: any): boolean
 		end
 		root.Anchored = record.RootAnchored
 		if record.RootOwner then
-			local _ = pcall(function()
-				root:SetNetworkOwner(record.RootOwner :: Player)
-			end)
+			root:SetNetworkOwner(record.RootOwner :: Player)
 		else
-			local _ = pcall(function()
-				root:SetNetworkOwner(nil)
-			end)
+			root:SetNetworkOwner(nil)
 		end
 	end
 	restPoseState[residentState] = nil

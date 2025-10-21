@@ -45,12 +45,7 @@ local function defaultHandlerWrapper(
 			end
 		end
 
-		local success, result = pcall(callback, state, input)
-		if not success then
-			warn("[ActionBinder] Handler error for action:", actionName, result)
-			return PASS_RESULT
-		end
-
+		local result = callback(state, input)
 		if result ~= nil then
 			return result :: Enum.ContextActionResult
 		end

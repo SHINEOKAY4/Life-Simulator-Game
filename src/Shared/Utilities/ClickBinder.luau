@@ -4,7 +4,9 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local UISignals = require(script.Parent.UISignals)
+local UISignalsModule = script.Parent:FindFirstChild("UISignals")
+assert(UISignalsModule and UISignalsModule:IsA("ModuleScript"), "UISignals module missing")
+local UISignals = (require :: any)(UISignalsModule)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
 local ClickBinder = {}
@@ -37,8 +39,11 @@ end
 
 -- Internal: generate a unique debounce key
 local function makeDebounceKey(prefix: string, button: GuiButton): string
-	local success, fullName = pcall(button.GetFullName, button)
-	return prefix .. (success and fullName or tostring(button))
+	local fullName = button:GetFullName()
+	if typeof(fullName) == "string" then
+		return prefix .. fullName
+	end
+	return prefix .. tostring(button)
 end
 
 -- Internal: shared bind logic for various button signals
@@ -80,20 +85,10 @@ local function bindInternal(
 
 		if typeof(handler) == "function" then
 			local callback = handler :: Callback
-			local success, result = pcall(function(): any
-				return callback()
-			end)
-			if not success then
-				warn("[ClickBinder] Error running handler:", result)
-			end
+			callback()
 		else
 			local signalName = handler :: string
-			local success, result = pcall(function()
-				UISignals.Get(signalName):Fire()
-			end)
-			if not success then
-				warn("[ClickBinder] Error firing UISignal:", result)
-			end
+			UISignals.Get(signalName):Fire()
 		end
 	end)
 end
@@ -149,12 +144,7 @@ function ClickBinder.BindDoubleClick(button: GuiButton, callbackFunction: Callba
 		local nowSeconds = monotonicNow()
 		if (nowSeconds - lastActivationTime) <= DOUBLE_CLICK_WINDOW_SECONDS then
 			if debounceSeconds == nil or Debounce.TryAcquire(debounceKey, debounceSeconds, nil) then
-				local success, result = pcall(function(): any
-					return callbackFunction()
-				end)
-				if not success then
-					warn("[ClickBinder] Error running double-click callback:", result)
-				end
+				callbackFunction()
 			end
 		end
 		lastActivationTime = nowSeconds
@@ -195,12 +185,7 @@ function ClickBinder.BindOnce(button: GuiButton, callbackFunction: Callback, deb
 
 		ClickBinder.Unbind(button, "Once")
 
-		local success, result = pcall(function(): any
-			return callbackFunction()
-		end)
-		if not success then
-			warn("[ClickBinder] Error running one-shot callback:", result)
-		end
+		callbackFunction()
 	end)
 
 	perButtonMap.Once = connectionObject

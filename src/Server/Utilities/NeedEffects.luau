@@ -19,7 +19,6 @@ local SCHEDULER_INTERVAL = 1 / 30
 type SchedulerRuntime = {
 	Id: number,
 	Step: (dt: number) -> boolean,
-	HandleError: (err: any) -> (),
 }
 
 local activeRuntimes: { [number]: SchedulerRuntime } = {}
@@ -27,11 +26,8 @@ local schedulerActive = false
 local nextRuntimeId = 0
 
 local function stepRuntimes(dt: number)
-	for _runtimeId, runtime in pairs(activeRuntimes) do
-		local success, finishedOrError = pcall(runtime.Step, dt)
-		if not success then
-			runtime.HandleError(finishedOrError)
-		end
+	for _, runtime in pairs(activeRuntimes) do
+		runtime.Step(dt)
 	end
 	if next(activeRuntimes) == nil then
 		WorldUpdate.Unsubscribe(SCHEDULER_TASK_NAME)
@@ -200,10 +196,8 @@ local function evaluateEmergencyNeeds(
 		end
 		if not stationCacheLoaded then
 			stationCacheLoaded = true
-			local ok, result = pcall(function()
-				return PlotService.GetStationsForPlayer(contextPlayer)
-			end)
-			if ok and result ~= nil then
+			local result = PlotService.GetStationsForPlayer(contextPlayer)
+			if result ~= nil then
 				stationCache = result
 			else
 				stationCache = {}
@@ -224,16 +218,8 @@ local function evaluateEmergencyNeeds(
 	for needName, def in pairs(needsDef) do
 		local value = sanitizeNeed(residentState, needName)
 		local guard = guardOverrides and guardOverrides[needName]
-		if guard then
-			local ok, suppress = pcall(guard, residentState, value, def)
-			if not ok then
-				ResidentDebug.Trace(EFFECT_CHANNEL, string.format("Emergency guard error: %s", tostring(guard)), {
-					Need = needName,
-					Error = suppress,
-				})
-			elseif suppress then
-				continue
-			end
+		if guard and guard(residentState, value, def) then
+			continue
 		end
 		local isPositiveTarget = positiveTargets[needName] == true
 		local isSurvival = isSurvivalNeed(needName)
@@ -592,18 +578,6 @@ function NeedEffects.Run(
 		end
 	end
 
-	local function handleSchedulerError(err: any)
-		if completed then
-			return
-		end
-		ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects runtime error: %s", tostring(err)), {
-			Resident = residentName,
-		})
-		activityReason = activityReason or "EffectError"
-		local result = failReturn(activityReason, currentProgress())
-		complete(result)
-	end
-
 	local function step(dt: number): boolean
 		if completed then
 			return true
@@ -697,16 +671,12 @@ function NeedEffects.Run(
 	local runtime: SchedulerRuntime = {
 		Id = runtimeId,
 		Step = step,
-		HandleError = handleSchedulerError,
 	}
 	activeRuntimes[runtimeId] = runtime
 
 	ensureScheduler()
 
-	local success, resultOrError = pcall(step, 0)
-	if not success then
-		handleSchedulerError(resultOrError)
-	end
+	step(0)
 
 	if completed then
 		if not hasResult then

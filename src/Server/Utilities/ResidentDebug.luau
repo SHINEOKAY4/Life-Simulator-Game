@@ -62,10 +62,8 @@ local function sanitizeMetadata(value: any, depth: number): any
 		end
 		return result
 	elseif valueType == "Instance" then
-		local ok, fullName = pcall(function()
-			return value:GetFullName()
-		end)
-		if ok then
+		local fullName = value:GetFullName()
+		if typeof(fullName) == "string" then
 			return fullName
 		end
 		return string.format("<%s>", value.ClassName)
@@ -99,10 +97,8 @@ local function metadataToString(metadata: { [string]: any }?): string?
 		return nil
 	end
 	local sanitized = sanitizeMetadata(metadata, 0)
-	local ok, encoded = pcall(function()
-		return HttpService:JSONEncode(sanitized)
-	end)
-	if ok and typeof(encoded) == "string" then
+	local encoded = HttpService:JSONEncode(sanitized)
+	if typeof(encoded) == "string" then
 		return encoded
 	end
 	return tostring(sanitized)

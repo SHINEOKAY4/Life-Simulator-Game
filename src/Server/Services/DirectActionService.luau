@@ -117,7 +117,10 @@ local function clearExistingManualOverride(
 	residentState:ClearManualOverrideState()
 end
 
-local function resolveHandler(stationType: string)
+local function resolveHandler(stationType: string): (
+	context: { Resident: any, CancelToken: { Cancelled: boolean, Reason: string? } },
+	StationAssignment
+) -> ()
 	return OverrideHandlers[stationType]
 		or function(context, _assignment)
 			if context.CancelToken.Cancelled then
@@ -133,11 +136,8 @@ local function enqueueOverrideAction(assignment: StationAssignment)
 	local actionName = string.format("ManualOverride:%s", assignment.StationType)
 
 	residentState:EnqueueAction(actionName, function(context)
-		local ok, result = xpcall(handler, debug.traceback, context, assignment)
-		finalizeAssignment(assignment, ok, if ok then nil else result)
-		if not ok then
-			error(result)
-		end
+		handler(context, assignment)
+		finalizeAssignment(assignment, true, nil)
 	end)
 end
 
@@ -394,7 +394,7 @@ function DirectActionService.MoveResidentToWorldPosition(player: Player, residen
 			releaseCollapse()
 		end
 		ResidentMovement.ClearRestPose(residentState)
-		local ok, result = pcall(ResidentMovement.GoToWorldPosition, residentState, targetPosition, {
+		local result = ResidentMovement.GoToWorldPosition(residentState, targetPosition, {
 			CancelToken = context.CancelToken,
 			TimeoutSeconds = MANUAL_MOVE_TIMEOUT_SECONDS,
 			DebugName = "ManualMove",
@@ -402,10 +402,6 @@ function DirectActionService.MoveResidentToWorldPosition(player: Player, residen
 
 		residentState:ClearManualOverrideState()
 		residentState:EnableAutomation()
-
-		if not ok then
-			error(result)
-		end
 
 		if result then
 			return

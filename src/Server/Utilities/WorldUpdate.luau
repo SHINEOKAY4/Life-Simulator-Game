@@ -17,14 +17,6 @@ local _tasks: { [string]: Task } = {}
 local _connection: RBXScriptConnection? = nil
 local _taskCount = 0
 
-local function safeInvoke(name: string, callback: (dt: number) -> (), dt: number)
-	local ok, err = (pcall :: any)(callback, dt)
-	if not ok then
-		warn(string.format("[WorldUpdate] Task '%s' failed: %s", name, tostring(err)))
-	end
-	return ok :: boolean
-end
-
 -- Internal: starts the single heartbeat when first subscriber joins.
 local function ensureConnection()
 	if _connection then
@@ -38,13 +30,13 @@ local function ensureConnection()
 			end
 			return
 		end
-		
+
 		for name, task in pairs(_tasks) do
 			task.Accum += dt
 			local interval = task.Interval
 			while task.Accum >= interval do
 				task.Accum -= interval
-				safeInvoke(name, task.Callback, interval)
+				task.Callback(interval)
 				if _tasks[name] ~= task then
 					break
 				end

@@ -340,10 +340,8 @@ local function getNeedValue(residentState, needName: string): number?
 	if typeof(getter) ~= "function" then
 		return nil
 	end
-	local success, value = pcall(function()
-		return getter(residentState, needName)
-	end)
-	if not success or typeof(value) ~= "number" then
+	local value = getter(residentState, needName)
+	if typeof(value) ~= "number" then
 		return nil
 	end
 	return value

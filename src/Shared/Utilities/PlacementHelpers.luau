@@ -103,8 +103,8 @@ function PlacementHelpers.GetRotation(cf: CFrame): CFrame
 end
 
 function PlacementHelpers.GetPivotRotation(model: Model): CFrame
-	local ok, pivot = pcall(model.GetPivot, model)
-	if not ok or typeof(pivot) ~= "CFrame" then
+	local pivot = model:GetPivot()
+	if typeof(pivot) ~= "CFrame" then
 		return CFrame.identity
 	end
 	return pivot - pivot.Position

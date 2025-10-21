@@ -77,13 +77,8 @@ function Debounce.RunIfAvailable(key: Key, durationSeconds: number?, callback: (
 	if not Debounce.TryAcquire(key, durationSeconds, scope) then
 		return false
 	end
-	
-	local success, result = pcall(callback)
-	if not success then
-		-- Ensure a failing callback does not leave the debounce stuck.
-		clearKey(toScopedKey(key, scope))
-		error(tostring(result))
-	end
+
+	callback()
 	return true
 end
 
