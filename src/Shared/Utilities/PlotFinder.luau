@@ -86,7 +86,7 @@ function PlotFinder.IsWithinBounds(player: Player): boolean
 	local halfSize: Vector3 = surface.Size * 0.5
 
 	-- Optionally add offset to go beyond the surface edges
-	local offset = 0
+	local offset = 12
 	local withinX = math.abs(localPoint.X) <= halfSize.X + offset
 	local withinZ = math.abs(localPoint.Z) <= halfSize.Z + offset
 

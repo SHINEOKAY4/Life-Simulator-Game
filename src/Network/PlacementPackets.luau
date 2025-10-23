@@ -57,6 +57,14 @@ PlacementPackets.PlaceWallStripRequest = Packet("PlaceWallStripRequest", {
 	EndCellZ = Packet.NumberU16,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
+PlacementPackets.PlaceRoofAreaRequest = Packet("PlaceRoofAreaRequest", {
+	ItemId = Packet.String,
+	StartCellX = Packet.NumberU16,
+	StartCellZ = Packet.NumberU16,
+	EndCellX = Packet.NumberU16,
+	EndCellZ = Packet.NumberU16,
+}):Response(Packet.Boolean8, Packet.StringLong)
+
 PlacementPackets.PlacementDelta = Packet("PlacementDelta", {
 	Action = Packet.String,
 	Item = {

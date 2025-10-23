@@ -1,8 +1,23 @@
 --!strict
 -- ServerScriptService/Server/Services/CurrencyService.lua
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local CurrencyPackets = require(ReplicatedStorage.Network.CurrencyPackets)
+
+export type CurrencyDeltaContext = {
+	Source: string?,
+	ResidentName: string?,
+}
+
 export type CurrencyModule = {
-	Add: (player: Player, currencyName: string, amount: number, data: { [string]: number }) -> number,
+	Add: (
+		player: Player,
+		currencyName: string,
+		amount: number,
+		data: { [string]: number },
+		context: CurrencyDeltaContext?
+	) -> number,
 	Remove: (player: Player, currencyName: string, amount: number, data: { [string]: number }) -> number,
 	Set: (player: Player, currencyName: string, amount: number, data: { [string]: number }) -> number,
 	Get: (player: Player, currencyName: string?, data: { [string]: number }) -> number,
@@ -35,6 +50,35 @@ end
 
 local CurrencyService = {}
 
+local function dispatchCurrencyDelta(
+	player: Player,
+	currencyName: string,
+	amount: number,
+	context: CurrencyDeltaContext?
+)
+	if amount <= 0 then
+		return
+	end
+	local payloadSource = ""
+	local payloadResidentName = ""
+	if context then
+		local contextSource = context.Source
+		if typeof(contextSource) == "string" then
+			payloadSource = contextSource
+		end
+		local contextResidentName = context.ResidentName
+		if typeof(contextResidentName) == "string" then
+			payloadResidentName = contextResidentName
+		end
+	end
+	CurrencyPackets.PlayerCurrencyDelta:FireClient(player, {
+		CurrencyName = currencyName,
+		Amount = amount,
+		Source = payloadSource,
+		ResidentName = payloadResidentName,
+	})
+end
+
 --[=[
 	Adds currency to the player's balance.
 
@@ -44,13 +88,21 @@ local CurrencyService = {}
 	@param data {[string]: number} -- Player's currency table.
 	@return number -- New balance after addition.
 ]=]
-function CurrencyService.Add(player: Player, currencyName: string, amount: number, data: { [string]: number })
+function CurrencyService.Add(
+	player: Player,
+	currencyName: string,
+	amount: number,
+	data: { [string]: number },
+	context: CurrencyDeltaContext?
+)
 	AssertParameters(player, currencyName, amount, data, "CurrencyService.Add")
 
 	local current = data[currencyName] or 0
 	local sum = current + amount
 
 	data[currencyName] = sum
+	player:SetAttribute(currencyName, sum)
+	dispatchCurrencyDelta(player, currencyName, amount, context)
 	return sum
 end
 
@@ -73,6 +125,7 @@ function CurrencyService.Remove(player: Player, currencyName: string, amount: nu
 	end
 
 	data[currencyName] = nextValue
+	player:SetAttribute(currencyName, nextValue)
 	return nextValue
 end
 
@@ -89,6 +142,7 @@ function CurrencyService.Set(player: Player, currencyName: string, amount: numbe
 	AssertParameters(player, currencyName, amount, data, "CurrencyService.Set")
 
 	data[currencyName] = amount
+	player:SetAttribute(currencyName, amount)
 	return amount
 end
 

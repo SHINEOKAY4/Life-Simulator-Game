@@ -16,7 +16,7 @@ local Player = Players.LocalPlayer
 
 local PlayerGui = Player:WaitForChild("PlayerGui")
 local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
-local ResidentSelectorContext = InputContextsFolder:WaitForChild("ResidentSelectorContext")
+local ResidentMoverContext = InputContextsFolder:WaitForChild("ResidentMoverContext")
 
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEnabled") :: BoolValue
@@ -141,6 +141,7 @@ local function OnWorldClick()
 	local activeResident = residentModel :: Model
 	local now = os.clock()
 	local pending = pendingMove
+
 	if pending and pending.Resident == activeResident then
 		if now - pending.Timestamp <= DOUBLE_CLICK_WINDOW then
 			resetPendingMove()
@@ -159,7 +160,7 @@ local function OnWorldClick()
 end
 
 function ResidentMover.Init()
-	ResidentSelectorContext.SelectResident.Pressed:Connect(function()
+	ResidentMoverContext.MoveResident.Pressed:Connect(function()
 		-- Add all the conditions that would block resident selection here
 		if
 			ObjectSelectorEnabled.Value

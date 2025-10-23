@@ -13,6 +13,7 @@ local PlotStateStore = require(script.Parent.Parent:WaitForChild("ClientStores")
 local MarkerPool = require(script:WaitForChild("MarkerPool"))
 local PlacementUtils = require(script:WaitForChild("PlacementUtils"))
 local FloorPreview = require(script:WaitForChild("FloorPreview"))
+local RoofPreview = require(script:WaitForChild("RoofPreview"))
 local WallStripPreview = require(script:WaitForChild("WallStripPreview"))
 local WallConstraints = require(script:WaitForChild("WallConstraints"))
 local Renderer = require(script:WaitForChild("Renderer"))
@@ -30,6 +31,8 @@ export type PreviewPose = {
 }
 export type FloorSelectionInfo = FloorPreview.FloorSelectionInfo
 type FloorUpdateResult = FloorPreview.FloorUpdateResult
+export type RoofSelectionInfo = RoofPreview.RoofSelectionInfo
+type RoofUpdateResult = RoofPreview.RoofUpdateResult
 export type WallStripSelectionInfo = WallStripPreview.WallStripSelectionInfo
 
 local Player = Players.LocalPlayer
@@ -65,6 +68,7 @@ local MOUSE_MOVE_RELEASE_THRESHOLD = 2
 
 local FloorSupportMap: { [number]: boolean } = {}
 local WallStripPlacementHandler: ((WallStripSelectionInfo) -> ())? = nil
+local RoofPlacementHandler: ((RoofSelectionInfo) -> ())? = nil
 local LastPrimaryMouseDown = false
 
 local PLACEABLE_FILL = Color3.fromRGB(159, 234, 159)
@@ -76,6 +80,14 @@ local function resetFloorState(shouldReleasePreviewPart: boolean?)
 	FloorPreview.Clear()
 	if shouldReleasePreviewPart then
 		FloorPreview.ReleasePreviewPart()
+	end
+	LastPrimaryMouseDown = false
+end
+
+local function resetRoofState(shouldReleasePreviewPart: boolean?)
+	RoofPreview.Clear()
+	if shouldReleasePreviewPart then
+		RoofPreview.ReleasePreviewPart()
 	end
 	LastPrimaryMouseDown = false
 end
@@ -179,6 +191,17 @@ function ObjectPreview.Init()
 			end
 			return
 		end
+		if RoofPreview.IsDragInProgress() then
+			local summary = RoofPreview.GetSelectionSummary()
+			resetRoofState()
+			if summary and summary.ItemId then
+				local handler = RoofPlacementHandler
+				if handler and summary.CanPlace then
+					handler(summary)
+				end
+			end
+			return
+		end
 		if not FloorPreview.IsDragInProgress() then
 			return
 		end
@@ -211,8 +234,13 @@ end
 local function ensureFloorPreviewPrepared(kind: PreviewKind, model: Model, baseWidth: number, baseDepth: number)
 	if kind == "Floor" then
 		FloorPreview.Prepare(model, baseWidth, baseDepth)
+		resetRoofState(true)
+	elseif kind == "Roof" then
+		RoofPreview.Prepare(model, baseWidth, baseDepth)
+		resetFloorState(true)
 	else
 		resetFloorState(true)
+		resetRoofState(true)
 	end
 end
 
@@ -264,10 +292,11 @@ local function previewRoof(
 	cellX: number,
 	cellZ: number,
 	facing: PreviewFacing,
+	widthCells: number,
+	depthCells: number,
 	spec: any?
 )
-	local height = spec and spec.HeightStuds or 12
-	Renderer.PreviewRoof(model, grid, surface, cellX, cellZ, facing, height)
+	Renderer.PreviewRoof(model, grid, surface, cellX, cellZ, widthCells, depthCells, facing, spec)
 end
 
 local function previewCellObject(
@@ -493,6 +522,10 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 			if isMouseDown and not LastPrimaryMouseDown then
 				FloorPreview.TryBeginDrag(CurrentKind, CurrentItemId, cellX, cellZ, true)
 			end
+		elseif CurrentKind == "Roof" and CurrentItemId then
+			if isMouseDown and not LastPrimaryMouseDown then
+				RoofPreview.TryBeginDrag(CurrentKind, CurrentItemId, cellX, cellZ, true)
+			end
 		end
 		LastPrimaryMouseDown = isMouseDown
 
@@ -509,6 +542,27 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 
 		if resolvedPreviewKind == "Floor" then
 			renderFloorPreview(model, grid, surface, chunkSize, cellX, cellZ, placed, ignorePlacement, CurrentItemId)
+			return
+		end
+
+		if resolvedPreviewKind == "Roof" and RoofPreview.IsDragInProgress() then
+			local roofResult = RoofPreview.Update({
+				model = model,
+				grid = grid,
+				surface = surface,
+				chunkSize = chunkSize,
+				cellX = cellX,
+				cellZ = cellZ,
+				itemId = CurrentItemId,
+				spec = CurrentItemSpec,
+				placed = placed,
+				ignorePlacement = ignorePlacement,
+				isChunkUnlocked = PlotStateStore.IsChunkUnlocked,
+			}) :: RoofUpdateResult?
+			if roofResult then
+				PreviewHighlight.FillColor = roofResult.fillColor
+				PreviewHighlight.OutlineColor = roofResult.outlineColor
+			end
 			return
 		end
 
@@ -669,7 +723,17 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 			if resolvedPreviewKind == "Wall" then
 				previewWall(model, grid, cellX, cellZ, previewFacing, lift)
 			elseif resolvedPreviewKind == "Roof" then
-				previewRoof(model, grid, surface, cellX, cellZ, previewFacing, CurrentItemSpec)
+				previewRoof(
+					model,
+					grid,
+					surface,
+					cellX,
+					cellZ,
+					previewFacing,
+					baseWidthCells,
+					baseDepthCells,
+					CurrentItemSpec
+				)
 			else
 				previewCellObject(
 					model,
@@ -699,6 +763,7 @@ function ObjectPreview.ClearPreview()
 	objectPreviewEnabled.Value = false
 	MarkerPool.Clear()
 	resetFloorState(true)
+	resetRoofState(true)
 	WallStripPreview.Clear()
 
 	if SelectedItem then
@@ -744,6 +809,10 @@ end
 
 function ObjectPreview.SetWallStripPlacementHandler(handler: ((WallStripSelectionInfo) -> ())?)
 	WallStripPlacementHandler = handler
+end
+
+function ObjectPreview.SetRoofPlacementHandler(handler: ((RoofSelectionInfo) -> ())?)
+	RoofPlacementHandler = handler
 end
 
 function ObjectPreview.TryBeginFloorDrag(): boolean
@@ -807,6 +876,30 @@ end
 
 function ObjectPreview.GetWallStripSelectionSummary(): WallStripSelectionInfo?
 	return WallStripPreview.GetSelectionSummary()
+end
+
+function ObjectPreview.TryBeginRoofDrag(): boolean
+	if CurrentKind ~= "Roof" then
+		return false
+	end
+	if RoofPreview.IsDragInProgress() then
+		return true
+	end
+	if not CurrentItemId or not LastCellX or not LastCellZ then
+		return false
+	end
+	if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+		return false
+	end
+	return RoofPreview.TryBeginDrag(CurrentKind, CurrentItemId, LastCellX, LastCellZ, true)
+end
+
+function ObjectPreview.IsRoofDragInProgress(): boolean
+	return RoofPreview.IsDragInProgress()
+end
+
+function ObjectPreview.GetRoofSelectionSummary(): RoofSelectionInfo?
+	return RoofPreview.GetSelectionSummary()
 end
 
 function ObjectPreview.SetMoveOrigin(originInfo: {

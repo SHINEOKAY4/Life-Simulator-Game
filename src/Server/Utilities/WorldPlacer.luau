@@ -76,7 +76,7 @@ function WorldPlacer.Spawn(
 	if not model then
 		return
 	end
-	
+
 	local facingString = tostring(facing)
 	model:SetAttribute("ItemId", itemId)
 	model:SetAttribute("CellX", cellX)
@@ -84,7 +84,7 @@ function WorldPlacer.Spawn(
 	model:SetAttribute("Facing", facingString)
 	model:SetAttribute("WidthCells", footprintWidth)
 	model:SetAttribute("DepthCells", footprintDepth)
-	
+
 	if options then
 		if options.previousWallId then
 			model:SetAttribute("PreviousWallId", options.previousWallId)
@@ -103,6 +103,14 @@ function WorldPlacer.Spawn(
 			local widthScale = footprintWidth / math.max(catalogWidth, 1)
 			local depthScale = footprintDepth / math.max(catalogDepth, 1)
 			floorPart.Size = Vector3.new(baseSize.X * widthScale, baseSize.Y, baseSize.Z * depthScale)
+		end
+	elseif placementType == "Roof" then
+		local roofPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+		if roofPart then
+			local baseSize = roofPart.Size
+			local widthScale = footprintWidth / math.max(catalogWidth, 1)
+			local depthScale = footprintDepth / math.max(catalogDepth, 1)
+			roofPart.Size = Vector3.new(baseSize.X * widthScale, baseSize.Y, baseSize.Z * depthScale)
 		end
 	end
 
@@ -179,10 +187,12 @@ function WorldPlacer.Despawn(player: Player, itemId: string, cellX: number, cell
 
 	local desiredFacing = tostring(facing)
 	for _, inst in container:GetChildren() do
-		if inst:GetAttribute("ItemId") == itemId 
-			and inst:GetAttribute("CellX") == cellX 
-			and inst:GetAttribute("CellZ") == cellZ 
-			and inst:GetAttribute("Facing") == desiredFacing then
+		if
+			inst:GetAttribute("ItemId") == itemId
+			and inst:GetAttribute("CellX") == cellX
+			and inst:GetAttribute("CellZ") == cellZ
+			and inst:GetAttribute("Facing") == desiredFacing
+		then
 			inst:Destroy()
 			break
 		end

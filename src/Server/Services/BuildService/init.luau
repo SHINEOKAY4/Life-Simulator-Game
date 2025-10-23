@@ -9,6 +9,7 @@ local Build = require(script.Actions.Build)
 local DestroyAction = require(script.Actions.DestroyAction)
 local Move = require(script.Actions.Move)
 local PlaceFloorArea = require(script.Actions.PlaceFloorArea)
+local PlaceRoofArea = require(script.Actions.PlaceRoofArea)
 local PlaceWallStrip = require(script.Actions.PlaceWallStrip)
 local Rotate = require(script.Actions.Rotate)
 
@@ -29,6 +30,7 @@ local function withRateLimit(handler: (Player, any) -> (boolean, string))
 end
 
 BuildService.PlaceFloorArea = PlaceFloorArea
+BuildService.PlaceRoofArea = PlaceRoofArea
 BuildService.PlaceWallStrip = PlaceWallStrip
 BuildService.Build = Build
 BuildService.Destroy = DestroyAction
@@ -38,6 +40,7 @@ BuildService.Rotate = Rotate
 function BuildService.Init()
 	Packets.PlaceRequest.OnServerInvoke = withRateLimit(BuildService.Build)
 	Packets.PlaceFloorAreaRequest.OnServerInvoke = withRateLimit(BuildService.PlaceFloorArea)
+	Packets.PlaceRoofAreaRequest.OnServerInvoke = withRateLimit(BuildService.PlaceRoofArea)
 	Packets.PlaceWallStripRequest.OnServerInvoke = withRateLimit(BuildService.PlaceWallStrip)
 	Packets.DestroyRequest.OnServerInvoke = withRateLimit(BuildService.Destroy)
 	Packets.MoveRequest.OnServerInvoke = withRateLimit(BuildService.Move)

@@ -9,7 +9,9 @@ local ResidentService = require(ServerScriptService.Server.Services.ResidentServ
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local ResidentMovement = require(ServerScriptService.Server.Utilities.ResidentMovement)
+local ResidentChat = require(ServerScriptService.Server.Utilities.ResidentChat)
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
+local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
 type StationRecord = {
@@ -32,6 +34,7 @@ type StationAssignment = {
 	StationModel: Model,
 	NeedName: string?,
 	RestModeOverride: string?,
+	ManualOverride: boolean?,
 }
 
 type StationCache = { [string]: { [string]: StationRecord } }
@@ -40,6 +43,22 @@ local DirectActionService = {}
 DirectActionService.OverrideStarted = GoodSignal.new()
 DirectActionService.OverrideCompleted = GoodSignal.new()
 DirectActionService.OverrideFailed = GoodSignal.new()
+
+local StationKindLabels: { [string]: string } = {
+	RestStation = "bed",
+	CookStation = "kitchen",
+	SocialStation = "hangout",
+	HygieneStation = "sink",
+	FunStation = "fun spot",
+}
+
+local StationNeedMap: { [string]: string } = {
+	CookStation = "Hunger",
+	RestStation = "Energy",
+	HygieneStation = "Hygiene",
+	SocialStation = "Social",
+	FunStation = "Fun",
+}
 
 local OverrideHandlers: {
 	[string]: (
@@ -91,6 +110,43 @@ local function finalizeAssignment(assignment: StationAssignment, succeeded: bool
 	else
 		DirectActionService.OverrideFailed:Fire(assignment, message)
 	end
+end
+
+local function resolveStationDisplayName(itemSpec: { [string]: any }?, stationType: string): string?
+	if itemSpec then
+		local displayName = itemSpec.DisplayName
+		if typeof(displayName) == "string" and displayName ~= "" then
+			return displayName
+		end
+		local itemName = itemSpec.Name
+		if typeof(itemName) == "string" and itemName ~= "" then
+			return itemName
+		end
+		local tags = itemSpec.Tags
+		if typeof(tags) == "table" then
+			for _, tag in ipairs(tags) do
+				if typeof(tag) == "string" and tag ~= "" then
+					return tag
+				end
+			end
+		end
+	end
+	return StationKindLabels[stationType]
+end
+
+local function isNeedAtMax(residentState: any, needName: string, needDef: NeedConfig.NeedDef): boolean
+	if typeof(residentState) ~= "table" then
+		return false
+	end
+	local getter = residentState.GetNeed
+	if typeof(getter) ~= "function" then
+		return false
+	end
+	local value = getter(residentState, needName)
+	if typeof(value) ~= "number" then
+		return false
+	end
+	return value >= needDef.Max
 end
 
 local function clearExistingManualOverride(
@@ -279,6 +335,9 @@ function DirectActionService.AssignStationToResident(player: Player, residentNam
 		return false, "Item is not a station"
 	end
 
+	local primaryNeed = StationNeedMap[stationType]
+	local primaryNeedDef = if primaryNeed then NeedConfig.Needs[primaryNeed] else nil
+
 	local playerStations = PlotService.GetStationsForPlayer(player)
 	local stationScope = playerStations[stationType]
 	if not stationScope then
@@ -305,6 +364,17 @@ function DirectActionService.AssignStationToResident(player: Player, residentNam
 	end
 	if residentState.IsOnShift then
 		return false, "Resident is currently working"
+	end
+
+	if primaryNeed and primaryNeedDef and isNeedAtMax(residentState, primaryNeed, primaryNeedDef) then
+		ResidentChat.ShowInterrupt(residentState, "NeedFull:" .. primaryNeed, {
+			StationType = stationType,
+			StationName = resolveStationDisplayName(itemSpec, stationType),
+			StationId = uniqueId,
+			NeedName = primaryNeed,
+			Player = player,
+		})
+		return false, "Need already satisfied"
 	end
 
 	local collapseActive = typeof(residentState._EnergyCollapseRelease) == "function"
@@ -339,8 +409,9 @@ function DirectActionService.AssignStationToResident(player: Player, residentNam
 		ItemSpec = itemSpec,
 		StationRecord = resolvedStation,
 		StationModel = itemModel,
-		NeedName = nil,
+		NeedName = primaryNeed,
 		RestModeOverride = nil,
+		ManualOverride = true,
 	}
 
 	residentState:SetManualOverrideState({

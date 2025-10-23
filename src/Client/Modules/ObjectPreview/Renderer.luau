@@ -144,13 +144,27 @@ function Renderer.PreviewRoof(
 	surface: BasePart,
 	cellX: number,
 	cellZ: number,
+	widthCells: number?,
+	depthCells: number?,
 	facing: Facing,
-	lift: number
+	spec: any?
 )
-	local base = grid:CellToWorldCenterCFrame(cellX, cellZ, lift)
-	local aligned = alignToSurface(base, surface)
-	local yaw = CFrame.Angles(0, YawFromFacing(facing :: any), 0)
-	model:PivotTo(aligned * yaw)
+	local width = widthCells or 1
+	local depth = depthCells or 1
+	local lift = spec and spec.HeightStuds or 12
+
+	if width == 1 and depth == 1 then
+		local base = grid:CellToWorldCenterCFrame(cellX, cellZ, lift)
+		local aligned = alignToSurface(base, surface)
+		local yaw = CFrame.Angles(0, YawFromFacing(facing :: any), 0)
+		model:PivotTo(aligned * yaw)
+	else
+		local center = grid:FootprintCenterCFrame(cellX, cellZ, width, depth, facing)
+		local aligned = alignToSurface(center, surface)
+		local yaw = CFrame.Angles(0, YawFromFacing(facing :: any), 0)
+		local liftedPosition = aligned.Position + surface.CFrame.UpVector * lift
+		model:PivotTo(CFrame.new(liftedPosition) * GetRotationOnly(aligned) * yaw)
+	end
 end
 
 function Renderer.PreviewCellObject(

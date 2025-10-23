@@ -11,6 +11,8 @@ local Profile = {
 	},
 	CurrencyState = {
 		-- CurrencyName: Balance
+		Cash = 0,
+		OutstandingBalance = 0,
 	},
 	GigState = {
 		SlotsUsedToday = 0,
@@ -21,14 +23,20 @@ local Profile = {
 			ExpiresAt = 0,
 		},
 	},
-	EconomyState = {
-		LastBillingDay = -4,
-		OutstandingBills = 0,
+	BillingState = {
+		lastPaymentTime = 0,
+		BillingGraceActive = false,
+		GraceElapsedSeconds = 0,
+		OverduePayments = 0,
+		CurrentCycleRecordedOverdue = false,
+		CycleState = "Active",
+		OutstandingBreakdown = {
+			PlotTax = 0,
+			Electric = 0,
+			Food = 0,
+		},
 	},
-	PayrollState = {
-		PendingAmount = 0,
-		LastPayoutDay = -1,
-	},
+
 	InventoryState = {},
 }
 

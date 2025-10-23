@@ -28,6 +28,7 @@ local function buildAssignment(player: Player, residentName: string, resident: R
 		StationRecord = decision.StationRecord,
 		StationModel = decision.StationModel,
 		NeedName = decision.NeedName,
+		ManualOverride = false,
 	}
 	if decision.RestModeOverride then
 		assignment.RestModeOverride = decision.RestModeOverride

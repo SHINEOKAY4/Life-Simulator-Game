@@ -3,12 +3,13 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 
 local ResidentNeedsUI = require(script.Parent.ResidentNeedsUI)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local CameraUtils = require(ReplicatedStorage.Shared.Utilities.CameraUtils)
 local ResidentsStore = require(script.Parent.Parent.ClientStores.ResidentsStore)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
+local VisualFX = require(ReplicatedStorage.Shared.Utilities.VisualFX)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -18,6 +19,11 @@ local Profile = ResidentGui:WaitForChild("Profile")
 local ResidentSelectionFrame = ResidentGui:WaitForChild("ResidentSelectionFrame")
 local ResidentNeedsFrame = ResidentGui:WaitForChild("ResidentNeedsFrame")
 local ResidentButtons = ResidentGui:WaitForChild("ResidentButtons")
+local CustomizeButton = ResidentButtons:WaitForChild("CustomizeButton") :: TextButton
+local ProfileButton = ResidentButtons:WaitForChild("ProfileButton") :: TextButton
+local CareerButton = ResidentButtons:WaitForChild("CareerButton") :: TextButton
+
+local StationRadial = PlayerGui:WaitForChild("StationRadial") :: BillboardGui
 
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEnabled") :: BoolValue
@@ -26,6 +32,7 @@ local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnab
 local RadialBillboardButtonEnabled = ActiveQueryFolder:WaitForChild("RadialBillboardButtonEnabled") :: BoolValue
 local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
 local _ResidentRadialEnabled = ActiveQueryFolder:FindFirstChild("ResidentRadialEnabled") :: BoolValue
+local ResidentRosterEnabled = ActiveQueryFolder:FindFirstChild("ResidentRosterEnabled") :: BoolValue
 
 local Roster = ResidentSelectionFrame.Background.Roster
 
@@ -35,19 +42,203 @@ local TemplateFrame = InterfacesTemplates:WaitForChild("ResidentFrameTemplate")
 
 local HoverTweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local HoverSizeGoal = UDim2.fromScale(0.155, 1.525)
+local ButtonHoverScale = 1.08
+
+local isRosterVisible = ResidentSelectionFrame.Visible
+
+local function setRosterVisible(isVisible: boolean)
+	ResidentSelectionFrame.Visible = isVisible
+	isRosterVisible = isVisible
+end
+
+local function isRosterBlocked(): boolean
+	if ObjectSelectorEnabled and ObjectSelectorEnabled.Value then
+		return true
+	end
+	if PlotBuilderEnabled and PlotBuilderEnabled.Value then
+		return true
+	end
+	if PlotExpansionEnabled and PlotExpansionEnabled.Value then
+		return true
+	end
+	if RadialBillboardButtonEnabled and RadialBillboardButtonEnabled.Value then
+		return true
+	end
+	if JobSelectionUIEnabled and JobSelectionUIEnabled.Value then
+		return true
+	end
+	return false
+end
 
 local INPUT_DEBOUNCE_SECONDS = 0.2
+local NEED_ATTRIBUTE_NAMES = { "Hunger", "Energy", "Fun", "Social", "Hygiene" }
+local GRADIENT_GOOD_COLOR = Color3.fromRGB(54, 199, 82)
+local GRADIENT_BAD_COLOR = Color3.fromRGB(215, 71, 63)
+local GRADIENT_HIGHLIGHT_COLOR = Color3.new(1, 1, 1)
+local GRADIENT_SHADOW_COLOR = Color3.new(0, 0, 0)
+local CAMERA_FOCUS_DURATION_SECONDS = 0
+local CAMERA_ISO_DISTANCE_STUDS = 26
+local CAMERA_ISO_PITCH_DEGREES = 55
+local CAMERA_ISO_YAW_DEGREES = 45
+local DEFAULT_WALK_SPEED = 16
+local DEFAULT_JUMP_POWER = 50
 
 type FrameInfo = {
 	Frame: Frame,
 	DefaultSize: UDim2,
 	PlaySizeTween: (UDim2) -> (),
+	UpdateGradient: () -> (),
+	UpdateResidentSnapshot: (any) -> (),
 }
 
 local ResidentRoster = {}
 local Connections = {} :: { [string]: { RBXScriptConnection } }
 local FrameData = {} :: { [string]: FrameInfo }
 local SelectedResidentName: string? = nil
+local cachedMovementState: { WalkSpeed: number?, JumpPower: number?, AutoJumpEnabled: boolean? }? = nil
+local isMovementDisabled = false
+
+local function scaleUDim2(baseSize: UDim2, multiplier: number): UDim2
+	return UDim2.new(
+		baseSize.X.Scale * multiplier,
+		math.round(baseSize.X.Offset * multiplier),
+		baseSize.Y.Scale * multiplier,
+		math.round(baseSize.Y.Offset * multiplier)
+	)
+end
+
+local function registerButtonHover(button: TextButton, registryKey: string)
+	local imageFrame = button:FindFirstChild("Image")
+	if not imageFrame or not imageFrame:IsA("GuiObject") then
+		return
+	end
+
+	local defaultSize = imageFrame.Size
+	local hoverSize = scaleUDim2(defaultSize, ButtonHoverScale)
+	local activeTween: Tween? = nil
+
+	local function tweenTo(targetSize: UDim2)
+		if activeTween then
+			activeTween:Cancel()
+		end
+		activeTween = VisualFX.TweenSize(imageFrame, HoverTweenInfo, targetSize)
+	end
+
+	local mouseEnterConnection: RBXScriptConnection
+	local mouseLeaveConnection: RBXScriptConnection
+	local ancestryConnection: RBXScriptConnection
+
+	mouseEnterConnection = button.MouseEnter:Connect(function()
+		tweenTo(hoverSize)
+	end)
+	mouseLeaveConnection = button.MouseLeave:Connect(function()
+		tweenTo(defaultSize)
+	end)
+	ancestryConnection = button.AncestryChanged:Connect(function(_, parent)
+		if parent then
+			return
+		end
+		if mouseEnterConnection.Connected then
+			mouseEnterConnection:Disconnect()
+		end
+		if mouseLeaveConnection.Connected then
+			mouseLeaveConnection:Disconnect()
+		end
+		if ancestryConnection.Connected then
+			ancestryConnection:Disconnect()
+		end
+	end)
+
+	Connections[registryKey] = { mouseEnterConnection, mouseLeaveConnection, ancestryConnection }
+end
+
+local function setPlayerMovementEnabled(isEnabled: boolean)
+	-- Locks the player's humanoid movement while a resident is actively selected.
+	local character = Player.Character
+	local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+
+	if isEnabled then
+		if not isMovementDisabled then
+			return
+		end
+
+		isMovementDisabled = false
+
+		local state = cachedMovementState
+		if humanoid then
+			local storedSpeed = if state and typeof(state.WalkSpeed) == "number"
+				then state.WalkSpeed
+				else DEFAULT_WALK_SPEED
+			humanoid.WalkSpeed = storedSpeed
+			local storedJumpPower = if state and typeof(state.JumpPower) == "number"
+				then state.JumpPower
+				else DEFAULT_JUMP_POWER
+			humanoid.JumpPower = storedJumpPower
+		end
+
+		if state and typeof(state.AutoJumpEnabled) == "boolean" then
+			Player.AutoJumpEnabled = state.AutoJumpEnabled
+		else
+			Player.AutoJumpEnabled = true
+		end
+
+		cachedMovementState = nil
+		return
+	end
+
+	if isMovementDisabled then
+		return
+	end
+
+	isMovementDisabled = true
+
+	if humanoid then
+		cachedMovementState = {
+			WalkSpeed = humanoid.WalkSpeed,
+			JumpPower = humanoid.JumpPower,
+			AutoJumpEnabled = Player.AutoJumpEnabled,
+		}
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+	else
+		cachedMovementState = {
+			WalkSpeed = nil,
+			JumpPower = nil,
+			AutoJumpEnabled = Player.AutoJumpEnabled,
+		}
+	end
+
+	Player.AutoJumpEnabled = false
+end
+
+local function computeIsometricCameraCFrame(residentModel: Model): CFrame?
+	local residentPivot = residentModel:GetPivot()
+	local focusPosition = residentPivot.Position
+	local yaw = math.rad(CAMERA_ISO_YAW_DEGREES)
+	local pitch = math.rad(CAMERA_ISO_PITCH_DEGREES)
+	local horizontalDirection = Vector3.new(math.cos(yaw), 0, math.sin(yaw))
+	if horizontalDirection.Magnitude == 0 then
+		horizontalDirection = Vector3.new(0, 0, -1)
+	end
+	horizontalDirection = horizontalDirection.Unit
+	local direction = (horizontalDirection * math.cos(pitch)) + Vector3.new(0, -math.sin(pitch), 0)
+	direction = direction.Unit
+	local cameraPosition = focusPosition - (direction * CAMERA_ISO_DISTANCE_STUDS)
+	return CFrame.lookAt(cameraPosition, focusPosition)
+end
+
+local function findResidentCameraSubject(residentModel: Model): BasePart?
+	local humanoidRoot = residentModel:FindFirstChild("HumanoidRootPart")
+	if humanoidRoot and humanoidRoot:IsA("BasePart") then
+		return humanoidRoot
+	end
+	local primaryPart = residentModel.PrimaryPart
+	if primaryPart then
+		return primaryPart
+	end
+	local anyPart = residentModel:FindFirstChildWhichIsA("BasePart")
+	return anyPart
+end
 
 local function runDebounced(actionName: string, callback: () -> ()): ()
 	local key = string.format("ResidentRoster/%s", actionName)
@@ -56,19 +247,34 @@ end
 
 local function deselectResident()
 	local currentName = SelectedResidentName
-	if not currentName then
-		return
-	end
-
-	local currentData = FrameData[currentName]
-	if currentData then
-		currentData.PlaySizeTween(currentData.DefaultSize)
+	if currentName then
+		local currentData = FrameData[currentName]
+		if currentData then
+			currentData.PlaySizeTween(currentData.DefaultSize)
+		end
 	end
 	SelectedResidentName = nil
 	ResidentNeedsFrame.Visible = false
 	ResidentButtons.Visible = false
 	Profile.Visible = false
 	ResidentNeedsUI.Hide()
+	StationRadial.Enabled = false
+	CameraUtils.CancelFocus()
+	setPlayerMovementEnabled(true)
+end
+
+local function refreshRosterVisibility()
+	local shouldShow = ResidentRosterEnabled.Value and not isRosterBlocked()
+	if shouldShow then
+		setRosterVisible(true)
+		return
+	end
+
+	if isRosterVisible then
+		deselectResident()
+	end
+
+	setRosterVisible(false)
 end
 
 local function selectResident(residentName: string, residentModel: Model)
@@ -85,8 +291,13 @@ local function selectResident(residentName: string, residentModel: Model)
 		end
 	end
 
+	if isRosterBlocked() then
+		return
+	end
+
 	SelectedResidentName = residentName
-	ResidentSelectionFrame.Visible = true
+	ResidentRosterEnabled.Value = true
+	setRosterVisible(true)
 	ResidentNeedsFrame.Visible = true
 	ResidentButtons.Visible = true
 	ResidentNeedsUI.Show(residentModel)
@@ -95,6 +306,17 @@ local function selectResident(residentName: string, residentModel: Model)
 	if currentData then
 		currentData.PlaySizeTween(HoverSizeGoal)
 	end
+	local focusFrame = computeIsometricCameraCFrame(residentModel)
+	if focusFrame then
+		local cameraSubject = findResidentCameraSubject(residentModel)
+		CameraUtils.FocusOn(focusFrame, {
+			duration = CAMERA_FOCUS_DURATION_SECONDS,
+			restoreOnComplete = false,
+			cameraTypeOnComplete = Enum.CameraType.Custom,
+			cameraSubjectOnComplete = cameraSubject,
+		})
+	end
+	setPlayerMovementEnabled(false)
 end
 
 local function CreateResidentImageButton(residentData: any)
@@ -110,6 +332,71 @@ local function CreateResidentImageButton(residentData: any)
 	local residentNameLabel = newFrame.ResidentName
 	local viewportFrame = portraitButton.Image.ViewportFrame
 	local worldModel = viewportFrame.WorldModel
+	local imageLabel = portraitButton.Image.ImageLabel
+	local portraitGradient = imageLabel:FindFirstChildOfClass("UIGradient") :: UIGradient?
+	if not portraitGradient then
+		local newGradient = Instance.new("UIGradient") :: UIGradient
+		newGradient.Name = "NeedsGradient"
+		newGradient.Parent = imageLabel
+		portraitGradient = newGradient
+	end
+
+	local currentResidentSnapshot = residentData
+
+	local function getNeedValue(attributeName: string): number?
+		local attributeValue = residentModel:GetAttribute(attributeName)
+		if typeof(attributeValue) == "number" then
+			return attributeValue
+		end
+		local needsSnapshot = currentResidentSnapshot and currentResidentSnapshot.Needs
+		if typeof(needsSnapshot) == "table" then
+			local fallbackValue = needsSnapshot[attributeName]
+			if typeof(fallbackValue) == "number" then
+				return fallbackValue
+			end
+		end
+		return nil
+	end
+
+	local function calculateNeedSatisfaction(): number
+		local totalNeedValue = 0
+		local validNeedCount = 0
+		for _, attributeName in ipairs(NEED_ATTRIBUTE_NAMES) do
+			local needValue = getNeedValue(attributeName)
+			if typeof(needValue) == "number" then
+				totalNeedValue += math.clamp(needValue, 0, 100)
+				validNeedCount += 1
+			end
+		end
+		if validNeedCount == 0 then
+			return 1
+		end
+		return math.clamp(totalNeedValue / (validNeedCount * 100), 0, 1)
+	end
+
+	local function updateResidentGradient()
+		if not portraitGradient then
+			return
+		end
+		local satisfactionRatio = calculateNeedSatisfaction()
+		local baseColor = GRADIENT_BAD_COLOR:Lerp(GRADIENT_GOOD_COLOR, satisfactionRatio)
+		local highlightColor = baseColor:Lerp(GRADIENT_HIGHLIGHT_COLOR, 0.2)
+		local shadowColor = baseColor:Lerp(GRADIENT_SHADOW_COLOR, 0.25)
+		portraitGradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, highlightColor),
+			ColorSequenceKeypoint.new(0.5, baseColor),
+			ColorSequenceKeypoint.new(1, shadowColor),
+		})
+	end
+
+	local function updateResidentSnapshot(newResidentData: any)
+		if typeof(newResidentData) ~= "table" then
+			return
+		end
+		currentResidentSnapshot = newResidentData
+		updateResidentGradient()
+	end
+
 	local targetPivot = CFrame.new(0, -1, 4, -1, 0, 0, 0, 1, 0, 0, 0, -1)
 	local defaultSize = newFrame.Size
 	local activeTween: Tween? = nil
@@ -118,9 +405,7 @@ local function CreateResidentImageButton(residentData: any)
 		if activeTween then
 			activeTween:Cancel()
 		end
-		local newTween = TweenService:Create(newFrame, HoverTweenInfo, { Size = targetSize })
-		activeTween = newTween
-		newTween:Play()
+		activeTween = VisualFX.TweenSize(newFrame, HoverTweenInfo, targetSize)
 	end
 	residentNameLabel.Text = residentData.Name
 	local animateScript = imageModel:FindFirstChild("Animate") :: Script
@@ -140,11 +425,20 @@ local function CreateResidentImageButton(residentData: any)
 		playSizeTween(defaultSize)
 	end)
 	Connections[residentData.Name] = { mouseEnterConnection, mouseLeaveConnection }
+	for _, attributeName in ipairs(NEED_ATTRIBUTE_NAMES) do
+		local attributeConnection = residentModel:GetAttributeChangedSignal(attributeName):Connect(function()
+			updateResidentGradient()
+		end)
+		table.insert(Connections[residentData.Name], attributeConnection)
+	end
 	FrameData[residentData.Name] = {
 		Frame = newFrame,
 		DefaultSize = defaultSize,
 		PlaySizeTween = playSizeTween,
+		UpdateGradient = updateResidentGradient,
+		UpdateResidentSnapshot = updateResidentSnapshot,
 	}
+	updateResidentGradient()
 	newFrame.Parent = Roster
 	return newFrame, residentModel
 end
@@ -152,45 +446,38 @@ end
 function ResidentRoster.Init(): ()
 	-- Placeholder for future Resident Roster UI initialization.
 
-	ObjectSelectorEnabled.Changed:Connect(function()
-		if ObjectSelectorEnabled.Value then
-			ResidentRoster.Hide()
-		else
-			ResidentSelectionFrame.Visible = true
-		end
-	end)
-	PlotBuilderEnabled.Changed:Connect(function()
-		if PlotBuilderEnabled.Value then
-			ResidentRoster.Hide()
-		else
-			ResidentSelectionFrame.Visible = true
-		end
-	end)
+	registerButtonHover(CustomizeButton, "Buttons/Customize")
+	registerButtonHover(ProfileButton, "Buttons/Profile")
+	registerButtonHover(CareerButton, "Buttons/Career")
 
-	PlotExpansionEnabled.Changed:Connect(function()
-		if PlotExpansionEnabled.Value then
-			ResidentRoster.Hide()
-		else
-			ResidentSelectionFrame.Visible = true
-		end
-	end)
-	RadialBillboardButtonEnabled.Changed:Connect(function()
-		if RadialBillboardButtonEnabled.Value then
-			ResidentRoster.Hide()
-		else
-			ResidentSelectionFrame.Visible = true
-		end
-	end)
+	if ResidentRosterEnabled then
+		ResidentRosterEnabled.Changed:Connect(refreshRosterVisibility)
+	end
+	if ObjectSelectorEnabled then
+		ObjectSelectorEnabled.Changed:Connect(refreshRosterVisibility)
+	end
+	if PlotBuilderEnabled then
+		PlotBuilderEnabled.Changed:Connect(refreshRosterVisibility)
+	end
+	if PlotExpansionEnabled then
+		PlotExpansionEnabled.Changed:Connect(refreshRosterVisibility)
+	end
+	if RadialBillboardButtonEnabled then
+		RadialBillboardButtonEnabled.Changed:Connect(refreshRosterVisibility)
+	end
+	if JobSelectionUIEnabled then
+		JobSelectionUIEnabled.Changed:Connect(refreshRosterVisibility)
+	end
 
-	JobSelectionUIEnabled.Changed:Connect(function()
-		if JobSelectionUIEnabled.Value then
-			ResidentRoster.Hide()
-		else
-			ResidentSelectionFrame.Visible = true
-		end
-	end)
+	refreshRosterVisibility()
 	ResidentsStore.ResidentAdded:Connect(function(userId: number, residentData: any)
 		print("Resident added for userId:", userId, "Resident Name:", residentData.Name)
+		if userId ~= Player.UserId then
+			return
+		end
+		if not ResidentGui.Enabled then
+			ResidentGui.Enabled = true
+		end
 		local residentFrame, residentModel = CreateResidentImageButton(residentData)
 		local portraitButton = residentFrame.PortraitButton :: TextButton
 		local activationConnection = portraitButton.Activated:Connect(function()
@@ -201,6 +488,19 @@ function ResidentRoster.Init(): ()
 		end)
 		Connections[residentData.Name] = Connections[residentData.Name] or {}
 		table.insert(Connections[residentData.Name], activationConnection)
+	end)
+
+	ResidentsStore.ResidentsUpdated:Connect(function(userId: number, updatedResidentData: any)
+		if userId ~= Player.UserId then
+			return
+		end
+		if type(updatedResidentData.Name) ~= "string" then
+			return
+		end
+		local frameInfo = FrameData[updatedResidentData.Name]
+		if frameInfo then
+			frameInfo.UpdateResidentSnapshot(updatedResidentData)
+		end
 	end)
 
 	ResidentsStore.ResidentRemoved:Connect(function(userId: number, residentName: string)
@@ -223,8 +523,11 @@ function ResidentRoster.Init(): ()
 	end)
 end
 
-function ResidentRoster.Hide()
+function ResidentRoster.Hide(shouldDisableEnabledValue: boolean?)
 	deselectResident()
-	ResidentSelectionFrame.Visible = false
+	setRosterVisible(false)
+	if shouldDisableEnabledValue ~= false then
+		ResidentRosterEnabled.Value = false
+	end
 end
 return ResidentRoster

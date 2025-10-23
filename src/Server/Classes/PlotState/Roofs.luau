@@ -70,6 +70,10 @@ function Roofs.attach(PlotState)
 			cellX = cellX,
 			cellZ = cellZ,
 			facing = facing,
+			Metadata = {
+				WidthCells = widthCells,
+				DepthCells = depthCells,
+			},
 		}
 		return true
 	end
@@ -88,13 +92,16 @@ function Roofs.attach(PlotState)
 			local spec = ItemFinder.FindItemById(saved.id)
 			assert(spec, ("Unknown catalog item '%s'"):format(saved.id))
 			local placementType = spec.PlacementType
-			local specWidth = spec.WidthCells
-			local specDepth = spec.DepthCells
+
+			local savedMetadata = saved.Metadata
+			local actualWidth = savedMetadata and savedMetadata.WidthCells or spec.WidthCells
+			local actualDepth = savedMetadata and savedMetadata.DepthCells or spec.DepthCells
 			local objFacing = saved.facing or "North"
+
 			if
 				placementType == "Roof"
-				and specWidth == normalizedWidth
-				and specDepth == normalizedDepth
+				and actualWidth == normalizedWidth
+				and actualDepth == normalizedDepth
 				and objFacing == facing
 			then
 				self.Save.PlacedObjects[key] = nil

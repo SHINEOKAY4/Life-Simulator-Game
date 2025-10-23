@@ -13,6 +13,13 @@ function TimeScale.GetSecondsPerFullDay(): number
 	return math.max(1, v)
 end
 
+function TimeScale.ClockTimeFromServerSeconds(serverSeconds: number): number
+	local secPerDay = TimeScale.GetSecondsPerFullDay()
+	local startClock = (tonumber(Lighting:GetAttribute("StartClockTime")) or 16.5) % 24
+	local phase = (serverSeconds % secPerDay) / secPerDay
+	return (phase * 24 + startClock) % 24
+end
+
 function TimeScale.GameHoursFromRealDelta(realDt: number): number
 	local secPerDay = TimeScale.GetSecondsPerFullDay()
 	local realPerGameHour = secPerDay / 24
@@ -20,11 +27,7 @@ function TimeScale.GameHoursFromRealDelta(realDt: number): number
 end
 
 function TimeScale.GetClockTime(): number
-	local secPerDay = TimeScale.GetSecondsPerFullDay()
-	local startClock = (tonumber(Lighting:GetAttribute("StartClockTime")) or 16.5) % 24
-	local serverSeconds = Workspace:GetServerTimeNow()
-	local phase = (serverSeconds % secPerDay) / secPerDay
-	return (phase * 24 + startClock) % 24
+	return TimeScale.ClockTimeFromServerSeconds(Workspace:GetServerTimeNow())
 end
 
 function TimeScale.GetDayIndex(): number

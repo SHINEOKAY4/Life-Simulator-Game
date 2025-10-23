@@ -54,6 +54,14 @@ local NeedFriendlyNames: { [string]: string } = {
 	Social = "I could use some company",
 }
 
+local NeedFullPhrases: { [string]: string } = {
+	Hunger = "I'm already full.",
+	Energy = "I'm wide awake already.",
+	Hygiene = "I'm already squeaky clean.",
+	Fun = "I'm all set for fun right now.",
+	Social = "I'm feeling social enough already.",
+}
+
 local GenericInterrupts: { string } = {
 	"Something popped up; I'll be back soon.",
 	"I need to pause for just a moment.",
@@ -240,6 +248,9 @@ local function resolveInterruptColor(reason: string?): Enum.ChatColor
 	if urgentNeed then
 		return Enum.ChatColor.Red
 	end
+	if string.match(normalized, "^NeedFull:") then
+		return Enum.ChatColor.Blue
+	end
 	local mapped = InterruptColorMap[normalized]
 	if mapped then
 		return mapped
@@ -273,6 +284,15 @@ function ResidentChat.ResolveInterruptText(reason: string?, context: InterruptCo
 		if parsedNeed then
 			return buildUrgentNeedText(parsedNeed, context)
 		end
+	end
+	local satiatedNeed = string.match(reason, "^NeedFull:(.+)$")
+	if satiatedNeed then
+		local phrase = NeedFullPhrases[satiatedNeed]
+		if phrase then
+			return phrase
+		end
+		local friendlyNeed = humanizeReason(satiatedNeed)
+		return string.format("I'm already topped up on %s.", friendlyNeed)
 	end
 	local stationLabel = resolveStationLabel(context)
 	local friendlyReason = humanizeReason(reason)

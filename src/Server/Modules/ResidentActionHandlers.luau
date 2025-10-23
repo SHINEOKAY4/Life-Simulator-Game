@@ -4,6 +4,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DirectActionService = require(ServerScriptService.Server.Services.DirectActionService)
+local BillingService = require(ServerScriptService.Server.Services.BillingService)
 local ResidentMovement = require(ServerScriptService.Server.Utilities.ResidentMovement)
 local NeedEffects = require(ServerScriptService.Server.Utilities.NeedEffects)
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
@@ -28,6 +29,7 @@ export type HandlerAssignment = {
 	StationModel: Model,
 	NeedName: string?,
 	RestModeOverride: string?,
+	ManualOverride: boolean?,
 }
 
 local ResidentActionHandlers = {}
@@ -83,6 +85,23 @@ local StationKindLabels: { [string]: string } = {
 	HygieneStation = "sink",
 	FunStation = "fun spot",
 }
+
+local function resolveMealUsageWeight(behavior: Behavior): number
+	local effects = behavior.Effects
+	if not effects then
+		return 0
+	end
+	for _, effect in ipairs(effects) do
+		if effect.Need == "Hunger" then
+			local instant = effect.InstantAmount
+			local rate = effect.RatePerHour
+			if (typeof(instant) == "number" and instant > 0) or (typeof(rate) == "number" and rate > 0) then
+				return 1
+			end
+		end
+	end
+	return 0
+end
 
 type RawEffect = { [string]: any }
 type Effect = { Need: string, InstantAmount: number?, RatePerHour: number? }
@@ -669,6 +688,43 @@ local function executeStationAction(stationType: string, context: HandlerContext
 			end
 		end
 	end
+	local manualOverride = assignment.ManualOverride == true
+	if manualOverride and assignment.NeedName then
+		local needDef = Needs[assignment.NeedName]
+		if needDef then
+			local originalShouldEnd = behavior.ShouldEnd
+			behavior.ShouldEnd = function(residentState)
+				local getter = residentState and residentState.GetNeed
+				if typeof(getter) == "function" then
+					local value = getter(residentState, assignment.NeedName)
+					if typeof(value) == "number" then
+						if value >= needDef.Max then
+							return true
+						end
+						return false
+					end
+				end
+				if originalShouldEnd then
+					return originalShouldEnd(residentState)
+				end
+				return false
+			end
+			local originalReason = behavior.EndReasonProvider
+			behavior.EndReasonProvider = function(residentState)
+				local getter = residentState and residentState.GetNeed
+				if typeof(getter) == "function" then
+					local value = getter(residentState, assignment.NeedName)
+					if typeof(value) == "number" and value >= needDef.Max then
+						return "NeedFull:" .. assignment.NeedName
+					end
+				end
+				if originalReason then
+					return originalReason(residentState)
+				end
+				return nil
+			end
+		end
+	end
 	local restPoseMode: string? = nil
 	local restPoseEligible = false
 	if stationType == "RestStation" then
@@ -770,6 +826,12 @@ local function executeStationAction(stationType: string, context: HandlerContext
 	end
 	if arrival and behavior.UseSeat then
 		ResidentMovement.LeaveSeat(assignment.ResidentState, arrival.Seat)
+	end
+	if stationType == "CookStation" and runResult == true and assignment.Player then
+		local usageWeight = resolveMealUsageWeight(behavior)
+		if usageWeight > 0 then
+			BillingService.RecordMealUsage(assignment.Player, usageWeight)
+		end
 	end
 	ResidentDebug.Trace(
 		ACTION_CHANNEL,

@@ -28,6 +28,7 @@ local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEn
 
 type Facing = ObjectPreview.Facing
 type WallStripSelectionInfo = ObjectPreview.WallStripSelectionInfo
+type RoofSelectionInfo = ObjectPreview.RoofSelectionInfo
 local PlotBuilder = {}
 local INPUT_DEBOUNCE_SECONDS = 0.25
 
@@ -54,6 +55,10 @@ function PlotBuilder.Init()
 
 	ObjectPreview.SetWallStripPlacementHandler(function(selection)
 		PlotBuilder.PlaceWallStrip(selection)
+	end)
+
+	ObjectPreview.SetRoofPlacementHandler(function(selection)
+		PlotBuilder.PlaceRoofSelection(selection)
 	end)
 
 	ObjectSelectorEnabled.Changed:Connect(function()
@@ -90,6 +95,9 @@ function PlotBuilder.Init()
 	PlacePreviewAction.Pressed:Connect(function()
 		runDebounced("PlacePreview", function()
 			if ObjectPreview.TryBeginFloorDrag() then
+				return
+			end
+			if ObjectPreview.TryBeginRoofDrag() then
 				return
 			end
 			if ObjectPreview.TryBeginWallStripDrag() then
@@ -157,6 +165,15 @@ function PlotBuilder.PlaceSelectedPreview()
 			PlotBuilder.PlaceWallStrip(wallSelection)
 			return
 		end
+	elseif pose.Kind == "Roof" then
+		if ObjectPreview.IsRoofDragInProgress() then
+			return
+		end
+		local roofSelection = ObjectPreview.GetRoofSelectionSummary()
+		if roofSelection and roofSelection.CanPlace then
+			PlotBuilder.PlaceRoofSelection(roofSelection)
+			return
+		end
 	end
 
 	local success, message = Packets.PlaceRequest:Fire({
@@ -188,8 +205,12 @@ function PlotBuilder.PlaceFloorSelection(selection: any)
 	local endX = selection.CurrentCellX
 	local endZ = selection.CurrentCellZ
 
-	if typeof(startX) ~= "number" or typeof(startZ) ~= "number" 
-		or typeof(endX) ~= "number" or typeof(endZ) ~= "number" then
+	if
+		typeof(startX) ~= "number"
+		or typeof(startZ) ~= "number"
+		or typeof(endX) ~= "number"
+		or typeof(endZ) ~= "number"
+	then
 		return
 	end
 
@@ -200,7 +221,7 @@ function PlotBuilder.PlaceFloorSelection(selection: any)
 
 	local widthCells = selection.WidthCells
 	local depthCells = selection.DepthCells
-	
+
 	if typeof(widthCells) ~= "number" then
 		widthCells = maxCellX - minCellX + 1
 	end
@@ -241,21 +262,27 @@ function PlotBuilder.PlaceWallStrip(selection: WallStripSelectionInfo)
 	local facing = selection.Facing
 	local orientation = selection.Orientation
 
-	if typeof(startCellX) ~= "number" or typeof(endCellX) ~= "number" 
-		or typeof(startCellZ) ~= "number" or typeof(endCellZ) ~= "number" then
+	if
+		typeof(startCellX) ~= "number"
+		or typeof(endCellX) ~= "number"
+		or typeof(startCellZ) ~= "number"
+		or typeof(endCellZ) ~= "number"
+	then
 		return
 	end
-	
+
 	if typeof(facing) ~= "string" or facing == "" then
 		return
 	end
-	
+
 	if orientation ~= "Horizontal" and orientation ~= "Vertical" then
 		return
 	end
 
-	if (orientation == "Horizontal" and startCellZ ~= endCellZ) 
-		or (orientation == "Vertical" and startCellX ~= endCellX) then
+	if
+		(orientation == "Horizontal" and startCellZ ~= endCellZ)
+		or (orientation == "Vertical" and startCellX ~= endCellX)
+	then
 		return
 	end
 
@@ -267,6 +294,43 @@ function PlotBuilder.PlaceWallStrip(selection: WallStripSelectionInfo)
 		StartCellZ = startCellZ,
 		EndCellX = endCellX,
 		EndCellZ = endCellZ,
+	})
+
+	if not success then
+		warn("Placement failed: " .. message)
+	end
+end
+
+function PlotBuilder.PlaceRoofSelection(selection: RoofSelectionInfo)
+	if typeof(selection) ~= "table" or selection.CanPlace ~= true then
+		return
+	end
+
+	local itemId = selection.ItemId
+	if typeof(itemId) ~= "string" or itemId == "" then
+		return
+	end
+
+	local startX = selection.AnchorCellX
+	local startZ = selection.AnchorCellZ
+	local endX = selection.CurrentCellX
+	local endZ = selection.CurrentCellZ
+
+	if
+		typeof(startX) ~= "number"
+		or typeof(startZ) ~= "number"
+		or typeof(endX) ~= "number"
+		or typeof(endZ) ~= "number"
+	then
+		return
+	end
+
+	local success, message = Packets.PlaceRoofAreaRequest:Fire({
+		ItemId = itemId,
+		StartCellX = startX,
+		StartCellZ = startZ,
+		EndCellX = endX,
+		EndCellZ = endZ,
 	})
 
 	if not success then

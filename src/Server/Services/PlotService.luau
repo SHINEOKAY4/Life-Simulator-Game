@@ -169,18 +169,19 @@ function PlotService.Load(player: Player, plotModel: Model)
 	local userId = player.UserId
 	local plotIndex = plotModel:GetAttribute("IndexOrder") :: number
 	local grid = PlotGrids[plotIndex]
-	local data = PlayerSession.GetDataAwait(player, "PlotState") :: any
+	local plotStateData = PlayerSession.GetDataAwait(player, "PlotState") :: any
+	local currencyStateData = PlayerSession.GetDataAwait(player, "CurrencyState") :: any
 
-	data.UnlockedChunks = data.UnlockedChunks or {}
-	data.PlacedObjects = data.PlacedObjects or {}
+	plotStateData.UnlockedChunks = plotStateData.UnlockedChunks or {}
+	plotStateData.PlacedObjects = plotStateData.PlacedObjects or {}
 
 	-- If brand new: create default starter area once (persist + runtime)
-	if #data.UnlockedChunks == 0 then
-		data.UnlockedChunks[1] = { cx = 1, cz = 3 }
+	if #plotStateData.UnlockedChunks == 0 then
+		plotStateData.UnlockedChunks[1] = { cx = 1, cz = 3 }
 	end
 
 	local chunkSizeInCells = 5
-	local runtimeState = PlotState.new(grid, chunkSizeInCells, data)
+	local runtimeState = PlotState.new(grid, chunkSizeInCells, plotStateData)
 	runtimeState:HydrateFromSave()
 
 	PlayerRuntime[userId] = runtimeState
@@ -189,7 +190,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 
 	-- Station names are the object IDs of the stations and the key is the unique id for easier reference
 	local stationCache = PlayerStations[userId]
-	for uniqueKey, obj in pairs(data.PlacedObjects) do
+	for uniqueKey, obj in pairs(plotStateData.PlacedObjects) do
 		local facing = obj.facing or "North"
 		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing, {
 			metadata = obj.Metadata,
@@ -214,6 +215,9 @@ function PlotService.Load(player: Player, plotModel: Model)
 		end
 	end
 
+	for currencyName, amount in pairs(currencyStateData or {}) do
+		player:SetAttribute(currencyName, amount)
+	end
 	-- Possibly add a revision to discard stale client state in future (if problematic)
 
 	local chunkInfo = {
@@ -222,7 +226,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 		ChunkRows = runtimeState.ChunkRows,
 	}
 
-	local placedSnapshot = flattenPlacedObjects(data.PlacedObjects)
+	local placedSnapshot = flattenPlacedObjects(plotStateData.PlacedObjects)
 	Packets.PlotStateSync:FireClient(player, chunkInfo, runtimeState.ChunkUnlocked, placedSnapshot)
 end
 

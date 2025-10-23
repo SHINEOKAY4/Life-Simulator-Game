@@ -12,6 +12,7 @@ local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
+local MainHUD = PlayerGui:WaitForChild("MainHUD") :: ScreenGui
 local PlotSelectorGui = PlayerGui:WaitForChild("PlotSelectorGui")
 local MainFrame = PlotSelectorGui:WaitForChild("Main")
 local PlotSelectorContext = PlotSelectorGui:WaitForChild("PlotSelectorContext")
@@ -160,6 +161,7 @@ function PlotSelector.Select()
 	SetPlayerMovement(true)
 	--#TODO: Toast notification for success
 	--CameraModule.EnableTopDownCamera()
+	MainHUD.Enabled = true
 	print("Successfully claimed plot: " .. message)
 end
 
