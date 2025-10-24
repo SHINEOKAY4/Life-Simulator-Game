@@ -421,6 +421,7 @@ function JobSelectionUI.Init()
 	JobSelectionContext.Toggle.Pressed:Connect(function()
 		runDebounced("Toggle", function()
 			if JobSelectionGui.Enabled then
+				print("Hiding Job Selection UI")
 				JobSelectionUI.Hide()
 			else
 				JobSelectionUI.Show()

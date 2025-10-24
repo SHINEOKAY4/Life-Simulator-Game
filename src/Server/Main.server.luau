@@ -19,12 +19,14 @@ local CareerService = require(ServicesFolder.CareerService)
 local GigService = require(ServicesFolder.GigService)
 local JobListingService = require(ServicesFolder.JobListingService)
 local BillingService = require(ServicesFolder.BillingService)
+local PayrollService = require(ServicesFolder.PayrollService)
 
 local _ResidentActionHandlers = require(ModulesFolder.ResidentActionHandlers)
 
 ResidentService.Init()
 CareerService.Init()
 BillingService.Init()
+PayrollService.Init()
 GigService.Init()
 PlotService.Init()
 BuildService.Init()
@@ -56,6 +58,7 @@ local function OnPlayerRemoving(player: Player)
 	ResidentService.Unload(player) -- This should always be higher in the unload order
 	PlotService.Unclaim(player) -- This should always be lower in the unload order
 	BillingService.Remove(player)
+	PayrollService.Remove(player)
 end
 
 Players.PlayerAdded:Connect(OnPlayerAdded)

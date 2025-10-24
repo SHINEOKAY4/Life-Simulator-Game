@@ -1,13 +1,14 @@
 # 🌍 Game Overview
 
-A life-simulation game that blends **BitLife-style choices** with **The Sims-style building**.  
-The player does not directly control NPCs moment-to-moment. Instead, they **manage a plot of land** and place items (bed, stove, fridge, books, etc.).  
-These items shape how NPCs live, what jobs they can get, and ultimately their life outcomes.  
+A life-simulation game that blends **The Sims-style building** with **dual income streams**.  
+Players manage a plot of land and place furniture (beds, kitchens, tables, etc.) to support **Residents** (NPCs).  
+Residents autonomously satisfy their needs and work **Careers** (passive shift-based income).  
+Players can also run **Gigs** (active skill-check minigames) for burst income and momentum bonuses.
 
-The player’s core loop is:  
-**Place items → NPCs survive → NPC stats grow → NPCs get jobs → Earn coins → Upgrade house → Unlock more items → Repeat.**
+The player's core loop is:  
+**Place items → Residents survive autonomously → Residents work careers → Run player gigs → Earn coins → Expand plot → Unlock more items → Pay bills → Repeat.**
 
-Players can also **intervene directly** using the **Direct Action System** — selecting NPCs and telling them to *Eat*, *Sleep*, *Study*, etc. This adds a proactive layer to shaping each life.
+Players can also **intervene directly** using the **Direct Action System** — selecting Residents and telling them to *Eat*, *Sleep*, *Socialize*, etc. This adds a proactive layer to optimize resident well-being.
 
 ---
 
@@ -15,25 +16,43 @@ Players can also **intervene directly** using the **Direct Action System** — s
 
 ### Starting State
 
-- Empty plot with a small unlocked chunk
-- 1 NPC (“First Life”) with basic stats.  
-- Starter items: sleeping bag, cooler.  
-- ~0 coins.  
+- Claimable plot with one unlocked chunk (5x5 cells)  
+- Create up to 4 Residents with customizable names and genders  
+- Starter furniture: Wooden Chair ($50), Campfire ($150), Old Mattress ($200)  
+- Starting cash from initial gig runs or career earnings  
+- Billing system active: Plot tax, electricity usage, food consumption  
 
 ### Player Goals
 
-- Keep NPC alive (manage Hunger + Energy).  
-- Place first survival items (stove, fridge, bed).  
-- Learn the build/placement system.  
+- Keep Residents alive (manage 5 needs: Hunger, Energy, Hygiene, Social, Fun)  
+- Place essential furniture: beds (RestStation), cooking stations (CookStation), social tables  
+- Learn the grid-based build system:  
+  - Floors, walls, roofs with drag-to-place  
+  - Cell objects (furniture) with rotation and placement validation  
 - Learn the **Direct Action System**:  
-  - Manually tell NPCs to eat or sleep when motives get low.  
-  - Prevent early deaths through babysitting.  
+  - Click Residents to manually queue actions (Eat, Sleep, Socialize)  
+  - Override autonomy to prevent collapses or optimize behavior  
+- Assign Residents to **Careers** for passive income:  
+  - Cafe Crew: $18/min (Discipline ≥ 0)  
+  - Office Assistant: $24/min (Intelligence ≥ 2, Discipline ≥ 1)  
+  - Junior Programmer: $36/min (Intelligence ≥ 4, Discipline ≥ 2)  
+  - Fitness Trainer: $34/min (Fitness ≥ 4, Social ≥ 2)  
+- Run **Player Gigs** for active income:  
+  - Courier Sprint: $28±6 (8min cooldown)  
+  - Cafe Pop-Up: $24±4 (6min cooldown)  
+  - Debug Jam: $32±8 (10min cooldown)  
+  - 3 daily gig slots refresh each in-game day  
+  - Bronze/Silver/Gold performance tiers multiply payout  
+- Pay bills every 8 minutes (480 seconds):  
+  - Plot tax (increases with unlocked chunks)  
+  - Electricity (varies by powered stations)  
+  - Food usage (tracked per cook interaction)
 
 ### Player Feeling
 
-- Scarcity and survival pressure.  
-- “I’m poor and struggling, but I can scrape by if I manage carefully.”  
-- Hands-on micromanagement builds attachment to the first NPC.  
+- Resource management with multiple systems (needs, careers, gigs, bills)  
+- "I'm building a functioning household while juggling active and passive income"  
+- Strategic decisions: invest in furniture vs save for expansion vs unlock chunks
 
 ---
 
@@ -41,24 +60,30 @@ Players can also **intervene directly** using the **Direct Action System** — s
 
 ### Mid Game Progression
 
-- Unlock more buildable grid space.  
-- Add more NPCs (family, roommates, new lives).  
-- NPCs qualify for better jobs (clerk, tech, nurse).  
-- Stats begin diverging: some NPCs thrive, others fall behind.  
+- Unlock additional chunks (unlock cost increases per chunk)  
+- Support multiple Residents (max 4 per household)  
+- Residents qualify for higher-paying careers as stats grow:  
+  - Intelligence and Discipline unlock Office Assistant → Junior Programmer  
+  - Fitness and Social unlock Fitness Trainer  
+- Furniture diversity: Standard Bed ($500), Stove ($200), Refridgerator ($250), Big Wooden Table ($300), Lamp ($75)  
+- Billing costs increase with plot expansion and powered appliances  
 
 ### Gameplay Depth
 
-- Players juggle multiple NPCs and their needs.  
-- Placement strategy matters: shower to avoid hygiene penalties, desk for studying.  
+- Players balance multiple Residents' needs across stations  
+- Station efficiency matters: Refridgerator (16s cook) vs Campfire (60s cook)  
 - **Direct Action System** shifts role:  
-  - Less about babysitting, more about scheduling (“Study now” before school).  
-  - Strategic interventions accelerate stat growth.  
+  - Less emergency intervention, more strategic optimization  
+  - Queue actions to prevent need decay before it becomes critical  
+  - Coordinate multiple Residents using shared stations (max occupancy limits)  
+- Gig momentum system: successful gigs grant +10% career payout boost for 1 in-game hour  
+- Grace periods and overdue states add billing pressure  
 
 ### Mid Game Player Feeling
 
-- Growth and discovery.  
-- “I’m building a real home and shaping multiple lives.”  
-- Balance between letting NPCs act autonomously and stepping in at key moments.  
+- Mastery and optimization  
+- "I'm efficiently managing a household with coordinated routines"  
+- Balancing active gig income with passive career automation
 
 ---
 
@@ -66,35 +91,48 @@ Players can also **intervene directly** using the **Direct Action System** — s
 
 ### Late Game Progression
 
-- Upgrade → max grid space.  
-- Support 4–6 NPCs simultaneously.  
-- Unlock high-end items (gym, advanced computer, luxury kitchen).  
-- NPCs achieve top-tier jobs (doctor, engineer, musician).  
-- Coins flow steadily → player decorates and experiments.  
+- Maximize plot expansion (all chunks unlocked)  
+- Support full 4-Resident household with specialized roles  
+- Access to complete furniture catalog with varied station types  
+- Residents achieve rare/elite careers through stat investment  
+- Consistent billing management becomes routine income drain  
+- Gig mastery: consistently hit Gold tier for maximum payouts  
 
 ### Endgame Loop
 
-- Balancing multiple lives with diverging outcomes.  
-- Building the “ultimate household” with every motive covered.  
-- Optional prestige/rebirth system: retire NPCs, start new generations, inherit stats/wealth.  
+- Fine-tuning household efficiency for maximum income per cycle  
+- Strategic stat development to unlock best career paths  
+- Balancing active gig income with passive career reliability  
+- Dealing with billing pressure and grace/overdue states  
 - **Direct Action System** at this stage:  
-  - Used for fine-tuning outcomes (e.g., train one NPC into a superstar doctor).  
-  - Strategic choice of who to push and who to leave autonomous.  
+  - Precision timing for career prep (ensure Residents well-rested before shifts)  
+  - Strategic gig momentum transfers to boost career payouts  
+  - Multi-Resident coordination on shared high-capacity stations
 
 ### Late Game Player Feeling
 
-- Legacy, attachment, and pride.  
-- “I started with nothing and now have a thriving household.”  
-- Each NPC life tells a story shaped partly by the environment and partly by player intervention.  
+- Systematic mastery and optimization  
+- "I've built an efficient machine where every system feeds into the others"  
+- Pride in maximizing income while minimizing waste  
 
-### ⚰️ NPC Life Cycle
+---
 
-- NPCs age: Child → Teen → Adult → Elder → Death.  
-- Aging creates urgency and legacy.  
-- Children inherit traits and carry the story forward.  
-- Direct Action adds drama — the player may push a child to study harder or care for an elder more closely.  
-- Memorial system can log past NPCs to give a sense of history.  
+## 🚧 Future Systems (Not Yet Implemented)
 
-Game Systems Requirements:
+**Note:** The following features are described in design documents but are not currently in the game:
 
-["Systems"](GameSystems.md)
+- **Aging & Life Cycle:** Child → Teen → Adult → Elder → Death progression  
+- **Stat Progression:** Study desks, gyms, training equipment that boost Intelligence/Discipline/Fitness/Creativity stats  
+- **Hygiene Stations:** Showers, sinks, bathroom fixtures (Hygiene need exists but limited station support)  
+- **Family & Legacy:** Children inheriting traits, multi-generational households  
+- **Memorial System:** Tracking past Residents and their life achievements  
+- **Advanced Careers:** Doctor, Engineer, Musician roles requiring very high stat levels  
+- **Plot Tiering:** House tier/quality progression system with prestige rewards  
+- **Relationships:** Social connections and interactions between Residents  
+- **Rebirth System:** Retire Residents, start new generations with inherited bonuses  
+
+---
+
+## 📚 Game Systems
+
+For detailed technical documentation, see [GameSystems.md](GameSystems.md)

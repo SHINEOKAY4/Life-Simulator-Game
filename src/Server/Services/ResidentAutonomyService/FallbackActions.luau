@@ -16,6 +16,8 @@ local ActionQueue = require(script.Parent.ActionQueue)
 local RandomProvider = require(script.Parent.RandomProvider)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 
+local CareerService -- Lazy loaded to avoid circular dependency
+
 export type ResidentState = any
 type StationCache = { [string]: any }
 
@@ -34,14 +36,15 @@ local BEG_TICK_SECONDS = Constants.BEG_TICK_SECONDS
 local BEG_CHAT_INTERVAL_SECONDS = Constants.BEG_CHAT_INTERVAL_SECONDS
 local BEG_STATION_REFRESH_INTERVAL = Constants.BEG_STATION_REFRESH_INTERVAL
 local BEG_PAYOUT_CURRENCY = Constants.BEG_PAYOUT_CURRENCY
-local BEG_PAYOUT_PER_SECOND = Constants.BEG_PAYOUT_PER_SECOND
+local BEG_PAYOUT_CHANCE = math.clamp(Constants.BEG_PAYOUT_CHANCE or 0.15, 0, 1)
+local BEG_PAYOUT_MIN = math.max(Constants.BEG_PAYOUT_MIN or 1, 1)
+local BEG_PAYOUT_MAX = math.max(Constants.BEG_PAYOUT_MAX or 5, BEG_PAYOUT_MIN)
 local BEG_CHAT_LINES = Constants.BEG_CHAT_LINES
-local BEG_SPOT_FORWARD_OFFSET = math.max(Constants.BEG_SPOT_FORWARD_OFFSET or 0, 0)
-local BEG_SPOT_LATERAL_JITTER = math.max(Constants.BEG_SPOT_LATERAL_JITTER or 0, 0)
-local BEG_SPOT_HEIGHT_OFFSET = Constants.BEG_SPOT_HEIGHT_OFFSET or 0
-local BEG_SPOT_FORWARD_VARIANCE = math.max(Constants.BEG_SPOT_FORWARD_VARIANCE or 0, 0)
-local BEG_SPOT_MAX_ANGLE_RADIANS = math.rad(math.clamp(Constants.BEG_SPOT_MAX_ANGLE_DEGREES or 0, 0, 85))
+local BEG_ROAM_MIN_DISTANCE = math.max(Constants.BEG_ROAM_MIN_DISTANCE or 10, 5)
+local BEG_ROAM_MAX_DISTANCE = math.max(Constants.BEG_ROAM_MAX_DISTANCE or 25, BEG_ROAM_MIN_DISTANCE)
+local BEG_ROAM_HEIGHT_OFFSET = Constants.BEG_ROAM_HEIGHT_OFFSET or 0
 local BEG_MOVE_TIMEOUT_SECONDS = math.max(Constants.BEG_MOVE_TIMEOUT_SECONDS or 0, 1)
+local BEG_ROAM_INTERVAL_SECONDS = math.max(Constants.BEG_ROAM_INTERVAL_SECONDS or 8, 3)
 
 local function getResidentName(resident: ResidentState): string
 	local save = resident and resident.Save
@@ -49,61 +52,36 @@ local function getResidentName(resident: ResidentState): string
 	return name or "Resident"
 end
 
--- Picks a beg spot just outside the plot entrance so residents relocate before starting the action.
-local function computeBeggingDestination(player: Player): (Vector3?, Vector3?)
+-- Picks a random position within the plot at a specified distance range from spawn
+local function computeBeggingDestination(player: Player): Vector3?
 	local plotIndex = player:GetAttribute("OwnedPlotIndex")
 	if typeof(plotIndex) ~= "number" then
-		return nil, nil
+		return nil
 	end
 	local plotModel = PlotFinder.FindPlot(plotIndex)
 	if not plotModel then
-		return nil, nil
+		return nil
 	end
 	local spawnPart = plotModel:FindFirstChild("Spawn")
 	if not spawnPart or not spawnPart:IsA("BasePart") then
-		return nil, nil
+		return nil
 	end
-	local spawnCFrame = spawnPart.CFrame
-	local outward = -spawnCFrame.LookVector
-	if outward.Magnitude <= 0.001 then
-		outward = spawnCFrame.LookVector
-	end
-	if outward.Magnitude <= 0.001 then
-		return nil, nil
-	end
-	outward = outward.Unit
-	if BEG_SPOT_MAX_ANGLE_RADIANS > 0 then
-		local yaw = begRandom:NextNumber(-BEG_SPOT_MAX_ANGLE_RADIANS, BEG_SPOT_MAX_ANGLE_RADIANS)
-		if yaw ~= 0 then
-			local rotation = CFrame.fromAxisAngle(Vector3.new(0, 1, 0), yaw)
-			local rotated = rotation:VectorToWorldSpace(outward)
-			if rotated.Magnitude > 0.001 then
-				outward = rotated.Unit
-			end
-		end
-	end
-	local lateral = spawnCFrame.RightVector
-	if lateral.Magnitude <= 0.001 then
-		lateral = Vector3.new(1, 0, 0)
-	else
-		lateral = lateral.Unit
-	end
-	local forwardOffset = math.max(BEG_SPOT_FORWARD_OFFSET, 4)
-	if BEG_SPOT_FORWARD_VARIANCE > 0 then
-		forwardOffset += begRandom:NextNumber(-BEG_SPOT_FORWARD_VARIANCE, BEG_SPOT_FORWARD_VARIANCE)
-		if forwardOffset < 4 then
-			forwardOffset = 4
-		end
-	end
-	local lateralOffset = if BEG_SPOT_LATERAL_JITTER > 0
-		then begRandom:NextNumber(-BEG_SPOT_LATERAL_JITTER, BEG_SPOT_LATERAL_JITTER)
-		else 0
-	local targetPosition = spawnCFrame.Position + outward * forwardOffset + lateral * lateralOffset
-	targetPosition += Vector3.new(0, BEG_SPOT_HEIGHT_OFFSET, 0)
-	if BEG_SPOT_HEIGHT_OFFSET == 0 then
-		targetPosition = Vector3.new(targetPosition.X, spawnCFrame.Position.Y, targetPosition.Z)
-	end
-	return targetPosition, spawnCFrame.Position
+	local spawnPosition = spawnPart.Position
+
+	-- Generate random angle (0 to 2π)
+	local angle = begRandom:NextNumber(0, math.pi * 2)
+
+	-- Generate random distance within the configured range
+	local distance = begRandom:NextNumber(BEG_ROAM_MIN_DISTANCE, BEG_ROAM_MAX_DISTANCE)
+
+	-- Calculate position using polar coordinates
+	local offsetX = math.cos(angle) * distance
+	local offsetZ = math.sin(angle) * distance
+
+	local targetPosition =
+		Vector3.new(spawnPosition.X + offsetX, spawnPosition.Y + BEG_ROAM_HEIGHT_OFFSET, spawnPosition.Z + offsetZ)
+
+	return targetPosition
 end
 
 local function getUnlockedChunkIndices(runtimeState: any): { number }
@@ -275,33 +253,23 @@ local function enqueueBegAction(player: Player, resident: ResidentState, station
 			return
 		end
 
-		local destinationPosition, lookTarget = computeBeggingDestination(player)
-		if not destinationPosition then
-			clearPending()
-			return
-		end
+		local residentDisplayName = getResidentName(resident)
+		local chatInterval = if BEG_CHAT_INTERVAL_SECONDS > 0 then BEG_CHAT_INTERVAL_SECONDS else 0
+		local chatElapsed = 0
+		local stationElapsed = 0
+		local roamElapsed = 0
+		local lastUpdate = os.clock()
+		local cachedStations = stationCache or PlotService.GetStationsForPlayer(player)
 
-		local debugLabel = string.format("BegSpot:%s", getResidentName(resident))
-		local arrived = ResidentMovement.GoToWorldPosition(resident, destinationPosition, {
-			CancelToken = cancelToken,
-			TimeoutSeconds = BEG_MOVE_TIMEOUT_SECONDS,
-			DebugName = debugLabel,
-		})
-		if cancelToken and cancelToken.Cancelled then
-			clearPending()
-			return
-		end
-		if not arrived then
-			clearPending()
-			return
-		end
-
-		if lookTarget then
-			local lookPosition = lookTarget
-			if (lookPosition - destinationPosition).Magnitude < 1 then
-				lookPosition = destinationPosition + Vector3.new(0, 0, -1)
-			end
-			ResidentMovement.FaceStation(resident, CFrame.new(destinationPosition, lookPosition))
+		-- Initial roam
+		local destinationPosition = computeBeggingDestination(player)
+		if destinationPosition then
+			local debugLabel = string.format("BegRoam:%s", residentDisplayName)
+			ResidentMovement.GoToWorldPosition(resident, destinationPosition, {
+				CancelToken = cancelToken,
+				TimeoutSeconds = BEG_MOVE_TIMEOUT_SECONDS,
+				DebugName = debugLabel,
+			})
 		end
 
 		if cancelToken and cancelToken.Cancelled then
@@ -311,14 +279,6 @@ local function enqueueBegAction(player: Player, resident: ResidentState, station
 
 		ResidentChat.ShowAction(resident, BEG_CHAT_LINES)
 
-		local residentDisplayName = getResidentName(resident)
-		local chatInterval = if BEG_CHAT_INTERVAL_SECONDS > 0 then BEG_CHAT_INTERVAL_SECONDS else 0
-		local chatElapsed = 0
-		local stationElapsed = 0
-		local payoutAccumulator = 0
-		local lastUpdate = os.clock()
-		local cachedStations = stationCache or PlotService.GetStationsForPlayer(player)
-
 		while true do
 			if cancelToken and cancelToken.Cancelled then
 				break
@@ -327,18 +287,21 @@ local function enqueueBegAction(player: Player, resident: ResidentState, station
 			local now = os.clock()
 			local delta = now - lastUpdate
 			lastUpdate = now
+
 			if delta > 0 then
-				payoutAccumulator += delta * BEG_PAYOUT_PER_SECOND
-				if payoutAccumulator >= 1 then
-					local payout = math.floor(payoutAccumulator)
+				-- Chance-based payout system
+				local roll = begRandom:NextNumber(0, 1)
+				if roll < BEG_PAYOUT_CHANCE then
+					local payout = begRandom:NextInteger(BEG_PAYOUT_MIN, BEG_PAYOUT_MAX)
+					-- Only add currency if payout is greater than 0
 					if payout > 0 then
 						CurrencyService.Add(player, BEG_PAYOUT_CURRENCY, payout, currencyState, {
 							Source = "Begging",
 							ResidentName = residentDisplayName,
 						})
-						payoutAccumulator -= payout
 					end
 				end
+
 				if chatInterval > 0 then
 					chatElapsed += delta
 					if chatElapsed >= chatInterval then
@@ -346,10 +309,26 @@ local function enqueueBegAction(player: Player, resident: ResidentState, station
 						ResidentChat.ShowAction(resident, BEG_CHAT_LINES)
 					end
 				end
+
 				stationElapsed += delta
 				if stationElapsed >= BEG_STATION_REFRESH_INTERVAL then
 					cachedStations = PlotService.GetStationsForPlayer(player)
 					stationElapsed = 0
+				end
+
+				-- Roam to new location periodically
+				roamElapsed += delta
+				if roamElapsed >= BEG_ROAM_INTERVAL_SECONDS then
+					roamElapsed = 0
+					local newDestination = computeBeggingDestination(player)
+					if newDestination and cancelToken and not cancelToken.Cancelled then
+						local debugLabel = string.format("BegRoam:%s", residentDisplayName)
+						ResidentMovement.GoToWorldPosition(resident, newDestination, {
+							CancelToken = cancelToken,
+							TimeoutSeconds = BEG_MOVE_TIMEOUT_SECONDS,
+							DebugName = debugLabel,
+						})
+					end
 				end
 			end
 
@@ -380,6 +359,7 @@ function FallbackActions.evaluateResidentJob(
 	if not resident.AutoJobEnabled then
 		return FallbackActions.enqueueRoamAction(player, residentName, resident)
 	end
+
 	local save = resident.Save
 	local currentCareerId = if save then save.CurrentCareerId else nil
 	if typeof(currentCareerId) ~= "string" or currentCareerId == "" then
@@ -388,13 +368,40 @@ function FallbackActions.evaluateResidentJob(
 			currentCareerId = fallbackOccupation
 		end
 	end
+
 	local hasJob = typeof(currentCareerId) == "string" and currentCareerId ~= ""
+
+	-- If resident has a career and auto-job is enabled, send them to work
 	if hasJob then
-		return false
+		-- Lazy load CareerService to avoid circular dependency
+		if not CareerService then
+			CareerService = require(ServerScriptService.Server.Services.CareerService)
+		end
+
+		-- Only start shift if not already working
+		if not resident.IsOnShift then
+			local success, message = CareerService.StartResidentShift(player, residentName)
+			if success then
+				return true
+			else
+				-- If unable to start shift (e.g., low energy), fall through to begging/roaming
+				if message and message:find("exhausted") then
+					-- Let them rest instead of begging when exhausted
+					return FallbackActions.enqueueRoamAction(player, residentName, resident)
+				end
+			end
+		else
+			-- Already at work, don't queue other actions
+			return false
+		end
 	end
+
+	-- No career or unable to work, fall back to begging
 	if enqueueBegAction(player, resident, stationCache) then
 		return true
 	end
+
+	-- Try fun station as last resort
 	local uniqueId, stationRecord, itemSpec, stationModel =
 		StationManager.findAvailableStation(player, "FunStation", residentName, stationCache)
 	if uniqueId and stationRecord and itemSpec and stationModel then
@@ -410,6 +417,7 @@ function FallbackActions.evaluateResidentJob(
 			return true
 		end
 	end
+
 	return FallbackActions.enqueueRoamAction(player, residentName, resident)
 end
 

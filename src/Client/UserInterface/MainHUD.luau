@@ -335,22 +335,6 @@ local function formatClockLabel(clockTime: number): string
 	return string.format("%d:%02d %s", displayHour, minuteComponent, suffix)
 end
 
-local function resolveNextBillingLabel(timeRemainingSeconds: number?, outstandingTotal: number?): string
-	local resolvedOutstanding = if typeof(outstandingTotal) == "number" then outstandingTotal else 0
-
-	if typeof(timeRemainingSeconds) == "number" and timeRemainingSeconds <= 0 and resolvedOutstanding > 0 then
-		return "due"
-	end
-
-	if typeof(timeRemainingSeconds) == "number" and timeRemainingSeconds > 0 then
-		local currentClock = TimeScale.GetClockTime()
-		local additionalHours = TimeScale.GameHoursFromRealDelta(timeRemainingSeconds)
-		return formatClockLabel(currentClock + additionalHours)
-	end
-
-	return "-"
-end
-
 local function configureButtonVisuals(button: TextButton)
 	local imageFrame = button:FindFirstChild("Image")
 	if not imageFrame or not imageFrame:IsA("Frame") then
@@ -445,6 +429,35 @@ function MainHUD.Init()
 		showCashPop(amount, resolvedResidentName)
 	end)
 
+	local BILLING_TOGGLE_DEBOUNCE = 0.3
+	local BILLING_PAY_DEBOUNCE = 0.5
+	local lastFormattedClockTime: string? = nil
+	local needsClockUpdate = false
+
+	local function resolveNextBillingLabel(timeRemainingSeconds: number?, outstandingTotal: number?): string
+		local resolvedOutstanding = if typeof(outstandingTotal) == "number" then outstandingTotal else 0
+
+		if typeof(timeRemainingSeconds) == "number" and timeRemainingSeconds <= 0 and resolvedOutstanding > 0 then
+			return "due"
+		end
+
+		if typeof(timeRemainingSeconds) == "number" and timeRemainingSeconds > 0 then
+			local currentClock = TimeScale.GetClockTime()
+			local additionalHours = TimeScale.GameHoursFromRealDelta(timeRemainingSeconds)
+			local formattedTime = formatClockLabel(currentClock + additionalHours)
+
+			if not lastFormattedClockTime then
+				lastFormattedClockTime = formattedTime
+			end
+			if needsClockUpdate then
+				lastFormattedClockTime = formattedTime
+			end
+			return lastFormattedClockTime or formattedTime
+		end
+
+		return "-"
+	end
+
 	local function updateBillDisplay(plotTax: number, electricityCost: number, foodCost: number, totalCost: number)
 		PlotTaxLabel.Text = Formatter.formatCurrency(plotTax, CASH_FORMAT_OPTIONS)
 		ElectricLabel.Text = Formatter.formatCurrency(electricityCost, CASH_FORMAT_OPTIONS)
@@ -453,8 +466,13 @@ function MainHUD.Init()
 		TotalLabel.Text = totalText
 	end
 
-	local function updateDueLabel(_dueClockTime: number?, timeRemaining: number?, outstandingTotal: number?)
-		-- Always use timeRemaining for consistency (ignore dueClockTime to avoid calculation drift)
+	local function updateDueLabel(
+		_dueClockTime: number?,
+		timeRemaining: number?,
+		outstandingTotal: number?,
+		isNeedClockUpdate: boolean
+	)
+		needsClockUpdate = isNeedClockUpdate
 		TimeTextLabel.Text = resolveNextBillingLabel(timeRemaining, outstandingTotal)
 	end
 
@@ -472,7 +490,7 @@ function MainHUD.Init()
 		local dueClockTime = payload.DueClockTime
 		local timeRemaining = payload.TimeRemaining
 
-		updateDueLabel(dueClockTime, timeRemaining, outstandingTotal)
+		updateDueLabel(dueClockTime, timeRemaining, outstandingTotal, true)
 
 		-- Only update bill breakdown if the bill frame is currently visible
 		if BillFrame.Visible then
@@ -480,12 +498,7 @@ function MainHUD.Init()
 		end
 	end)
 
-	BillContext.Toggle.Pressed:Connect(function()
-		BillFrame.Visible = not BillFrame.Visible
-		if not BillFrame.Visible then
-			return
-		end
-
+	local function requestAndUpdateBillingInfo()
 		local payload = BillingPackets.RequestBillingInfo:Fire()
 		if typeof(payload) ~= "table" then
 			return
@@ -499,32 +512,32 @@ function MainHUD.Init()
 		local dueClockTime = payload.DueClockTime
 		local timeRemaining = payload.TimeRemaining
 
-		updateDueLabel(dueClockTime, timeRemaining, outstandingTotal)
+		updateDueLabel(dueClockTime, timeRemaining, outstandingTotal, false)
 
-		updateBillDisplay(plotTax, electricityCost, foodCost, totalCost)
+		if BillFrame.Visible then
+			updateBillDisplay(plotTax, electricityCost, foodCost, totalCost)
+		end
+	end
+
+	BillContext.Toggle.Pressed:Connect(function()
+		Debounce.RunIfAvailable("BillTogglePress", BILLING_TOGGLE_DEBOUNCE, function()
+			BillFrame.Visible = not BillFrame.Visible
+			if BillFrame.Visible then
+				requestAndUpdateBillingInfo()
+			end
+		end, Player.UserId)
 	end)
 
 	BillContext.PayAction.Pressed:Connect(function()
-		local success, message = BillingPackets.PayBillRequest:Fire()
-		if success then
-			print(message or "Bill paid successfully")
-		else
-			warn(message or "Unable to process bill payment")
-		end
-	end)
-
-	-- Debounce settings for billing info requests
-	local BILLING_REQUEST_DEBOUNCE = 0.5 -- Prevent requests more often than twice per second
-
-	-- Function to request and update billing info with debouncing
-	local function requestAndUpdateBillingInfo()
-		Debounce.RunIfAvailable("BillingInfoRequest", BILLING_REQUEST_DEBOUNCE, function()
-			local payload = BillingPackets.RequestBillingInfo:Fire()
-			if typeof(payload) == "table" then
-				updateDueLabel(payload.DueClockTime, payload.TimeRemaining, payload.OutstandingTotal)
+		Debounce.RunIfAvailable("BillPayPress", BILLING_PAY_DEBOUNCE, function()
+			local success, message = BillingPackets.PayBillRequest:Fire()
+			if success then
+				print(message or "Bill paid successfully")
+			else
+				warn(message or "Unable to process bill payment")
 			end
 		end, Player.UserId)
-	end
+	end)
 
 	-- Initial request on script load
 	task.defer(requestAndUpdateBillingInfo)
@@ -533,7 +546,7 @@ function MainHUD.Init()
 	Player:GetAttributeChangedSignal("OwnedPlotIndex"):Connect(function()
 		local plotIndex = Player:GetAttribute("OwnedPlotIndex")
 		if plotIndex ~= nil then
-			-- Player claimed a plot, request billing info (debounced)
+			-- Player claimed a plot, request billing info
 			requestAndUpdateBillingInfo()
 		else
 			-- Player lost their plot, reset to default

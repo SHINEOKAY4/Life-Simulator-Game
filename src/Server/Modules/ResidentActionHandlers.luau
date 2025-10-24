@@ -86,23 +86,6 @@ local StationKindLabels: { [string]: string } = {
 	FunStation = "fun spot",
 }
 
-local function resolveMealUsageWeight(behavior: Behavior): number
-	local effects = behavior.Effects
-	if not effects then
-		return 0
-	end
-	for _, effect in ipairs(effects) do
-		if effect.Need == "Hunger" then
-			local instant = effect.InstantAmount
-			local rate = effect.RatePerHour
-			if (typeof(instant) == "number" and instant > 0) or (typeof(rate) == "number" and rate > 0) then
-				return 1
-			end
-		end
-	end
-	return 0
-end
-
 type RawEffect = { [string]: any }
 type Effect = { Need: string, InstantAmount: number?, RatePerHour: number? }
 type RawMoodlet = { [string]: any }
@@ -808,6 +791,13 @@ local function executeStationAction(stationType: string, context: HandlerContext
 		StationType = stationType,
 		Behavior = behavior,
 	})
+
+	-- Track time spent cooking for billing
+	local cookingStartTime: number? = nil
+	if stationType == "CookStation" and assignment.Player then
+		cookingStartTime = os.clock()
+	end
+
 	local runOk, runResult = pcall(function()
 		return NeedEffects.Run(assignment.ResidentState, context.CancelToken, behavior, {
 			StationType = stationType,
@@ -827,10 +817,18 @@ local function executeStationAction(stationType: string, context: HandlerContext
 	if arrival and behavior.UseSeat then
 		ResidentMovement.LeaveSeat(assignment.ResidentState, arrival.Seat)
 	end
-	if stationType == "CookStation" and runResult == true and assignment.Player then
-		local usageWeight = resolveMealUsageWeight(behavior)
-		if usageWeight > 0 then
-			BillingService.RecordMealUsage(assignment.Player, usageWeight)
+
+	-- Bill based on actual time spent cooking (rewards efficient stations)
+	if stationType == "CookStation" and assignment.Player and cookingStartTime ~= nil then
+		local cookingEndTime = os.clock()
+		local timeSpentCooking = cookingEndTime - cookingStartTime
+		local maxDuration = behavior.DurationSeconds or 30
+
+		if timeSpentCooking > 0 and maxDuration > 0 then
+			-- Calculate proportional weight based on time consumed
+			-- Less time = less billing (rewards better stations)
+			local timeWeight = math.clamp(timeSpentCooking / maxDuration, 0, 1)
+			BillingService.RecordMealUsage(assignment.Player, timeWeight)
 		end
 	end
 	ResidentDebug.Trace(

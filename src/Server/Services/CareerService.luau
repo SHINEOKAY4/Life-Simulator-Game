@@ -14,6 +14,8 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ResidentPlacer = require(ServerScriptService.Server.Utilities.ResidentPlacer)
 local ResidentMovement = require(ServerScriptService.Server.Utilities.ResidentMovement)
 
+local PayrollService -- Lazy loaded to avoid circular dependency
+
 export type CareerResult = {
 	Success: boolean,
 	Message: string?,
@@ -222,20 +224,6 @@ end
 
 local function getGigState(player: Player)
 	return PlayerSession.TryGetData(player, "GigState")
-end
-
-local function getPayrollState(player: Player)
-	local state = PlayerSession.TryGetData(player, "PayrollState")
-	if typeof(state) ~= "table" then
-		return nil
-	end
-	if typeof(state.PendingAmount) ~= "number" then
-		state.PendingAmount = 0
-	end
-	if typeof(state.LastPayoutDay) ~= "number" then
-		state.LastPayoutDay = -1
-	end
-	return state
 end
 
 local function pullMomentumMultiplier(gigState: any?): (number, boolean)
@@ -520,6 +508,11 @@ function CareerService.StartResidentShift(player: Player, residentName: string):
 end
 
 function CareerService.StopResidentShift(player: Player, residentName: string): (boolean, string, number?)
+	-- Lazy load PayrollService to avoid circular dependency
+	if not PayrollService then
+		PayrollService = require(ServerScriptService.Server.Services.PayrollService)
+	end
+
 	local shiftMap = activeShiftsByUser[player.UserId]
 	if not shiftMap then
 		return false, string.format("%s is not clocked in.", residentName)
@@ -547,25 +540,29 @@ function CareerService.StopResidentShift(player: Player, residentName: string): 
 	local minutesWorked = elapsedSeconds / secondsPerMinute
 	local gigState = getGigState(player)
 	local momentumMultiplier, _ = pullMomentumMultiplier(gigState)
-	local payout = computePayoutForResident(job, residentState.Save, minutesWorked, momentumMultiplier)
-	if payout > 0 then
-		local payrollState = getPayrollState(player)
-		if payrollState then
-			local pending = tonumber(payrollState.PendingAmount) or 0
-			payrollState.PendingAmount = math.max(0, pending + payout)
-		else
-			warn(string.format("[CareerService] Missing PayrollState for %s", player.Name))
-		end
+
+	-- Calculate payout for display purposes
+	local estimatedPayout = computePayoutForResident(job, residentState.Save, minutesWorked, momentumMultiplier)
+	local shortShift = minutesWorked < MIN_SHIFT_MINUTES_FOR_PAYOUT
+
+	if estimatedPayout > 0 and not shortShift then
+		-- Record work time in PayrollService instead of instant payout
+		local adjustedBasePay = job.BasePay * momentumMultiplier
+		local streakMultiplier = 1
+			+ math.min((residentState.Save.CareerStreak :: any or 0) * STREAK_STEP, MAX_STREAK_BONUS)
+		adjustedBasePay = adjustedBasePay * streakMultiplier
+
+		PayrollService.RecordWorkTime(player, residentName, elapsedSeconds, job.Id, adjustedBasePay / 60)
 		residentState.Save.CareerStreak = math.max(0, (residentState.Save.CareerStreak :: any) or 0) + 1
 	end
-	local shortShift = minutesWorked < MIN_SHIFT_MINUTES_FOR_PAYOUT
+
 	local message
-	if payout > 0 then
-		local suffix = " Earnings will be paid at 8 PM."
+	if estimatedPayout > 0 and not shortShift then
+		local suffix = " Earnings will be paid during the next payroll cycle."
 		if activeShift.ForcedReason == "EnergyDepleted" then
-			message = string.format("%s left work exhausted and banked $%d.%s", residentName, payout, suffix)
+			message = string.format("%s left work exhausted and earned ~$%d.%s", residentName, estimatedPayout, suffix)
 		else
-			message = string.format("%s banked $%d for tonight.%s", residentName, payout, suffix)
+			message = string.format("%s earned ~$%d this shift.%s", residentName, estimatedPayout, suffix)
 		end
 	else
 		if activeShift.ForcedReason == "EnergyDepleted" then
@@ -576,20 +573,18 @@ function CareerService.StopResidentShift(player: Player, residentName: string): 
 			message = string.format("%s ended the shift with no payout.", residentName)
 		end
 	end
-	local payrollState = getPayrollState(player)
-	local pending = payrollState and payrollState.PendingAmount or 0
+
 	print(
 		string.format(
-			"[CareerService] Shift complete for %s (%s): minutes=%.2f payout=$%d reason=%s pending=$%s",
+			"[CareerService] Shift complete for %s (%s): minutes=%.2f estimated=$%d reason=%s",
 			residentName,
 			player.Name,
 			minutesWorked,
-			payout,
-			activeShift.ForcedReason or "Manual",
-			tostring(pending)
+			estimatedPayout,
+			activeShift.ForcedReason or "Manual"
 		)
 	)
-	return true, message, payout
+	return true, message, estimatedPayout
 end
 
 return CareerService

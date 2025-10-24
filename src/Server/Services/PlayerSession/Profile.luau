@@ -36,6 +36,10 @@ local Profile = {
 			Food = 0,
 		},
 	},
+	PayrollState = {
+		LastPayoutTime = 0,
+		ResidentEarnings = {},
+	},
 
 	InventoryState = {},
 }
