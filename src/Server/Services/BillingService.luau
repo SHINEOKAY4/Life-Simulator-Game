@@ -11,15 +11,21 @@ local BillingPackets = require(ReplicatedStorage.Network.BillingPackets)
 local PlayerSession = require(script.Parent.PlayerSession)
 local PlotService = require(script.Parent.PlotService)
 local CurrencyService = require(script.Parent.CurrencyService)
+local ResidentService = require(script.Parent.ResidentService)
 local BillingState = require(ServerScriptService.Server.Classes.BillingState)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 local BillingCalculator = require(ServerScriptService.Server.Utilities.BillingCalculator)
+local EnergyUsageTracker = require(ServerScriptService.Server.Utilities.EnergyUsageTracker)
+local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
+local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
+local StationManager = require(ServerScriptService.Server.Services.ResidentAutonomyService.StationManager)
 
 type OutstandingBreakdown = {
 	PlotTax: number,
 	Electric: number,
 	Food: number,
+	Interest: number,
 }
 
 type CurrencyStateData = {
@@ -28,12 +34,26 @@ type CurrencyStateData = {
 	[string]: number,
 }
 
-local BILLING_DURATION_SECONDS = 480
+local BILLING_DURATION_SECONDS = math.max(1, BillingConstants.BillingCycleDurationSeconds or 1440)
 local BILLING_GRACE_PERIOD_SECONDS = 10
+local EARLY_PAYMENT_WINDOW_SECONDS =
+	math.clamp(BillingConstants.EarlyPaymentWindowSeconds or 480, 0, BILLING_DURATION_SECONDS)
 local CHECK_INTERVAL_SECONDS = 2
 local BASE_CYCLE_CHARGE = 100
+local POWER_OUTAGE_OVERRIDE = BillingConstants.PowerOutageOverrideKey or "BillingPowerOutage"
+local EARLY_PAYMENT_WINDOW_HOURS =
+	math.max(1, math.floor(TimeScale.GameHoursFromRealDelta(EARLY_PAYMENT_WINDOW_SECONDS) + 0.5))
 
 local CATEGORY_KEYS = { "PlotTax", "Electric", "Food" }
+local OUTSTANDING_KEYS = { "PlotTax", "Electric", "Food", "Interest" }
+
+local rawInterestRate = BillingConstants.OverdueInterestRate
+local OVERDUE_INTEREST_RATE = if typeof(rawInterestRate) == "number" then math.max(0, rawInterestRate) else 0.1
+
+local rawMinimumInterest = BillingConstants.MinimumOverdueInterest
+local MINIMUM_OVERDUE_INTEREST = if typeof(rawMinimumInterest) == "number"
+	then math.max(0, math.round(rawMinimumInterest))
+	else 25
 
 local BillingService = {}
 local PlayerBillingStates: { [number]: BillingState.BillingState } = {}
@@ -67,6 +87,80 @@ type FoodUsageBucket = {
 }
 
 local PlayerFoodUsage: { [number]: FoodUsageBucket } = {}
+local energyStationCache: { [string]: boolean } = {}
+
+local function isEnergyConsumingStationId(itemId: string?): boolean
+	if typeof(itemId) ~= "string" or itemId == "" then
+		return false
+	end
+
+	local cached = energyStationCache[itemId]
+	if cached ~= nil then
+		return cached
+	end
+
+	local itemSpec = ItemFinder.FindItemById(itemId)
+	local result = false
+	if itemSpec then
+		local energyPerHour = itemSpec.EnergyConsumptionPerHour
+		if typeof(energyPerHour) == "number" and energyPerHour > 0 then
+			result = true
+		end
+	end
+
+	energyStationCache[itemId] = result
+	return result
+end
+
+local function enforcePowerOutage(player: Player)
+	local stationCache = PlotService.GetStationsForPlayer(player)
+	for _, stationScope in pairs(stationCache) do
+		for _, station in pairs(stationScope) do
+			if isEnergyConsumingStationId(station.Id) then
+				local occupants: { string } = {}
+				if typeof(station.Residents) == "table" then
+					for _, residentName in ipairs(station.Residents) do
+						if typeof(residentName) == "string" and residentName ~= "" then
+							occupants[#occupants + 1] = residentName
+						end
+					end
+				end
+
+				for _, residentName in ipairs(occupants) do
+					StationManager.releaseStationOccupancy(station, residentName)
+					local residentState = ResidentService.GetResident(player, residentName)
+					if residentState then
+						local cancelAction = residentState.CancelCurrentAction
+						if typeof(cancelAction) == "function" then
+							cancelAction(residentState, "PowerOutage")
+						end
+						local clearOverride = residentState.ClearManualOverrideState
+						if typeof(clearOverride) == "function" then
+							clearOverride(residentState)
+						end
+						local enableAutomation = residentState.EnableAutomation
+						if typeof(enableAutomation) == "function" then
+							enableAutomation(residentState)
+						end
+					end
+				end
+
+				station.ActiveOverride = POWER_OUTAGE_OVERRIDE
+			end
+		end
+	end
+end
+
+local function clearPowerOutage(player: Player)
+	local stationCache = PlotService.GetStationsForPlayer(player)
+	for _, stationScope in pairs(stationCache) do
+		for _, station in pairs(stationScope) do
+			if station.ActiveOverride == POWER_OUTAGE_OVERRIDE then
+				station.ActiveOverride = nil
+			end
+		end
+	end
+end
 
 -- Forward declaration for use in RecordMealUsage
 local broadcastBillingUpdate: (player: Player, billingState: BillingState.BillingState) -> ()
@@ -76,15 +170,16 @@ local function createEmptyBreakdown(): OutstandingBreakdown
 		PlotTax = 0,
 		Electric = 0,
 		Food = 0,
+		Interest = 0,
 	}
 end
 
 local function sumBreakdownAmounts(breakdown: OutstandingBreakdown): number
-	return breakdown.PlotTax + breakdown.Electric + breakdown.Food
+	return breakdown.PlotTax + breakdown.Electric + breakdown.Food + breakdown.Interest
 end
 
 local function sanitizeBreakdown(breakdown: OutstandingBreakdown)
-	for _, key in CATEGORY_KEYS do
+	for _, key in OUTSTANDING_KEYS do
 		local value = breakdown[key]
 		if typeof(value) ~= "number" or value ~= value or value < 0 then
 			breakdown[key] = 0
@@ -110,7 +205,7 @@ local function getOutstandingBreakdown(billingState: BillingState.BillingState):
 end
 
 local function clearOutstandingBreakdown(breakdown: OutstandingBreakdown)
-	for _, key in CATEGORY_KEYS do
+	for _, key in OUTSTANDING_KEYS do
 		breakdown[key] = 0
 	end
 end
@@ -129,7 +224,7 @@ local function applyOutstandingDeduction(breakdown: OutstandingBreakdown, amount
 	if remaining <= 0 then
 		return
 	end
-	for _, key in CATEGORY_KEYS do
+	for _, key in OUTSTANDING_KEYS do
 		if remaining <= 0 then
 			break
 		end
@@ -140,6 +235,39 @@ local function applyOutstandingDeduction(breakdown: OutstandingBreakdown, amount
 			remaining -= reduction
 		end
 	end
+end
+
+local function computeOverdueInterestAmount(outstandingDue: number): number
+	local sanitizedOutstanding = sanitizeChargeAmount(outstandingDue)
+	if sanitizedOutstanding <= 0 then
+		return 0
+	end
+
+	local interestFromRate = math.round(sanitizedOutstanding * OVERDUE_INTEREST_RATE)
+	local resolvedMinimum = MINIMUM_OVERDUE_INTEREST
+	local interest = interestFromRate
+	if interest < resolvedMinimum then
+		interest = resolvedMinimum
+	end
+	return sanitizeChargeAmount(interest)
+end
+
+local function applyOverdueInterestCharge(
+	player: Player,
+	billingState: BillingState.BillingState,
+	currencyStateData: CurrencyStateData
+): number
+	local breakdown = getOutstandingBreakdown(billingState)
+	local outstandingBefore = sumBreakdownAmounts(breakdown)
+	local interest = computeOverdueInterestAmount(outstandingBefore)
+	if interest <= 0 then
+		return 0
+	end
+
+	breakdown.Interest += interest
+	local updatedOutstanding = sumBreakdownAmounts(breakdown)
+	BillingService.UpdateOutstandingBalance(player, currencyStateData, updatedOutstanding, billingState)
+	return interest
 end
 
 local function getFoodUsageBucket(player: Player): FoodUsageBucket
@@ -189,7 +317,6 @@ local function computeCurrentCycleCharges(
 	end
 
 	charges.PlotTax = sanitizeChargeAmount(BillingCalculator.CalculatePlotTax(resolvedPlotState))
-	charges.Electric = sanitizeChargeAmount(BillingCalculator.CalculateElectricityCost(resolvedPlotState))
 	charges.Food = sanitizeChargeAmount(getCurrentFoodCost(player, includePending))
 	return charges
 end
@@ -336,7 +463,11 @@ function BillingService.GetBaseCharge(player: Player): number
 end
 
 function BillingService.CalculateCycleCharge(player: Player, _currencyStateData: CurrencyStateData): number
-	local charges = computeCurrentCycleCharges(player, nil)
+	local plotStateData = PlayerSession.GetData(player, "PlotState")
+	local charges = computeCurrentCycleCharges(player, plotStateData)
+	if typeof(plotStateData) == "table" then
+		charges.Electric = sanitizeChargeAmount(BillingCalculator.EstimateCycleElectricCost(plotStateData))
+	end
 	local baseCharge = sanitizeChargeAmount(charges.PlotTax + charges.Electric + charges.Food)
 	local billingState = BillingService.GetBillingState(player)
 	local outstandingTotal = 0
@@ -363,6 +494,7 @@ broadcastBillingUpdate = function(player: Player, billingState: BillingState.Bil
 		PlotTax = breakdown.PlotTax,
 		Electric = breakdown.Electric,
 		Food = breakdown.Food,
+		Overdue = breakdown.Overdue,
 		OutstandingTotal = breakdown.OutstandingTotal,
 		Total = breakdown.Total,
 		DueClockTime = dueClockTime,
@@ -392,18 +524,31 @@ local function applyOverdueState(
 	overdueCount: number,
 	isNewState: boolean
 )
+	if player:GetAttribute("BillingOverdueActive") == true then
+		EnergyUsageTracker.SetOutage(player, true)
+		player:SetAttribute("BillingPowerOutageActive", true)
+		enforcePowerOutage(player)
+		return
+	end
+
+	EnergyUsageTracker.SetOutage(player, true)
 	player:SetAttribute("BillingOverdueActive", true)
 	player:SetAttribute("BillingOverdueCount", overdueCount)
+	player:SetAttribute("BillingPowerOutageActive", true)
+	enforcePowerOutage(player)
 	if isNewState then
 		BillingService.OnOverdueTriggered(player, billingState, overdueCount)
 	end
 end
 
 local function clearOverdueState(player: Player, billingState: BillingState.BillingState)
+	player:SetAttribute("BillingPowerOutageActive", false)
+	clearPowerOutage(player)
 	if player:GetAttribute("BillingOverdueActive") ~= true then
 		return
 	end
 	player:SetAttribute("BillingOverdueActive", false)
+	EnergyUsageTracker.SetOutage(player, false)
 	BillingService.OnOverdueCleared(player, billingState)
 end
 
@@ -451,6 +596,7 @@ function BillingService.CompleteCycle(
 	billingState:ResetCycle()
 	BillingService.UpdateOutstandingBalance(player, currencyStateData, 0, billingState)
 	rollPendingFoodUsage(player)
+	EnergyUsageTracker.ResetAccumulated(player)
 	clearGraceState(player, billingState)
 	clearOverdueState(player, billingState)
 end
@@ -462,6 +608,18 @@ function BillingService.ProcessDue(
 )
 	local plotStateData = PlayerSession.GetData(player, "PlotState")
 	local currentCharges = computeCurrentCycleCharges(player, plotStateData)
+
+	local consumedEnergy = EnergyUsageTracker.CollectUsage(player)
+	local electricCost = BillingCalculator.CalculateElectricityCostFromUsage(consumedEnergy)
+	if electricCost <= 0 then
+		local baseLoad = EnergyUsageTracker.GetBaseLoad(player)
+		local activeLoad = EnergyUsageTracker.GetActiveLoad(player)
+		if baseLoad > 0 and activeLoad > 0 and typeof(plotStateData) == "table" then
+			electricCost = BillingCalculator.EstimateCycleElectricCost(plotStateData)
+		end
+	end
+	currentCharges.Electric = sanitizeChargeAmount(electricCost)
+
 	local outstandingBreakdown = getOutstandingBreakdown(billingState)
 	addIntoBreakdown(outstandingBreakdown, currentCharges)
 
@@ -497,6 +655,7 @@ function BillingService.ProcessGrace(
 	if billingState:IsGraceExpired() then
 		local enteredOverdue = billingState:EnterOverdue()
 		if enteredOverdue then
+			local _interestApplied = applyOverdueInterestCharge(player, billingState, currencyStateData)
 			local overdueCount = billingState:IncrementOverdueCount()
 			applyOverdueState(player, billingState, overdueCount, true)
 			-- Broadcast overdue state change
@@ -538,6 +697,20 @@ function BillingService.PayBill(player: Player): (boolean, string)
 
 	if totalDue <= 0 then
 		return false, "No bill to pay."
+	end
+
+	local isInGrace = billingState:IsInGrace()
+	local isOverdue = billingState:IsOverdue()
+	if not isInGrace and not isOverdue then
+		local timeRemaining = billingState:GetTimeRemaining()
+		local resolvedTimeRemaining = if typeof(timeRemaining) == "number" then timeRemaining else 0
+		if resolvedTimeRemaining > EARLY_PAYMENT_WINDOW_SECONDS then
+			return false,
+				string.format(
+					"Bill can only be paid within %d in-game hours of the deadline.",
+					EARLY_PAYMENT_WINDOW_HOURS
+				)
+		end
 	end
 
 	local availableCash = currencyStateData.Cash
@@ -635,6 +808,7 @@ function BillingService.Init()
 			PlotTax = breakdown.PlotTax,
 			Electric = breakdown.Electric,
 			Food = breakdown.Food,
+			Overdue = breakdown.Overdue,
 			OutstandingTotal = breakdown.OutstandingTotal,
 			Total = breakdown.Total,
 			DueClockTime = dueClockTime,
@@ -700,6 +874,7 @@ function BillingService.GetBillingBreakdown(player: Player): {
 	PlotTax: number,
 	Electric: number,
 	Food: number,
+	Overdue: number,
 	Total: number,
 	OutstandingTotal: number,
 }
@@ -725,6 +900,7 @@ function BillingService.GetBillingBreakdown(player: Player): {
 	local plotTotal = sanitizeChargeAmount(outstandingBreakdown.PlotTax)
 	local electricTotal = sanitizeChargeAmount(outstandingBreakdown.Electric)
 	local foodTotal = sanitizeChargeAmount(outstandingBreakdown.Food)
+	local interestTotal = sanitizeChargeAmount(outstandingBreakdown.Interest)
 
 	if includeCurrentCycle then
 		plotTotal += sanitizeChargeAmount(currentCharges.PlotTax)
@@ -738,12 +914,13 @@ function BillingService.GetBillingBreakdown(player: Player): {
 		end
 	end
 
-	local totalDue = plotTotal + electricTotal + foodTotal
+	local totalDue = plotTotal + electricTotal + foodTotal + interestTotal
 
 	return {
 		PlotTax = plotTotal,
 		Electric = electricTotal,
 		Food = foodTotal,
+		Overdue = interestTotal,
 		Total = totalDue,
 		OutstandingTotal = sanitizeChargeAmount(outstandingTotal),
 	}
@@ -757,6 +934,7 @@ function BillingService.Remove(player: Player)
 	clearGraceState(player, billingState)
 	clearOverdueState(player, billingState)
 	PlayerBillingStates[player.UserId] = nil
+	EnergyUsageTracker.RemovePlayer(player)
 	resetFoodUsage(player)
 end
 

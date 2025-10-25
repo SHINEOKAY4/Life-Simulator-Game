@@ -8,6 +8,7 @@ local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
 local ResidentMovement = require(ServerScriptService.Server.Utilities.ResidentMovement)
 local ResidentChat = require(ServerScriptService.Server.Utilities.ResidentChat)
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
@@ -59,6 +60,9 @@ local StationNeedMap: { [string]: string } = {
 	SocialStation = "Social",
 	FunStation = "Fun",
 }
+
+local POWER_OUTAGE_OVERRIDE = BillingConstants.PowerOutageOverrideKey or "BillingPowerOutage"
+local POWER_OUTAGE_MESSAGE = "Power is out. Energy stations are offline."
 
 local OverrideHandlers: {
 	[string]: (
@@ -347,6 +351,23 @@ function DirectActionService.AssignStationToResident(player: Player, residentNam
 	local resolvedStation = stationScope[uniqueId]
 	if not resolvedStation then
 		return false, "Station with the given uniqueId not in player's station scope"
+	end
+
+	local outageActive = player:GetAttribute("BillingPowerOutageActive") == true
+	if resolvedStation.ActiveOverride == POWER_OUTAGE_OVERRIDE and not outageActive then
+		resolvedStation.ActiveOverride = nil
+	end
+
+	if outageActive then
+		local energyPerHour = itemSpec.EnergyConsumptionPerHour
+		if typeof(energyPerHour) == "number" and energyPerHour > 0 then
+			resolvedStation.ActiveOverride = POWER_OUTAGE_OVERRIDE
+			return false, POWER_OUTAGE_MESSAGE
+		end
+	end
+
+	if resolvedStation.ActiveOverride == POWER_OUTAGE_OVERRIDE then
+		return false, POWER_OUTAGE_MESSAGE
 	end
 
 	if table.find(resolvedStation.Residents, residentName) then

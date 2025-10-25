@@ -10,6 +10,7 @@ type OutstandingBreakdown = {
 	PlotTax: number,
 	Electric: number,
 	Food: number,
+	Interest: number,
 }
 
 export type BillingStateData = {
@@ -62,6 +63,7 @@ local function sanitizeOutstandingBreakdown(raw: any): OutstandingBreakdown
 		PlotTax = 0,
 		Electric = 0,
 		Food = 0,
+		Interest = 0,
 	}
 	if typeof(raw) ~= "table" then
 		return normalized
@@ -71,6 +73,7 @@ local function sanitizeOutstandingBreakdown(raw: any): OutstandingBreakdown
 	normalized.PlotTax = sanitizeOutstandingValue(candidate.PlotTax)
 	normalized.Electric = sanitizeOutstandingValue(candidate.Electric)
 	normalized.Food = sanitizeOutstandingValue(candidate.Food)
+	normalized.Interest = sanitizeOutstandingValue(candidate.Interest)
 	return normalized
 end
 
@@ -87,6 +90,7 @@ function BillingState.new(durationSeconds: number, gracePeriodSeconds: number, s
 				PlotTax = 0,
 				Electric = 0,
 				Food = 0,
+				Interest = 0,
 			},
 		}
 

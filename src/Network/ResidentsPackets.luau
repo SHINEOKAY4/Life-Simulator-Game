@@ -74,4 +74,11 @@ ResidentsPackets.RequestAssignStation =
 ResidentsPackets.RequestResidentMove =
 	Packet("RequestResidentMove", Packet.String, Packet.Vector3F32):Response(Packet.Boolean8, Packet.StringLong)
 
+ResidentsPackets.ResidentChatMessage = Packet("ResidentChatMessage", {
+	Speaker = Packet.Instance,
+	Text = Packet.StringLong,
+	Kind = Packet.String,
+	Duration = Packet.NumberF32,
+})
+
 return ResidentsPackets

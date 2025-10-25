@@ -34,7 +34,15 @@ local Profile = {
 			PlotTax = 0,
 			Electric = 0,
 			Food = 0,
+			Interest = 0,
 		},
+	},
+	EnergyState = {
+		BaseLoad = 0,
+		ActiveLoad = 0,
+		AccumulatedEnergy = 0,
+		LastTimestamp = 0,
+		OutageActive = false,
 	},
 	PayrollState = {
 		LastPayoutTime = 0,

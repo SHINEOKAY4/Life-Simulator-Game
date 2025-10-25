@@ -2,12 +2,15 @@
 -- StarterPlayerScripts/Client/UserInterface/NeedsInterface.lua
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local ResidentUIEnabled = ActiveQueryFolder:FindFirstChild("ResidentUIEnabled") :: BoolValue
+
+local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
 local ResidentGui = PlayerGui:WaitForChild("ResidentGui") :: ScreenGui
 local ResidentNeedsFrame = ResidentGui:WaitForChild("ResidentNeedsFrame") :: Frame
@@ -17,7 +20,11 @@ local FunInfoBar = ResidentNeedsFrame:WaitForChild("FunInfoBar") :: Frame
 local SocialInfoBar = ResidentNeedsFrame:WaitForChild("SocialInfoBar") :: Frame
 local HygieneInfoBar = ResidentNeedsFrame:WaitForChild("HygieneInfoBar") :: Frame
 
-local ResidentUI = {}
+local ResidentSelectionChangedSignal = GoodSignal.new()
+
+local ResidentUI = {
+	ResidentSelectionChanged = ResidentSelectionChangedSignal,
+}
 local Connections = {} :: { RBXScriptConnection }
 local CurrentSelected = nil :: Model?
 
@@ -35,6 +42,7 @@ function ResidentUI.Show(residentModel: Model)
 	end
 	ResidentGui.Enabled = true
 	ResidentUIEnabled.Value = true
+	ResidentSelectionChangedSignal:Fire(residentModel)
 	-- Update all bars initially
 	local hunger = residentModel:GetAttribute("Hunger") :: number
 	local energy = residentModel:GetAttribute("Energy") :: number
@@ -114,6 +122,7 @@ function ResidentUI.Hide(isOnlyUI: boolean?)
 	ResidentNeedsFrame.Visible = false
 	ResidentUIEnabled.Value = false
 	CurrentSelected = nil
+	ResidentSelectionChangedSignal:Fire(nil)
 	for _, connection in ipairs(Connections) do
 		connection:Disconnect()
 	end

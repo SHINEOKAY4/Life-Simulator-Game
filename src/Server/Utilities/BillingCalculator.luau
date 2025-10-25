@@ -5,6 +5,8 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
+local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
 
 type PlotStateData = {
 	UnlockedChunks: { { cx: number, cz: number } },
@@ -15,8 +17,9 @@ local BillingCalculator = {}
 
 -- Constants (tunable)
 local COST_PER_CHUNK = 15 -- Base plot tax per unlocked chunk
-local ELECTRICITY_RATE = 0.8 -- Cost multiplier for energy consumption
+local ELECTRICITY_RATE = 0.8 -- Currency charged per in-game kWh consumed
 local FOOD_COST_PER_USAGE = 12 -- Currency charged per successful cook interaction
+local BILLING_CYCLE_DURATION_SECONDS = math.max(1, BillingConstants.BillingCycleDurationSeconds or 1440)
 
 function BillingCalculator.CalculatePlotTax(plotStateData: PlotStateData): number
 	local unlockedChunks = plotStateData.UnlockedChunks or {}
@@ -32,7 +35,20 @@ function BillingCalculator.CalculatePlotTax(plotStateData: PlotStateData): numbe
 	return math.floor(COST_PER_CHUNK * taxableChunks * (1 + taxableChunks * 0.1))
 end
 
-function BillingCalculator.CalculateElectricityCost(plotStateData: PlotStateData): number
+function BillingCalculator.CalculateElectricityCostFromUsage(energyConsumptionHours: number): number
+	if
+		typeof(energyConsumptionHours) ~= "number"
+		or energyConsumptionHours <= 0
+		or energyConsumptionHours ~= energyConsumptionHours
+	then
+		return 0
+	end
+
+	local cost = energyConsumptionHours * ELECTRICITY_RATE
+	return math.floor(cost + 0.5)
+end
+
+function BillingCalculator.EstimateCycleElectricCost(plotStateData: PlotStateData): number
 	local placedObjects = plotStateData.PlacedObjects or {}
 	local totalEnergyConsumption = 0
 
@@ -46,11 +62,17 @@ function BillingCalculator.CalculateElectricityCost(plotStateData: PlotStateData
 		end
 	end
 
-	-- Calculate cost for the billing cycle duration (8 minutes = 0.133 hours)
-	local billingHours = 8 / 60 -- 480 seconds = 8 minutes
-	local cost = totalEnergyConsumption * billingHours * ELECTRICITY_RATE
+	local secondsPerGameHour = TimeScale.GetSecondsPerFullDay() / 24
+	if secondsPerGameHour <= 0 then
+		secondsPerGameHour = 60
+	end
 
-	return math.floor(cost + 0.5)
+	local billingHours = BILLING_CYCLE_DURATION_SECONDS / secondsPerGameHour
+	if billingHours < 0 then
+		billingHours = 0
+	end
+	local estimatedEnergy = totalEnergyConsumption * billingHours
+	return BillingCalculator.CalculateElectricityCostFromUsage(estimatedEnergy)
 end
 
 function BillingCalculator.CalculateFoodCost(usageCount: number): number

@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 local Formatter = require(ReplicatedStorage.Shared.Utilities.Formatter)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
@@ -12,6 +13,7 @@ local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local ResidentNeedsUI = require(script.Parent:WaitForChild("ResidentNeedsUI"))
 local CurrencyPackets = require(ReplicatedStorage.Network.CurrencyPackets)
 local BillingPackets = require(ReplicatedStorage.Network.BillingPackets)
+local SoundtrackManager = require(script.Parent.Parent.Modules.SoundtrackManager)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -24,10 +26,19 @@ local HUDBottomRightEnabled = ActiveQueryFolder:FindFirstChild("HUDBottomRightEn
 
 local MainHUDGui = PlayerGui:WaitForChild("MainHUD") :: ScreenGui
 local BillFrame = MainHUDGui:WaitForChild("BillFrame") :: Frame
-local PlotTaxLabel = BillFrame:WaitForChild("PlotTaxLabel") :: TextLabel
-local ElectricLabel = BillFrame:WaitForChild("ElectricLabel") :: TextLabel
-local FoodLabel = BillFrame:WaitForChild("FoodLabel") :: TextLabel
-local TotalLabel = BillFrame:WaitForChild("TotalLabel") :: TextLabel
+local BillPanel = BillFrame:WaitForChild("BillPanel")
+local ItemsContainer = BillPanel:WaitForChild("ItemsContainer")
+local PlotTaxFrame = ItemsContainer:WaitForChild("PlotTaxFrame")
+local ElectricityFrame = ItemsContainer:WaitForChild("ElectricityFrame")
+local FoodFrame = ItemsContainer:WaitForChild("FoodFrame")
+local OverdueFrame = ItemsContainer:WaitForChild("OverdueFrame")
+local TotalFrame = BillPanel:WaitForChild("TotalFrame")
+local PlotTaxAmountLabel = PlotTaxFrame:WaitForChild("TextLabel") :: TextLabel
+local ElectricAmountLabel = ElectricityFrame:WaitForChild("TextLabel") :: TextLabel
+local FoodAmountLabel = FoodFrame:WaitForChild("TextLabel") :: TextLabel
+local OverdueAmountLabel = OverdueFrame:WaitForChild("TextLabel") :: TextLabel
+local TotalRow = TotalFrame:WaitForChild("TotalRow")
+local TotalAmountLabel = TotalRow:WaitForChild("TotalLabel") :: TextLabel
 
 local BottomRight = MainHUDGui:WaitForChild("BottomRight") :: Frame
 local TopRight = MainHUDGui:WaitForChild("TopRight")
@@ -396,6 +407,10 @@ local function configureButtonVisuals(button: TextButton)
 		isPressing = false
 		updateTarget()
 	end)
+
+	button.Activated:Connect(function()
+		SoundtrackManager.PlayButtonClick()
+	end)
 end
 
 local MainHUD = {}
@@ -433,9 +448,48 @@ function MainHUD.Init()
 	local BILLING_PAY_DEBOUNCE = 0.5
 	local lastFormattedClockTime: string? = nil
 	local needsClockUpdate = false
+	local graceCountdownDeadline: number? = nil
+	local graceCountdownConnection: RBXScriptConnection? = nil
+	local lastOutstandingTotal: number? = nil
+	local lastTimeRemainingSeconds: number? = nil
+	local lastDueClockTime: number? = nil
 
-	local function resolveNextBillingLabel(timeRemainingSeconds: number?, outstandingTotal: number?): string
+	local function stopGraceCountdown()
+		if graceCountdownConnection then
+			graceCountdownConnection:Disconnect()
+			graceCountdownConnection = nil
+		end
+		graceCountdownDeadline = nil
+	end
+
+	local function formatGraceCountdownLabel(timeRemainingSeconds: number): string
+		local remaining = math.max(math.ceil(timeRemainingSeconds), 0)
+		local minutes = math.floor(remaining / 60)
+		local seconds = remaining % 60
+		return string.format("grace %d:%02d", minutes, seconds)
+	end
+
+	local function resolveNextBillingLabel(
+		timeRemainingSeconds: number?,
+		outstandingTotal: number?,
+		isGraceActive: boolean,
+		isOverdueActive: boolean
+	): string
 		local resolvedOutstanding = if typeof(outstandingTotal) == "number" then outstandingTotal else 0
+
+		if isOverdueActive then
+			return "overdue"
+		end
+
+		if isGraceActive then
+			if typeof(timeRemainingSeconds) == "number" and timeRemainingSeconds > 0 then
+				return formatGraceCountdownLabel(timeRemainingSeconds)
+			end
+			if resolvedOutstanding > 0 then
+				return "due"
+			end
+			return "grace 0:00"
+		end
 
 		if typeof(timeRemainingSeconds) == "number" and timeRemainingSeconds <= 0 and resolvedOutstanding > 0 then
 			return "due"
@@ -458,22 +512,140 @@ function MainHUD.Init()
 		return "-"
 	end
 
-	local function updateBillDisplay(plotTax: number, electricityCost: number, foodCost: number, totalCost: number)
-		PlotTaxLabel.Text = Formatter.formatCurrency(plotTax, CASH_FORMAT_OPTIONS)
-		ElectricLabel.Text = Formatter.formatCurrency(electricityCost, CASH_FORMAT_OPTIONS)
-		FoodLabel.Text = Formatter.formatCurrency(foodCost, CASH_FORMAT_OPTIONS)
-		local totalText = Formatter.formatCurrency(totalCost, CASH_FORMAT_OPTIONS)
-		TotalLabel.Text = totalText
+	local function syncGraceCountdown(timeRemainingSeconds: number?, isGraceActive: boolean, isOverdueActive: boolean)
+		if isOverdueActive or not isGraceActive then
+			stopGraceCountdown()
+			return
+		end
+		if typeof(timeRemainingSeconds) ~= "number" or timeRemainingSeconds <= 0 then
+			stopGraceCountdown()
+			return
+		end
+
+		graceCountdownDeadline = os.clock() + timeRemainingSeconds
+
+		if graceCountdownConnection then
+			return
+		end
+
+		graceCountdownConnection = RunService.Heartbeat:Connect(function()
+			local deadline = graceCountdownDeadline
+			if not deadline then
+				stopGraceCountdown()
+				return
+			end
+
+			local remaining = deadline - os.clock()
+			if remaining <= 0 then
+				stopGraceCountdown()
+				local overdueActive = Player:GetAttribute("BillingOverdueActive") == true
+				if overdueActive then
+					TimeTextLabel.Text = "overdue"
+					return
+				end
+				local outstanding = if typeof(lastOutstandingTotal) == "number" then lastOutstandingTotal else 0
+				if outstanding > 0 then
+					TimeTextLabel.Text = "due"
+				else
+					TimeTextLabel.Text = "grace 0:00"
+				end
+				return
+			end
+
+			TimeTextLabel.Text = formatGraceCountdownLabel(remaining)
+		end)
+	end
+
+	local function clampAmount(value: any): number
+		if typeof(value) ~= "number" or not value then
+			return 0
+		end
+		return value
+	end
+
+	local function resolveOverdueInterest(
+		plotTax: number?,
+		electricityCost: number?,
+		foodCost: number?,
+		totalCost: number?,
+		providedOverdue: number?
+	): number
+		if typeof(providedOverdue) == "number" then
+			return providedOverdue
+		end
+
+		local total = if typeof(totalCost) == "number" then totalCost else 0
+		if total <= 0 then
+			return 0
+		end
+
+		local baseSum = 0
+		if typeof(plotTax) == "number" then
+			baseSum += plotTax
+		end
+		if typeof(electricityCost) == "number" then
+			baseSum += electricityCost
+		end
+		if typeof(foodCost) == "number" then
+			baseSum += foodCost
+		end
+
+		local interest = total - baseSum
+		if interest <= 0 then
+			return 0
+		end
+
+		return interest
+	end
+
+	local function updateBillDisplay(
+		plotTax: number?,
+		electricityCost: number?,
+		foodCost: number?,
+		overdueInterest: number?,
+		totalCost: number?
+	)
+		local sanitizedPlotTax = clampAmount(plotTax)
+		local sanitizedElectric = clampAmount(electricityCost)
+		local sanitizedFood = clampAmount(foodCost)
+		local sanitizedOverdue = clampAmount(overdueInterest)
+		local sanitizedTotal = clampAmount(totalCost)
+
+		PlotTaxAmountLabel.Text = Formatter.formatCurrency(sanitizedPlotTax, CASH_FORMAT_OPTIONS)
+		ElectricAmountLabel.Text = Formatter.formatCurrency(sanitizedElectric, CASH_FORMAT_OPTIONS)
+		FoodAmountLabel.Text = Formatter.formatCurrency(sanitizedFood, CASH_FORMAT_OPTIONS)
+		OverdueAmountLabel.Text = Formatter.formatCurrency(sanitizedOverdue, CASH_FORMAT_OPTIONS)
+		TotalAmountLabel.Text = Formatter.formatCurrency(sanitizedTotal, CASH_FORMAT_OPTIONS)
 	end
 
 	local function updateDueLabel(
-		_dueClockTime: number?,
+		dueClockTime: number?,
 		timeRemaining: number?,
 		outstandingTotal: number?,
 		isNeedClockUpdate: boolean
 	)
-		needsClockUpdate = isNeedClockUpdate
-		TimeTextLabel.Text = resolveNextBillingLabel(timeRemaining, outstandingTotal)
+		lastDueClockTime = dueClockTime
+		if typeof(timeRemaining) == "number" then
+			lastTimeRemainingSeconds = timeRemaining
+		else
+			lastTimeRemainingSeconds = nil
+		end
+		if typeof(outstandingTotal) == "number" then
+			lastOutstandingTotal = outstandingTotal
+		else
+			lastOutstandingTotal = nil
+		end
+
+		local graceActive = Player:GetAttribute("BillingGraceActive") == true
+		local overdueActive = Player:GetAttribute("BillingOverdueActive") == true
+		if overdueActive then
+			graceActive = false
+		end
+
+		needsClockUpdate = if graceActive then false else isNeedClockUpdate
+
+		TimeTextLabel.Text = resolveNextBillingLabel(timeRemaining, outstandingTotal, graceActive, overdueActive)
+		syncGraceCountdown(timeRemaining, graceActive, overdueActive)
 	end
 
 	-- Listen for real-time billing updates from server
@@ -487,6 +659,8 @@ function MainHUD.Init()
 		local foodCost = payload.Food
 		local outstandingTotal = payload.OutstandingTotal
 		local totalCost = payload.Total
+		local overdueInterest =
+			resolveOverdueInterest(plotTax, electricityCost, foodCost, totalCost, rawget(payload, "Overdue"))
 		local dueClockTime = payload.DueClockTime
 		local timeRemaining = payload.TimeRemaining
 
@@ -494,7 +668,7 @@ function MainHUD.Init()
 
 		-- Only update bill breakdown if the bill frame is currently visible
 		if BillFrame.Visible then
-			updateBillDisplay(plotTax, electricityCost, foodCost, totalCost)
+			updateBillDisplay(plotTax, electricityCost, foodCost, overdueInterest, totalCost)
 		end
 	end)
 
@@ -509,18 +683,21 @@ function MainHUD.Init()
 		local foodCost = payload.Food
 		local outstandingTotal = payload.OutstandingTotal
 		local totalCost = payload.Total
+		local overdueInterest =
+			resolveOverdueInterest(plotTax, electricityCost, foodCost, totalCost, rawget(payload, "Overdue"))
 		local dueClockTime = payload.DueClockTime
 		local timeRemaining = payload.TimeRemaining
 
 		updateDueLabel(dueClockTime, timeRemaining, outstandingTotal, false)
 
 		if BillFrame.Visible then
-			updateBillDisplay(plotTax, electricityCost, foodCost, totalCost)
+			updateBillDisplay(plotTax, electricityCost, foodCost, overdueInterest, totalCost)
 		end
 	end
 
 	BillContext.Toggle.Pressed:Connect(function()
 		Debounce.RunIfAvailable("BillTogglePress", BILLING_TOGGLE_DEBOUNCE, function()
+			SoundtrackManager.PlayBillToggle()
 			BillFrame.Visible = not BillFrame.Visible
 			if BillFrame.Visible then
 				requestAndUpdateBillingInfo()
@@ -532,6 +709,7 @@ function MainHUD.Init()
 		Debounce.RunIfAvailable("BillPayPress", BILLING_PAY_DEBOUNCE, function()
 			local success, message = BillingPackets.PayBillRequest:Fire()
 			if success then
+				SoundtrackManager.PlayBillPaid()
 				print(message or "Bill paid successfully")
 			else
 				warn(message or "Unable to process bill payment")
@@ -550,9 +728,22 @@ function MainHUD.Init()
 			requestAndUpdateBillingInfo()
 		else
 			-- Player lost their plot, reset to default
-			TimeTextLabel.Text = resolveNextBillingLabel(nil, nil)
+			stopGraceCountdown()
+			TimeTextLabel.Text = resolveNextBillingLabel(
+				nil,
+				nil,
+				Player:GetAttribute("BillingGraceActive") == true,
+				Player:GetAttribute("BillingOverdueActive") == true
+			)
 		end
 	end)
+
+	local function onBillingAttributeChanged()
+		updateDueLabel(lastDueClockTime, lastTimeRemainingSeconds, lastOutstandingTotal, false)
+	end
+
+	Player:GetAttributeChangedSignal("BillingGraceActive"):Connect(onBillingAttributeChanged)
+	Player:GetAttributeChangedSignal("BillingOverdueActive"):Connect(onBillingAttributeChanged)
 
 	Player:GetAttributeChangedSignal(CASH_ATTRIBUTE_NAME):Connect(function()
 		local newValue = Player:GetAttribute(CASH_ATTRIBUTE_NAME)
@@ -594,7 +785,12 @@ function MainHUD.Init()
 		configureButtonVisuals(button)
 	end
 
-	TimeTextLabel.Text = resolveNextBillingLabel(nil, nil)
+	TimeTextLabel.Text = resolveNextBillingLabel(
+		nil,
+		nil,
+		Player:GetAttribute("BillingGraceActive") == true,
+		Player:GetAttribute("BillingOverdueActive") == true
+	)
 end
 
 function MainHUD.Show()

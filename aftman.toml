@@ -5,3 +5,4 @@
 [tools]
 rojo = "rojo-rbx/rojo@7.5.1"
 # rojo = "rojo-rbx/rojo@6.2.0"
+rojo = "rojo-rbx/rojo@7.6.0"

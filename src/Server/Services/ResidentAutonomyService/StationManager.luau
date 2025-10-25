@@ -7,6 +7,7 @@ local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local DirectActionService = require(ServerScriptService.Server.Services.DirectActionService)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
 local State = require(script.Parent.State)
 
 export type StationRecord = {
@@ -18,6 +19,7 @@ export type StationRecord = {
 }
 
 local handlerCache: { [string]: any } = {}
+local POWER_OUTAGE_OVERRIDE = BillingConstants.PowerOutageOverrideKey or "BillingPowerOutage"
 
 local StationManager = {}
 
@@ -111,6 +113,7 @@ function StationManager.findAvailableStation(
 	if total == 0 then
 		return nil, nil, nil, nil
 	end
+	local outageActive = player:GetAttribute("BillingPowerOutageActive") == true
 	for _ = 1, total do
 		local uniqueId = order[iterator.index]
 		iterator.index += 1
@@ -120,16 +123,25 @@ function StationManager.findAvailableStation(
 		if uniqueId and stationMap then
 			local station = stationMap[uniqueId] :: StationRecord?
 			if station and not table.find(station.Residents, residentName) then
-				local activeOverride = station.ActiveOverride
-				if activeOverride == nil or activeOverride == residentName then
-					local itemSpec = State.ItemSpecCache[station.Id]
-					if itemSpec == nil then
-						itemSpec = ItemFinder.FindItemById(station.Id)
-						if itemSpec then
-							State.ItemSpecCache[station.Id] = itemSpec
-						end
-					end
+				local itemSpec = State.ItemSpecCache[station.Id]
+				if itemSpec == nil then
+					itemSpec = ItemFinder.FindItemById(station.Id)
 					if itemSpec then
+						State.ItemSpecCache[station.Id] = itemSpec
+					end
+				end
+				if itemSpec then
+					if outageActive then
+						local energyPerHour = itemSpec.EnergyConsumptionPerHour
+						if typeof(energyPerHour) == "number" and energyPerHour > 0 then
+							station.ActiveOverride = POWER_OUTAGE_OVERRIDE
+						end
+					elseif station.ActiveOverride == POWER_OUTAGE_OVERRIDE then
+						station.ActiveOverride = nil
+					end
+
+					local activeOverride = station.ActiveOverride
+					if activeOverride == nil or activeOverride == residentName then
 						local capacity = 1
 						local maxOccupancy = itemSpec.maxOccupancy
 						if typeof(maxOccupancy) == "number" and maxOccupancy > 0 then

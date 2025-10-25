@@ -61,6 +61,30 @@ export type NotificationButton = {
 	Callback: ((NotificationHandle) -> ())?,
 }
 
+export type NotificationPlacement = {
+	-- Optional parent to attach the notification stack to. Defaults to PlayerGui ScreenGui.
+	Parent: GuiBase2d?,
+	-- Optional anchor point override for the stack frame.
+	AnchorPoint: Vector2?,
+	-- Optional absolute position for the stack frame.
+	Position: UDim2?,
+	-- Optional size override for the stack frame.
+	Size: UDim2?,
+	-- Optional maximum width when Size is not provided.
+	MaxWidth: number?,
+	-- Optional padding between toasts.
+	Padding: number?,
+	-- Layout alignment overrides for the UIListLayout.
+	HorizontalAlignment: Enum.HorizontalAlignment?,
+	VerticalAlignment: Enum.VerticalAlignment?,
+	-- Maximum number of visible toasts before the oldest are dismissed.
+	MaxVisible: number?,
+	-- Optional ZIndex for the toast stack.
+	ZIndex: number?,
+	-- Optional name assigned to the container frame.
+	Name: string?,
+}
+
 export type NotificationOptions = {
 	-- The title text displayed at the top of the notification. Required.
 	Title: string,
@@ -86,6 +110,8 @@ export type NotificationOptions = {
 	Font: Enum.Font?,
 	-- Optional sound asset to play when the notification appears.
 	SoundId: string?,
+	-- Optional placement overrides controlling where the notification stack appears.
+	Placement: NotificationPlacement?,
 }
 
 export type NotificationHandle = {
@@ -95,34 +121,45 @@ export type NotificationHandle = {
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
-local SoundService = game:GetService("SoundService")
+local SoundtrackManager = require(script.Parent.Parent.Modules.SoundtrackManager)
 
 -- Internal module table
 local NotificationModule = {}
 
--- Container for all active notifications.  Lazily created on the first call to Show().
-local _containerGui: ScreenGui? = nil
--- Panel within the container that holds individual toast CanvasGroups.
-local stackFrame: Frame? = nil
--- Counter for assigning unique LayoutOrder values.  Incremented for each notification.
-local nextOrder: number = 0
+type ContainerRecord = {
+	Key: string,
+	Frame: Frame,
+	Layout: UIListLayout,
+	Parent: GuiBase2d,
+	CleanupConnection: RBXScriptConnection?,
+	NextOrder: number,
+	MaxVisible: number,
+	ZIndex: number,
+}
+
 -- Registry of active notification handles.  Used to track and dismiss toasts.
 local activeToasts: { [CanvasGroup]: boolean } = {}
 
+-- Sound playback throttling to prevent audio spam when many toasts spawn together.
+local SOUND_THROTTLE_SECONDS = 0.25
+local lastSoundTimestamp = 0
+local lastSoundById: { [string]: number } = {}
+
 -- Constants controlling layout and appearance.
-local PADDING: number = 8
-local MAX_WIDTH: number = 320
+local DEFAULT_PADDING: number = 8
+local DEFAULT_MAX_WIDTH: number = 320
 local CORNER_RADIUS: number = 8
 local TEXT_PADDING: number = 6
 local BUTTON_HEIGHT: number = 28
 local BUTTON_MIN_WIDTH: number = 80
 
--- Ensure the container ScreenGui and stack frame exist; create them lazily.
-local function ensureContainer(): Frame
-	if stackFrame then
-		return stackFrame
-	end
+local _defaultScreenGui: ScreenGui? = nil
+local containerRecords: { [string]: ContainerRecord } = {}
 
+local function ensureDefaultScreenGui(): ScreenGui
+	if _defaultScreenGui and _defaultScreenGui.Parent then
+		return _defaultScreenGui
+	end
 	local localPlayer = Players.LocalPlayer
 	assert(localPlayer, "NotificationModule must be used from a LocalScript")
 	local playerGui = localPlayer:WaitForChild("PlayerGui")
@@ -134,27 +171,134 @@ local function ensureContainer(): Frame
 	gui.DisplayOrder = 10000
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 	gui.Parent = playerGui
-	_containerGui = gui
+	_defaultScreenGui = gui
+	return gui
+end
 
-	local frame = Instance.new("Frame")
-	frame.Name = "StackFrame"
-	frame.BackgroundTransparency = 1
-	frame.ClipsDescendants = false
-	frame.AutomaticSize = Enum.AutomaticSize.Y
-	frame.Size = UDim2.fromOffset(MAX_WIDTH, 0)
-	frame.AnchorPoint = Vector2.new(1, 0)
-	frame.Position = UDim2.new(1, -PADDING, 0, PADDING)
-	frame.Parent = gui
-	stackFrame = frame
+local function computeContainerKey(placement: NotificationPlacement?): string
+	if placement and placement.Parent then
+		local name = placement.Name or "NotificationStack"
+		return string.format("%s@%s", name, tostring(placement.Parent))
+	end
+	return "_default"
+end
+
+local function destroyContainerRecord(key: string)
+	local record = containerRecords[key]
+	if not record then
+		return
+	end
+	if record.CleanupConnection then
+		record.CleanupConnection:Disconnect()
+		record.CleanupConnection = nil
+	end
+	if record.Frame.Parent then
+		record.Frame:Destroy()
+	end
+	containerRecords[key] = nil
+end
+
+local function ensureContainer(placement: NotificationPlacement?): ContainerRecord
+	local key = computeContainerKey(placement)
+	local existing = containerRecords[key]
+	if existing and existing.Frame.Parent then
+		return existing
+	elseif existing then
+		destroyContainerRecord(key)
+	end
+
+	local parentGui: GuiBase2d
+	if placement and placement.Parent then
+		parentGui = placement.Parent
+	else
+		parentGui = ensureDefaultScreenGui()
+	end
+
+	local containerFrame = Instance.new("Frame")
+	containerFrame.Name = placement and placement.Name or "NotificationStack"
+	containerFrame.BackgroundTransparency = 1
+	containerFrame.ClipsDescendants = false
+	containerFrame.AutomaticSize = Enum.AutomaticSize.Y
+	if placement and placement.Size then
+		containerFrame.Size = placement.Size
+	else
+		local maxWidth = placement and placement.MaxWidth or DEFAULT_MAX_WIDTH
+		containerFrame.Size = UDim2.fromOffset(maxWidth, 0)
+	end
+	if placement and placement.AnchorPoint then
+		containerFrame.AnchorPoint = placement.AnchorPoint
+	else
+		containerFrame.AnchorPoint = if placement and placement.Parent then Vector2.new(0, 0) else Vector2.new(1, 0)
+	end
+	if placement and placement.Position then
+		containerFrame.Position = placement.Position
+	else
+		containerFrame.Position = if placement and placement.Parent
+			then UDim2.fromOffset(DEFAULT_PADDING, DEFAULT_PADDING)
+			else UDim2.new(1, -DEFAULT_PADDING, 0, DEFAULT_PADDING)
+	end
+	local zIndex = placement and placement.ZIndex or 100
+	containerFrame.ZIndex = zIndex
+	containerFrame.Visible = true
+	containerFrame.Parent = parentGui
 
 	local listLayout = Instance.new("UIListLayout")
 	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	listLayout.Padding = UDim.new(0, PADDING)
-	listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
-	listLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-	listLayout.Parent = frame
+	listLayout.Padding = UDim.new(0, placement and placement.Padding or DEFAULT_PADDING)
+	listLayout.HorizontalAlignment = placement and placement.HorizontalAlignment
+		or (if placement and placement.Parent then Enum.HorizontalAlignment.Center else Enum.HorizontalAlignment.Right)
+	listLayout.VerticalAlignment = placement and placement.VerticalAlignment or Enum.VerticalAlignment.Top
+	listLayout.Parent = containerFrame
 
-	return frame
+	local record: ContainerRecord = {
+		Key = key,
+		Frame = containerFrame,
+		Layout = listLayout,
+		Parent = parentGui,
+		CleanupConnection = nil,
+		NextOrder = 0,
+		MaxVisible = placement and placement.MaxVisible or math.huge,
+		ZIndex = zIndex,
+	}
+
+	if placement and placement.Parent then
+		record.CleanupConnection = parentGui.AncestryChanged:Connect(function(_, newParent)
+			if newParent then
+				return
+			end
+			destroyContainerRecord(key)
+		end)
+	end
+
+	containerRecords[key] = record
+	return record
+end
+
+local function enforceMaxVisible(record: ContainerRecord)
+	local limit = record.MaxVisible
+	if limit == math.huge then
+		return
+	end
+	local toasts: { CanvasGroup } = {}
+	for _, child in ipairs(record.Frame:GetChildren()) do
+		if child:IsA("CanvasGroup") then
+			table.insert(toasts, child :: CanvasGroup)
+		end
+	end
+	if #toasts <= limit then
+		return
+	end
+	table.sort(toasts, function(a, b)
+		local createdA = a:GetAttribute("CreatedAt")
+		local createdB = b:GetAttribute("CreatedAt")
+		return (typeof(createdA) == "number" and createdA or 0) < (typeof(createdB) == "number" and createdB or 0)
+	end)
+	while #toasts > limit do
+		local toast = table.remove(toasts, 1)
+		if toast then
+			NotificationModule.Dismiss(toast)
+		end
+	end
 end
 
 -- Play a sound if provided.  The sound is cleaned up automatically.
@@ -162,20 +306,23 @@ local function playSound(soundId: string?)
 	if soundId == nil or soundId == "" then
 		return
 	end
-	local sound = Instance.new("Sound")
-	sound.SoundId = soundId
-	sound.Volume = 1
-	sound.PlayOnRemove = false
-	sound.Parent = SoundService
-	sound.Ended:Once(function()
-		sound:Destroy()
-	end)
-	sound:Play()
+	local now = os.clock()
+	local lastForSound = lastSoundById[soundId]
+	if lastForSound and now - lastForSound < SOUND_THROTTLE_SECONDS then
+		return
+	end
+	if now - lastSoundTimestamp < SOUND_THROTTLE_SECONDS then
+		return
+	end
+	lastSoundTimestamp = now
+	lastSoundById[soundId] = now
+	SoundtrackManager.PlayNotificationSound(soundId)
 end
 
 -- Create a single toast CanvasGroup based on options.
-local function createToast(options: NotificationOptions): CanvasGroup
-	local parentFrame = ensureContainer()
+local function createToast(options: NotificationOptions): (CanvasGroup, ContainerRecord)
+	local containerRecord = ensureContainer(options.Placement)
+	local parentFrame = containerRecord.Frame
 
 	-- Root CanvasGroup for the toast. Allows tweening group transparency.
 	local toast = Instance.new("CanvasGroup")
@@ -183,12 +330,15 @@ local function createToast(options: NotificationOptions): CanvasGroup
 	toast.AutomaticSize = Enum.AutomaticSize.Y
 	toast.Size = UDim2.fromScale(1, 0)
 	toast.GroupTransparency = 1
+	toast.ZIndex = containerRecord.ZIndex
+	toast:SetAttribute("CreatedAt", os.clock())
+	toast.BackgroundTransparency = 1
 	toast.Parent = parentFrame
 
 	-- Assign layout order: negative priority ensures higher priority appears above.
-	nextOrder += 1
+	containerRecord.NextOrder += 1
 	local priority = options.Priority or 0
-	toast.LayoutOrder = -priority * 1000 + nextOrder
+	toast.LayoutOrder = -priority * 1000 + containerRecord.NextOrder
 
 	-- Main panel
 	local panel = Instance.new("Frame")
@@ -197,6 +347,7 @@ local function createToast(options: NotificationOptions): CanvasGroup
 	panel.BackgroundColor3 = options.BackgroundColor or Color3.fromRGB(33, 33, 33)
 	panel.AutomaticSize = Enum.AutomaticSize.Y
 	panel.Size = UDim2.fromScale(1, 0)
+	panel.ZIndex = containerRecord.ZIndex + 1
 	panel.Parent = toast
 
 	local corner = Instance.new("UICorner")
@@ -216,8 +367,8 @@ local function createToast(options: NotificationOptions): CanvasGroup
 	content.Name = "Content"
 	content.BackgroundTransparency = 1
 	content.AutomaticSize = Enum.AutomaticSize.Y
-	content.Size = UDim2.new(1, -2 * PADDING, 0, 0)
-	content.Position = UDim2.fromOffset(PADDING, PADDING)
+	content.Size = UDim2.new(1, -2 * DEFAULT_PADDING, 0, 0)
+	content.Position = UDim2.fromOffset(DEFAULT_PADDING, DEFAULT_PADDING)
 	content.Parent = panel
 
 	local horizontalLayout = Instance.new("UIListLayout")
@@ -269,6 +420,10 @@ local function createToast(options: NotificationOptions): CanvasGroup
 	titleLabel.TextColor3 = options.TextColor or Color3.fromRGB(255, 255, 255)
 	titleLabel.Parent = textStack
 
+	local texstroke = Instance.new("UIStroke")
+	texstroke.Thickness = 0.1
+	texstroke.Parent = titleLabel
+
 	-- Body label
 	local bodyLabel = Instance.new("TextLabel")
 	bodyLabel.Name = "Body"
@@ -277,7 +432,7 @@ local function createToast(options: NotificationOptions): CanvasGroup
 	bodyLabel.TextWrapped = true
 	bodyLabel.AutomaticSize = Enum.AutomaticSize.Y
 	bodyLabel.Size = UDim2.fromScale(1, 0)
-	bodyLabel.Font = options.Font or Enum.Font.Gotham
+	bodyLabel.Font = options.Font or Enum.Font.GothamMedium
 	bodyLabel.TextSize = 14
 	if options.TextColor then
 		bodyLabel.TextColor3 = options.TextColor:Lerp(Color3.new(1, 1, 1), 0.2)
@@ -285,6 +440,9 @@ local function createToast(options: NotificationOptions): CanvasGroup
 		bodyLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
 	end
 	bodyLabel.Parent = textStack
+	local bodystroke = Instance.new("UIStroke")
+	bodystroke.Thickness = 0.1
+	bodystroke.Parent = bodyLabel
 
 	-- Buttons (optional)
 	if options.Buttons and #options.Buttons > 0 then
@@ -336,13 +494,14 @@ local function createToast(options: NotificationOptions): CanvasGroup
 		end
 	end
 
-	return toast
+	return toast, containerRecord
 end
 
 -- Animate a toast into view, schedule dismissal if needed, and return a handle.
 local function showToast(options: NotificationOptions): NotificationHandle
-	local toast = createToast(options)
+	local toast, containerRecord = createToast(options)
 	activeToasts[toast] = true
+	enforceMaxVisible(containerRecord)
 
 	playSound(options.SoundId)
 

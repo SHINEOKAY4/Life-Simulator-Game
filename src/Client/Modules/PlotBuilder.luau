@@ -8,6 +8,7 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ObjectPreview = require(script.Parent.ObjectPreview)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
+local SoundtrackManager = require(script.Parent.SoundtrackManager)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -240,7 +241,9 @@ function PlotBuilder.PlaceFloorSelection(selection: any)
 		DepthCells = depthCells,
 	})
 
-	if not success then
+	if success then
+		SoundtrackManager.PlayPlacementSuccess()
+	else
 		warn("Placement failed: " .. message)
 	end
 end
@@ -296,7 +299,9 @@ function PlotBuilder.PlaceWallStrip(selection: WallStripSelectionInfo)
 		EndCellZ = endCellZ,
 	})
 
-	if not success then
+	if success then
+		SoundtrackManager.PlayPlacementSuccess()
+	else
 		warn("Placement failed: " .. message)
 	end
 end

@@ -5,12 +5,14 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
+local EnergyUsageTracker = require(ServerScriptService.Server.Utilities.EnergyUsageTracker)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local GridClass = require(ReplicatedStorage.Shared.Utilities.Grid)
 local PlotState = require(ServerScriptService.Server.Classes.PlotState)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
 type PlotRuntimeState = PlotState.PlotState
@@ -35,6 +37,7 @@ type StationInstanceMap = { [string]: StationOccupancy }
 type PlayerStationCache = { [string]: StationInstanceMap }
 
 local PlotService = {}
+local POWER_OUTAGE_OVERRIDE = BillingConstants.PowerOutageOverrideKey or "BillingPowerOutage"
 local PlotModels: { [number]: Model } = PlotFinder.GetOrderedPlots()
 local PlotGrids: { [number]: any } = {} -- [plotIndex] = Grid
 local PlayerRuntime: { [number]: PlotRuntimeState } = {}
@@ -188,6 +191,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 	PlayerStations[userId] = {}
 	StationScopeVersions[userId] = StationScopeVersions[userId] or {}
 
+	local totalEnergyLoad = 0
 	-- Station names are the object IDs of the stations and the key is the unique id for easier reference
 	local stationCache = PlayerStations[userId]
 	for uniqueKey, obj in pairs(plotStateData.PlacedObjects) do
@@ -197,6 +201,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 		})
 
 		local itemSpec = ItemFinder.FindItemById(obj.id)
+		local energyPerHour = itemSpec and itemSpec.EnergyConsumptionPerHour
 		local stationType = itemSpec and itemSpec.StationType
 		if stationType then
 			local stationScope = stationCache[stationType]
@@ -204,14 +209,24 @@ function PlotService.Load(player: Player, plotModel: Model)
 				stationScope = {}
 				stationCache[stationType] = stationScope
 			end
+			local activeOverrideValue = nil
+			if player:GetAttribute("BillingPowerOutageActive") == true then
+				if typeof(energyPerHour) == "number" and energyPerHour > 0 then
+					activeOverrideValue = POWER_OUTAGE_OVERRIDE
+				end
+			end
 			stationScope[uniqueKey] = {
 				Id = obj.id,
 				Residents = {},
 				Occupied = false,
 				Model = nil,
-				ActiveOverride = nil,
+				ActiveOverride = activeOverrideValue,
 			}
 			bumpStationVersion(userId, stationType)
+		end
+
+		if typeof(energyPerHour) == "number" and energyPerHour > 0 then
+			totalEnergyLoad += energyPerHour
 		end
 	end
 
@@ -228,6 +243,10 @@ function PlotService.Load(player: Player, plotModel: Model)
 
 	local placedSnapshot = flattenPlacedObjects(plotStateData.PlacedObjects)
 	Packets.PlotStateSync:FireClient(player, chunkInfo, runtimeState.ChunkUnlocked, placedSnapshot)
+
+	EnergyUsageTracker.SyncBaseLoad(player, totalEnergyLoad)
+	local outageActive = player:GetAttribute("BillingPowerOutageActive") == true
+	EnergyUsageTracker.SetOutage(player, outageActive)
 end
 
 function PlotService.Unclaim(player: Player)
@@ -351,14 +370,25 @@ function PlotService.AddStationForPlayer(player: Player, stationName: string, un
 		stationScope = {}
 		stationCache[stationName] = stationScope
 	end
+	local itemSpec = ItemFinder.FindItemById(itemId)
+	local energyPerHour = itemSpec and itemSpec.EnergyConsumptionPerHour
+	local activeOverrideValue = nil
+	if player:GetAttribute("BillingPowerOutageActive") == true then
+		if typeof(energyPerHour) == "number" and energyPerHour > 0 then
+			activeOverrideValue = POWER_OUTAGE_OVERRIDE
+		end
+	end
 	stationScope[uniqueId] = {
 		Id = itemId,
 		Residents = {},
 		Occupied = false,
 		Model = nil,
-		ActiveOverride = nil,
+		ActiveOverride = activeOverrideValue,
 	}
 	bumpStationVersion(userId, stationName)
+	if typeof(energyPerHour) == "number" and energyPerHour > 0 then
+		EnergyUsageTracker.AdjustStationLoad(player, energyPerHour)
+	end
 end
 
 function PlotService.RemoveStationForPlayer(player: Player, stationName: string, uniqueId: string)
@@ -392,6 +422,12 @@ function PlotService.RemoveStationForPlayer(player: Player, stationName: string,
 
 	if next(stationInstances) == nil then
 		stationCache[stationName] = nil
+	end
+
+	local itemSpec = ItemFinder.FindItemById(removed.Id)
+	local energyPerHour = itemSpec and itemSpec.EnergyConsumptionPerHour
+	if typeof(energyPerHour) == "number" and energyPerHour > 0 then
+		EnergyUsageTracker.AdjustStationLoad(player, -energyPerHour)
 	end
 
 	PlotService.StationRemoved:Fire(player, stationName, uniqueId, occupants)

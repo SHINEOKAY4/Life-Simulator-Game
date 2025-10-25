@@ -2,14 +2,41 @@
 -- ServerScriptService/Server/Utilities/ResidentChat.luau
 -- Emits simple chat bubbles for resident actions and moodlets and provides helpers for contextual phrasing.
 
-local ChatService = game:GetService("Chat")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
+local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
 
 local ResidentChat = {}
 
 local rng = Random.new()
+
+local DEFAULT_DURATIONS: { [string]: number } = {
+	Action = 3,
+	Interrupt = 3.5,
+	Moodlet = 2,
+}
+
+local function fireChatBubble(head: BasePart, text: string, kind: string, duration: number?)
+	if not head then
+		return
+	end
+	if typeof(text) ~= "string" or text == "" then
+		return
+	end
+	local finalDuration: number
+	if typeof(duration) == "number" and duration > 0 then
+		finalDuration = duration
+	else
+		finalDuration = DEFAULT_DURATIONS[kind] or DEFAULT_DURATIONS.Action
+	end
+	ResidentsPackets.ResidentChatMessage:Fire({
+		Speaker = head,
+		Text = text,
+		Kind = kind,
+		Duration = finalDuration,
+	})
+end
 
 export type ChatOption = {
 	Text: string,
@@ -29,12 +56,13 @@ export type InterruptContext = {
 	Player: Player?,
 }
 
-local MoodletPhrases: { [string]: string } = {
-	WellRested = "That nap felt amazing!",
-	Satisfied = "Yum, that hit the spot!",
-	Chatty = "Let's keep talking!",
-	Fresh = "Squeaky clean!",
-	Entertained = "That was so much fun!",
+-- Moodlet emojis for visual feedback (shorter, cleaner than full text)
+local MoodletEmojis: { [string]: string } = {
+	WellRested = "😴✨",
+	Satisfied = "😋🍽️",
+	Chatty = "💬😊",
+	Fresh = "🚿✨",
+	Entertained = "🎉😄",
 }
 
 local StationFriendlyNames: { [string]: string } = {
@@ -46,26 +74,79 @@ local StationFriendlyNames: { [string]: string } = {
 	GroundRest = "this spot",
 }
 
-local NeedFriendlyNames: { [string]: string } = {
-	Hunger = "I could really use a bite to eat",
-	Hygiene = "I should take a moment to freshen up",
-	Fun = "I could use a little fun first",
-	Energy = "I'm running low on energy",
-	Social = "I could use some company",
-}
-
-local NeedFullPhrases: { [string]: string } = {
-	Hunger = "I'm already full.",
-	Energy = "I'm wide awake already.",
-	Hygiene = "I'm already squeaky clean.",
-	Fun = "I'm all set for fun right now.",
-	Social = "I'm feeling social enough already.",
+local NeedFriendlyNames: { [string]: { string } } = {
+	Hunger = {
+		"I could really use a bite to eat",
+		"I'm getting pretty hungry",
+		"My stomach's rumbling",
+		"I need some food",
+	},
+	Hygiene = {
+		"I should take a moment to freshen up",
+		"I could use a quick wash",
+		"Time to clean up a bit",
+		"I need to freshen up",
+	},
+	Fun = {
+		"I could use a little fun first",
+		"I need some entertainment",
+		"I'm getting bored here",
+		"I need a break to have some fun",
+	},
+	Energy = {
+		"I'm running low on energy",
+		"I'm feeling exhausted",
+		"I really need some rest",
+		"I can barely keep my eyes open",
+	},
+	Social = {
+		"I could use some company",
+		"I'm feeling lonely",
+		"I need someone to talk to",
+		"I miss chatting with people",
+	},
 }
 
 local GenericInterrupts: { string } = {
 	"Something popped up; I'll be back soon.",
 	"I need to pause for just a moment.",
 	"Had to step away for a bit.",
+	"I'll handle this real quick.",
+	"Give me a second.",
+	"Something came up.",
+}
+
+local NeedFullPhrases: { [string]: { string } } = {
+	Hunger = {
+		"I'm already full.",
+		"I've eaten enough.",
+		"My stomach is satisfied.",
+		"I'm not hungry right now.",
+	},
+	Energy = {
+		"I'm wide awake already.",
+		"I'm fully rested.",
+		"I don't need sleep right now.",
+		"I'm energized!",
+	},
+	Hygiene = {
+		"I'm already squeaky clean.",
+		"I just freshened up.",
+		"I'm clean enough.",
+		"I don't need to wash up yet.",
+	},
+	Fun = {
+		"I'm all set for fun right now.",
+		"I've had enough entertainment.",
+		"I'm not bored yet.",
+		"I'm feeling entertained already.",
+	},
+	Social = {
+		"I'm feeling social enough already.",
+		"I've had enough conversation for now.",
+		"I'm all talked out.",
+		"I need some alone time.",
+	},
 }
 
 local StationArticles: { [string]: boolean } = {
@@ -112,6 +193,20 @@ end
 
 local function selectRandom(entries: { string }): string
 	return entries[rng:NextInteger(1, #entries)]
+end
+
+local function getTimeOfDayGreeting(): string?
+	local clockTime = TimeScale.GetClockTime()
+	if clockTime >= 5 and clockTime < 12 then
+		return selectRandom({ "Good morning!", "Morning!", "Rise and shine!" })
+	elseif clockTime >= 12 and clockTime < 17 then
+		return selectRandom({ "Good afternoon!", "Afternoon!", "Hey there!" })
+	elseif clockTime >= 17 and clockTime < 21 then
+		return selectRandom({ "Good evening!", "Evening!", "Hey!" })
+	elseif clockTime >= 21 or clockTime < 5 then
+		return selectRandom({ "It's getting late...", "Long day...", "Still up..." })
+	end
+	return nil
 end
 
 local function humanizeReason(raw: string): string
@@ -166,11 +261,20 @@ local function resolveNeedName(context: InterruptContext?): string?
 end
 
 local function buildUrgentNeedText(reasonNeed: string, context: InterruptContext?): string
-	local base = NeedFriendlyNames[reasonNeed]
+	local phrases = NeedFriendlyNames[reasonNeed]
+	local base = if phrases then selectRandom(phrases) else nil
 	local stationLabel = resolveStationLabel(context)
 	local stationPhrase = if stationLabel then formatStationForSentence(stationLabel) or stationLabel else nil
-	if base and stationPhrase then
-		return string.format("%s, so I'm stepping away from %s for now.", base, stationPhrase)
+
+	-- Don't repeat "I need X" if the station is already for that need
+	local actionName = if context then context.ActionName else nil
+	local contextNeed = if context then context.NeedName else nil
+	local isDuplicateContext = (actionName and actionName:lower():find(reasonNeed:lower()))
+		or (contextNeed and contextNeed:lower() == reasonNeed:lower())
+		or (stationLabel and stationLabel:lower():find(reasonNeed:lower()))
+
+	if base and stationPhrase and not isDuplicateContext then
+		return string.format("%s, so I'm stepping away from %s.", base, stationPhrase)
 	elseif base then
 		return base .. "."
 	elseif stationPhrase then
@@ -184,79 +288,110 @@ local InterruptHandlers: { [string]: (InterruptContext?) -> string? } = {
 	ManualOverride = function(context)
 		local stationLabel = resolveStationLabel(context)
 		local stationPhrase = if stationLabel then formatStationForSentence(stationLabel) or stationLabel else nil
-		if stationPhrase then
-			return string.format("I'll step away from %s for now.", stationPhrase)
-		end
-		return "I'll take a short break for now."
+		local variations = if stationPhrase
+			then {
+				string.format("I'll step away from %s for now.", stationPhrase),
+				string.format("Pausing at %s for a moment.", stationPhrase),
+				string.format("I need to stop using %s.", stationPhrase),
+			}
+			else {
+				"I'll take a short break for now.",
+				"Pausing for a moment.",
+				"I need to step away.",
+			}
+		return selectRandom(variations)
 	end,
 	DirectSocialPartnerFailed = function(context)
 		local partner = resolvePartnerName(context)
 		if partner then
-			return string.format("I think %s had to step away mid-chat.", partner)
+			local variations = {
+				string.format("I think %s had to step away mid-chat.", partner),
+				string.format("Looks like %s couldn't continue.", partner),
+				string.format("%s had to leave suddenly.", partner),
+			}
+			return selectRandom(variations)
 		end
-		return "Looks like my chat partner had to leave."
+		return selectRandom({
+			"Looks like my chat partner had to leave.",
+			"They had to step away.",
+			"Our conversation got cut short.",
+		})
 	end,
 	DirectSocialCancelled = function(context)
 		local partner = resolvePartnerName(context)
 		if partner then
-			return string.format("Our chat with %s paused for now.", partner)
+			local variations = {
+				string.format("Our chat with %s paused for now.", partner),
+				string.format("I'll catch up with %s later.", partner),
+				string.format("I need to postpone talking with %s.", partner),
+			}
+			return selectRandom(variations)
 		end
-		return "That conversation is on hold for the moment."
+		return selectRandom({
+			"That conversation is on hold for the moment.",
+			"I'll continue that chat later.",
+			"We'll pick this up another time.",
+		})
 	end,
 	StationRemoved = function(context)
 		local stationLabel = resolveStationLabel(context)
 		local stationPhrase = if stationLabel then formatStationForSentence(stationLabel) or stationLabel else nil
 		if stationPhrase then
-			return string.format("Looks like %s is gone for now.", stationPhrase)
+			local variations = {
+				string.format("Looks like %s is gone for now.", stationPhrase),
+				string.format("I can't use %s anymore.", stationPhrase),
+				string.format("%s disappeared!", stationPhrase),
+			}
+			return selectRandom(variations)
 		end
-		return "Looks like what I was using is gone for now."
+		return selectRandom({
+			"What I was using is gone for now.",
+			"That just disappeared on me!",
+			"I can't use that anymore.",
+		})
 	end,
 	MovementFailed = function(context)
 		local stationLabel = resolveStationLabel(context)
 		local stationPhrase = if stationLabel then formatStationForSentence(stationLabel) or stationLabel else nil
 		if stationPhrase then
-			return string.format("I can't quite reach %s right now.", stationPhrase)
+			local variations = {
+				string.format("I can't quite reach %s right now.", stationPhrase),
+				string.format("I'm having trouble getting to %s.", stationPhrase),
+				string.format("I can't get to %s from here.", stationPhrase),
+			}
+			return selectRandom(variations)
 		end
-		return "I can't get there just yet."
+		return selectRandom({
+			"I can't get there just yet.",
+			"I'm having trouble reaching that spot.",
+			"The path is blocked.",
+		})
 	end,
 	Cancelled = function(_context)
-		return "That was cancelled for now."
+		return selectRandom({
+			"That was cancelled for now.",
+			"Plans changed.",
+			"Never mind that.",
+		})
 	end,
 	EnergySatisfied = function(context)
 		local stationLabel = resolveStationLabel(context)
 		local stationPhrase = if stationLabel then formatStationForSentence(stationLabel) or stationLabel else nil
 		if stationPhrase then
-			return string.format("Feeling rested—wrapping up at %s.", stationPhrase)
+			local variations = {
+				string.format("Feeling rested—wrapping up at %s.", stationPhrase),
+				string.format("I'm energized now! Done with %s.", stationPhrase),
+				string.format("All recharged! Leaving %s.", stationPhrase),
+			}
+			return selectRandom(variations)
 		end
-		return "Feeling rested and ready."
+		return selectRandom({
+			"Feeling rested and ready.",
+			"I'm fully energized now!",
+			"All recharged!",
+		})
 	end,
 }
-
-local InterruptColorMap: { [string]: Enum.ChatColor } = {
-	ManualOverride = Enum.ChatColor.Blue,
-	DirectSocialPartnerFailed = Enum.ChatColor.Blue,
-	DirectSocialCancelled = Enum.ChatColor.Blue,
-	EnergySatisfied = Enum.ChatColor.Blue,
-}
-
-local function resolveInterruptColor(reason: string?): Enum.ChatColor
-	if not reason or reason == "" then
-		return Enum.ChatColor.Red
-	end
-	local normalized = reason
-	local urgentNeed = string.match(reason, "^NeedUrgent:(.+)$")
-	if urgentNeed then
-		return Enum.ChatColor.Red
-	end
-	if string.match(normalized, "^NeedFull:") then
-		return Enum.ChatColor.Blue
-	end
-	local mapped = InterruptColorMap[normalized]
-	if mapped then
-		return mapped
-	end
-	return Enum.ChatColor.Red
-end
 
 function ResidentChat.ResolveInterruptText(reason: string?, context: InterruptContext?): string?
 	if reason == nil or reason == "" then
@@ -287,9 +422,9 @@ function ResidentChat.ResolveInterruptText(reason: string?, context: InterruptCo
 	end
 	local satiatedNeed = string.match(reason, "^NeedFull:(.+)$")
 	if satiatedNeed then
-		local phrase = NeedFullPhrases[satiatedNeed]
-		if phrase then
-			return phrase
+		local phrases = NeedFullPhrases[satiatedNeed]
+		if phrases then
+			return selectRandom(phrases)
 		end
 		local friendlyNeed = humanizeReason(satiatedNeed)
 		return string.format("I'm already topped up on %s.", friendlyNeed)
@@ -301,10 +436,6 @@ function ResidentChat.ResolveInterruptText(reason: string?, context: InterruptCo
 		return string.format("Paused at %s because %s.", stationPhrase, friendlyReason)
 	end
 	return string.format("Paused because %s.", friendlyReason)
-end
-
-function ResidentChat.ResolveInterruptColor(reason: string?): Enum.ChatColor
-	return resolveInterruptColor(reason)
 end
 
 local function resolveHead(residentState): BasePart?
@@ -397,12 +528,16 @@ function ResidentChat.ResolveChatTexts(residentState, options: { ChatOption }?):
 	for _, option in ipairs(options) do
 		local text = option.Text
 		if typeof(text) == "string" and text ~= "" then
-			local hasConditions = option.MinClock ~= nil or option.MaxClock ~= nil
+			local hasTimeConditions = option.MinClock ~= nil or option.MaxClock ~= nil
+			local hasNeedConditions = option.MinNeeds ~= nil or option.MaxNeeds ~= nil
+			local hasAnyConditions = hasTimeConditions or hasNeedConditions
+
 			local meetsTime = clockInRange(clockTime, option.MinClock, option.MaxClock)
 			local meetsNeeds = needsMeetBounds(residentState, option.MinNeeds, option.MaxNeeds)
+
 			if meetsTime and meetsNeeds then
 				valid[#valid + 1] = text
-			elseif not hasConditions and option.MinNeeds == nil and option.MaxNeeds == nil then
+			elseif not hasAnyConditions then
 				fallback[#fallback + 1] = text
 			end
 		end
@@ -428,6 +563,10 @@ function ResidentChat.SelectChatText(residentState, options: { ChatOption }?, la
 	end
 	local pool = if #filtered > 0 then filtered else choices
 	return pool[rng:NextInteger(1, #pool)]
+end
+
+function ResidentChat.GetTimeOfDayGreeting(): string?
+	return getTimeOfDayGreeting()
 end
 
 function ResidentChat.ShowAction(residentState, phrases: { string } | { ChatOption } | string?)
@@ -464,7 +603,7 @@ function ResidentChat.ShowAction(residentState, phrases: { string } | { ChatOpti
 	if not head then
 		return
 	end
-	ChatService:Chat(head, text, Enum.ChatColor.White)
+	fireChatBubble(head, text, "Action", DEFAULT_DURATIONS.Action)
 end
 
 function ResidentChat.ShowInterrupt(residentState, reason: string?, context: InterruptContext?)
@@ -476,8 +615,7 @@ function ResidentChat.ShowInterrupt(residentState, reason: string?, context: Int
 	if not head then
 		return
 	end
-	local color = ResidentChat.ResolveInterruptColor(reason)
-	ChatService:Chat(head, text, color)
+	fireChatBubble(head, text, "Interrupt", DEFAULT_DURATIONS.Interrupt)
 end
 
 function ResidentChat.ShowMoodlet(residentState, moodletName: string)
@@ -485,11 +623,12 @@ function ResidentChat.ShowMoodlet(residentState, moodletName: string)
 	if not head then
 		return
 	end
-	local text = MoodletPhrases[moodletName]
-	if not text then
+	-- Use emoji instead of full text for cleaner, less cluttered feedback
+	local emoji = MoodletEmojis[moodletName]
+	if not emoji or emoji == "" then
 		return
 	end
-	ChatService:Chat(head, text, Enum.ChatColor.Green)
+	fireChatBubble(head, emoji, "Moodlet", DEFAULT_DURATIONS.Moodlet)
 end
 
 return ResidentChat
