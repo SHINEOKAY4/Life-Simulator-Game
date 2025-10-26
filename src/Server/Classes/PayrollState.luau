@@ -25,6 +25,7 @@ type ResidentEarnings = {
 export type PayrollStateData = {
 	LastPayoutTime: number,
 	ResidentEarnings: { [string]: ResidentEarnings },
+	PendingCash: number?,
 }
 
 export type PayrollState = typeof(setmetatable(
@@ -44,6 +45,14 @@ local function sanitizeNonNegativeNumber(value: number?, defaultValue: number): 
 		return defaultValue
 	end
 	return value
+end
+
+local function sanitizeCurrencyAmount(value: number?): number
+	local sanitized = sanitizeNonNegativeNumber(value, 0)
+	if sanitized <= 0 then
+		return 0
+	end
+	return math.floor(sanitized + 0.5)
 end
 
 local function sanitizeResidentEarnings(raw: any): { [string]: ResidentEarnings }
@@ -86,13 +95,16 @@ local function sanitizeResidentEarnings(raw: any): { [string]: ResidentEarnings 
 end
 
 function PayrollState.new(cycleDurationSeconds: number, save: PayrollStateData?): PayrollState
-	local resolvedSave: PayrollStateData = save or {
-		LastPayoutTime = 0,
-		ResidentEarnings = {},
-	}
+	local resolvedSave: PayrollStateData = save
+		or {
+			LastPayoutTime = 0,
+			ResidentEarnings = {},
+			PendingCash = 0,
+		}
 
 	resolvedSave.LastPayoutTime = sanitizeNonNegativeNumber(resolvedSave.LastPayoutTime, 0)
 	resolvedSave.ResidentEarnings = sanitizeResidentEarnings(resolvedSave.ResidentEarnings)
+	resolvedSave.PendingCash = sanitizeCurrencyAmount(resolvedSave.PendingCash)
 
 	local self = setmetatable({}, PayrollState)
 	self.CycleDurationSeconds = cycleDurationSeconds
@@ -177,6 +189,30 @@ end
 function PayrollState:ClearResidentEarnings(residentName: string)
 	local payrollState = self :: PayrollState
 	payrollState.Save.ResidentEarnings[residentName] = nil
+end
+
+function PayrollState:GetPendingCash(): number
+	local payrollState = self :: PayrollState
+	local current = sanitizeCurrencyAmount(payrollState.Save.PendingCash)
+	payrollState.Save.PendingCash = current
+	return current
+end
+
+function PayrollState:AddPendingCash(amount: number): number
+	local payrollState = self :: PayrollState
+	local addition = sanitizeCurrencyAmount(amount)
+	if addition <= 0 then
+		return payrollState:GetPendingCash()
+	end
+	local current = sanitizeCurrencyAmount(payrollState.Save.PendingCash)
+	local updated = current + addition
+	payrollState.Save.PendingCash = updated
+	return updated
+end
+
+function PayrollState:ClearPendingCash()
+	local payrollState = self :: PayrollState
+	payrollState.Save.PendingCash = 0
 end
 
 return PayrollState

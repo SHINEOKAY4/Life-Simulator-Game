@@ -84,7 +84,7 @@ local function getOrCreateBubble(instance: Instance): BubbleEntry?
 		textColor = Color3.new(1, 1, 1),
 		backgroundTransparency = 1,
 		size = UDim2.fromScale(4.5, 1.25),
-		studsOffsetWorldSpace = Vector3.new(0, 8, 0),
+		studsOffsetWorldSpace = Vector3.new(0, 5, 0),
 		alwaysOnTop = true,
 		maxDistance = 70,
 		textSize = 18,

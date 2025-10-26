@@ -11,6 +11,7 @@ local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
 local ResidentChat = require(ServerScriptService.Server.Utilities.ResidentChat)
+local AutonomyState = require(ServerScriptService.Server.Services.ResidentAutonomyService.State)
 
 export type HandlerContext = {
 	Resident: any,
@@ -322,11 +323,15 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 			if not socialDef then
 				return false
 			end
-			for needName, needDef in pairs(Needs) do
+			local survivalNeeds = AutonomyState.SurvivalNeeds
+			for needName in pairs(survivalNeeds) do
 				if needName ~= "Social" then
-					local value = residentState:GetNeed(needName)
-					if value <= needDef.Critical then
-						return true
+					local needDef = Needs[needName]
+					if needDef then
+						local value = residentState:GetNeed(needName)
+						if value <= needDef.Critical then
+							return true
+						end
 					end
 				end
 			end

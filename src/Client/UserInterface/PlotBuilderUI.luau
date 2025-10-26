@@ -127,6 +127,9 @@ local function createButtonsForCategory(category: string): { TextButton }
 		button.AutoButtonColor = true
 		button.LayoutOrder = #buttons
 
+		local uICorner = Instance.new("UICorner")
+		uICorner.CornerRadius = UDim.new(0, 90)
+		uICorner.Parent = button
 		button.MouseButton1Click:Connect(function()
 			print("Selected item: " .. itemModel.Name)
 			PlotBuilder.PreviewSelected(itemModel.Name)

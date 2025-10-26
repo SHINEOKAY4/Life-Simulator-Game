@@ -47,6 +47,7 @@ local Profile = {
 	PayrollState = {
 		LastPayoutTime = 0,
 		ResidentEarnings = {},
+		PendingCash = 0,
 	},
 
 	InventoryState = {},

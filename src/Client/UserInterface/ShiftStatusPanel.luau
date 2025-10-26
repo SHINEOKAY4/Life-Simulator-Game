@@ -8,7 +8,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ResidentNeedsUI = require(script.Parent.ResidentNeedsUI)
 local ShiftStatusFormatter = require(script.Parent.Parent.Modules.ShiftStatusFormatter)
 local ResidentsStore = require(script.Parent.Parent.ClientStores.ResidentsStore)
-local NotificationModule = require(script.Parent.Notification)
 
 local Network = ReplicatedStorage:WaitForChild("Network")
 local JobPackets = require(Network:WaitForChild("JobPackets"))
@@ -64,26 +63,12 @@ local function isResidentOffsite(model: Model?): boolean
 	return model ~= nil and container ~= nil and model.Parent == container
 end
 
-local function showShiftToast(residentName: string, message: string, color: Color3)
-	NotificationModule.Show({
-		Title = residentName,
-		Text = message,
-		BackgroundColor = color,
-		TextColor = Color3.new(1, 1, 1),
-		Duration = 3,
-		Priority = 1,
-	})
+local function showShiftToast(_residentName: string, _message: string, _color: Color3)
+	-- Shift notifications disabled (no-op).
 end
 
-local function showShiftFailure(residentName: string, message: string)
-	NotificationModule.Show({
-		Title = residentName,
-		Text = message,
-		BackgroundColor = GO_HOME_COLOR,
-		TextColor = Color3.new(1, 1, 1),
-		Duration = 4,
-		Priority = 2,
-	})
+local function showShiftFailure(_residentName: string, _message: string)
+	-- Shift notifications disabled (no-op).
 end
 
 local function resolveMessage(message: string?, fallback: string): string
