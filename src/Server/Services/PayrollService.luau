@@ -14,8 +14,24 @@ local PayrollState = require(ServerScriptService.Server.Classes.PayrollState)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 
-local PAYROLL_CYCLE_DURATION_SECONDS = 14400 -- 4 hours
 local CHECK_INTERVAL_SECONDS = 5
+
+local function computeCycleDurationSeconds(): number
+	local secondsPerFullDay = TimeScale.GetSecondsPerFullDay()
+	local secondsPerGameHour = secondsPerFullDay / 24
+	local cycleSeconds = secondsPerGameHour * 8
+	if cycleSeconds <= 0 then
+		cycleSeconds = 60
+	end
+	return cycleSeconds
+end
+
+local function applyCycleDuration(payrollState: PayrollState.PayrollState)
+	local targetDuration = computeCycleDurationSeconds()
+	if math.abs(payrollState.CycleDurationSeconds - targetDuration) > 1e-03 then
+		payrollState.CycleDurationSeconds = targetDuration
+	end
+end
 
 local PayrollService = {}
 local PlayerPayrollStates: { [number]: PayrollState.PayrollState } = {}
@@ -57,7 +73,7 @@ local function ensurePayrollState(player: Player)
 	end
 
 	local payrollStateData = PlayerSession.GetDataAwait(player, "PayrollState")
-	local payrollState = PayrollState.new(PAYROLL_CYCLE_DURATION_SECONDS, payrollStateData)
+	local payrollState = PayrollState.new(computeCycleDurationSeconds(), payrollStateData)
 	PlayerPayrollStates[playerIdentifier] = payrollState
 end
 
@@ -124,6 +140,8 @@ function PayrollService.UpdatePayroll(deltaSeconds: number)
 			continue
 		end
 
+		applyCycleDuration(payrollState)
+
 		payrollState:Update(deltaSeconds)
 
 		if payrollState:IsDue() then
@@ -143,9 +161,11 @@ function PayrollService.ProcessPayroll(player: Player, payrollState: PayrollStat
 	local residentBreakdown: { [string]: number } = {}
 
 	for residentName, earningsData in pairs(allEarnings) do
-		local minutesWorked = earningsData.SecondsWorked / 60
-		local basePay = earningsData.BasePay
-		local payout = math.floor(basePay * minutesWorked + 0.5)
+		local minutesWorked = if typeof(earningsData.WorkMinutes) == "number" then earningsData.WorkMinutes else 0
+		local basePayPerMinute = if typeof(earningsData.BasePayPerMinute) == "number"
+			then earningsData.BasePayPerMinute
+			else 0
+		local payout = math.floor(basePayPerMinute * minutesWorked + 0.5)
 		payout = sanitizeAmount(payout)
 
 		if payout > 0 then
@@ -197,9 +217,11 @@ function PayrollService.GetPayrollBreakdown(player: Player): {
 	if payrollState then
 		local allEarnings = payrollState:GetAllEarnings()
 		for residentName, earningsData in pairs(allEarnings) do
-			local minutesWorked = earningsData.SecondsWorked / 60
-			local basePay = earningsData.BasePay
-			local payout = math.floor(basePay * minutesWorked + 0.5)
+			local minutesWorked = if typeof(earningsData.WorkMinutes) == "number" then earningsData.WorkMinutes else 0
+			local basePayPerMinute = if typeof(earningsData.BasePayPerMinute) == "number"
+				then earningsData.BasePayPerMinute
+				else 0
+			local payout = math.floor(basePayPerMinute * minutesWorked + 0.5)
 			payout = sanitizeAmount(payout)
 
 			if payout > 0 then
@@ -218,9 +240,9 @@ end
 function PayrollService.RecordWorkTime(
 	player: Player,
 	residentName: string,
-	secondsWorked: number,
+	minutesWorked: number,
 	jobId: string,
-	basePay: number
+	basePayPerMinute: number
 )
 	local payrollState = PayrollService.GetPayrollState(player)
 	if not payrollState then
@@ -228,7 +250,14 @@ function PayrollService.RecordWorkTime(
 		return
 	end
 
-	payrollState:AddWorkTime(residentName, secondsWorked, jobId, basePay)
+	if minutesWorked <= 0 then
+		return
+	end
+	if basePayPerMinute <= 0 then
+		return
+	end
+
+	payrollState:AddWorkTime(residentName, minutesWorked, jobId, basePayPerMinute)
 end
 
 function PayrollService.Remove(player: Player)

@@ -1,13 +1,25 @@
 --!strict
 -- ServerScriptService/Server/Classes/PayrollState.luau
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
+
+local function secondsPerGameMinute(): number
+	local secondsPerDay = TimeScale.GetSecondsPerFullDay()
+	local value = secondsPerDay / (24 * 60)
+	if value <= 0 then
+		return 60
+	end
+	return value
+end
+
 local PayrollState = {}
 PayrollState.__index = PayrollState
 
 type ResidentEarnings = {
-	SecondsWorked: number,
+	WorkMinutes: number,
 	JobId: string,
-	BasePay: number,
+	BasePayPerMinute: number,
 }
 
 export type PayrollStateData = {
@@ -42,10 +54,31 @@ local function sanitizeResidentEarnings(raw: any): { [string]: ResidentEarnings 
 	local sanitized: { [string]: ResidentEarnings } = {}
 	for residentName, data in pairs(raw :: { [string]: any }) do
 		if typeof(residentName) == "string" and typeof(data) == "table" then
+			local workMinutes = sanitizeNonNegativeNumber((data :: any).WorkMinutes, -1)
+			local legacySeconds = sanitizeNonNegativeNumber((data :: any).SecondsWorked, 0)
+			if workMinutes < 0 then
+				-- Legacy saves stored real seconds; convert using the active time scale.
+				if legacySeconds > 0 then
+					workMinutes = legacySeconds / secondsPerGameMinute()
+				else
+					workMinutes = 0
+				end
+			end
+
+			local basePayPerMinute = sanitizeNonNegativeNumber((data :: any).BasePayPerMinute, -1)
+			if basePayPerMinute < 0 then
+				local legacyPerSecond = sanitizeNonNegativeNumber((data :: any).BasePay, 0)
+				if legacyPerSecond > 0 then
+					basePayPerMinute = legacyPerSecond * 60
+				else
+					basePayPerMinute = 0
+				end
+			end
+
 			sanitized[residentName] = {
-				SecondsWorked = sanitizeNonNegativeNumber(data.SecondsWorked, 0),
-				JobId = if typeof(data.JobId) == "string" then data.JobId else "",
-				BasePay = sanitizeNonNegativeNumber(data.BasePay, 0),
+				WorkMinutes = workMinutes,
+				JobId = if typeof((data :: any).JobId) == "string" then (data :: any).JobId else "",
+				BasePayPerMinute = basePayPerMinute,
 			}
 		end
 	end
@@ -103,25 +136,25 @@ function PayrollState:ResetCycle()
 	payrollState.Save.LastPayoutTime = 0
 end
 
-function PayrollState:AddWorkTime(residentName: string, secondsWorked: number, jobId: string, basePay: number)
+function PayrollState:AddWorkTime(residentName: string, minutesWorked: number, jobId: string, basePayPerMinute: number)
 	local payrollState = self :: PayrollState
 	if typeof(residentName) ~= "string" or residentName == "" then
 		return
 	end
-	if secondsWorked <= 0 then
+	if minutesWorked <= 0 then
 		return
 	end
 
 	local existing = payrollState.Save.ResidentEarnings[residentName]
 	if existing then
-		existing.SecondsWorked += secondsWorked
+		existing.WorkMinutes += minutesWorked
 		existing.JobId = jobId
-		existing.BasePay = basePay
+		existing.BasePayPerMinute = basePayPerMinute
 	else
 		payrollState.Save.ResidentEarnings[residentName] = {
-			SecondsWorked = secondsWorked,
+			WorkMinutes = minutesWorked,
 			JobId = jobId,
-			BasePay = basePay,
+			BasePayPerMinute = basePayPerMinute,
 		}
 	end
 end

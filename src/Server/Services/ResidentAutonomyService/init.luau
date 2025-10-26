@@ -67,6 +67,27 @@ function ResidentAutonomyService.TrySatisfyNeedsForResident(
 	State.clearNextEvaluation(residentState)
 	local evaluationTime = clockTime or TimeScale.GetClockTime()
 	local stationCache = stationCacheOverride or PlotService.GetStationsForPlayer(player)
+	local attemptedDirectSocial = false
+
+	-- Prefer conversational social interactions before falling back to stations.
+	local needs = State.getNeeds()
+	local socialDef = needs.Social
+	if socialDef then
+		local cooldownSeconds = State.getNeedCooldownSeconds("Social", socialDef)
+		local onCooldown = State.isNeedOnCooldown(residentState, "Social", cooldownSeconds, evaluationClock)
+		if not onCooldown then
+			local socialValue = residentState:GetNeed("Social")
+			if socialValue < socialDef.Low then
+				local blocking = Utils.hasBlockingCriticalNeed(player, residentState, "Social", stationCache)
+				if not blocking then
+					attemptedDirectSocial = true
+					if SocialCoordinator.attemptDirectSocial(player, residentName, residentState, stationCache) then
+						return true
+					end
+				end
+			end
+		end
+	end
 	local decision = ResidentAutonomyService.EvaluateResidentNeeds(
 		player,
 		residentName,
@@ -77,7 +98,7 @@ function ResidentAutonomyService.TrySatisfyNeedsForResident(
 	)
 	if not decision then
 		local otherCriticalNeeds = Utils.hasBlockingCriticalNeed(player, residentState, "Social", stationCache)
-		if not otherCriticalNeeds then
+		if not otherCriticalNeeds and not attemptedDirectSocial then
 			if SocialCoordinator.attemptDirectSocial(player, residentName, residentState, stationCache) then
 				return true
 			end

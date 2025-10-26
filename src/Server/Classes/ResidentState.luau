@@ -11,7 +11,7 @@ export type ResidentData = {
 	Statistics: { [string]: number }?,
 	CurrentCareerId: string?,
 	CareerStreak: number?,
-	MomentumExpireClock: number?,
+	AssignedShiftId: string?,
 }
 
 type MoodletRuntime = {
@@ -91,8 +91,8 @@ local function ensureCareerFields(save: ResidentData)
 	if typeof(save.CareerStreak) ~= "number" then
 		save.CareerStreak = 0
 	end
-	if typeof(save.MomentumExpireClock) ~= "number" then
-		save.MomentumExpireClock = 0
+	if typeof(save.AssignedShiftId) ~= "string" then
+		save.AssignedShiftId = ""
 	end
 end
 
@@ -129,6 +129,22 @@ function ResidentState.new(save: ResidentData)
 	self.Model = nil :: Model?
 	self.Connections = self:BindConnections()
 	return self
+end
+
+function ResidentState:_setCurrentActionAttribute(value: string?)
+	local model = self.Model
+	if model and model:IsA("Model") then
+		model:SetAttribute("CurrentActionName", value)
+	end
+end
+
+function ResidentState:SyncCurrentActionAttribute()
+	local currentAction = self.CurrentAction
+	if typeof(currentAction) == "string" and currentAction ~= "" then
+		self:_setCurrentActionAttribute(currentAction)
+	else
+		self:_setCurrentActionAttribute(nil)
+	end
 end
 
 function ResidentState:GetCancelToken()
@@ -200,6 +216,7 @@ function ResidentState:ForceStopAllActions(reason: string?)
 	if self.ActionChanged then
 		self.ActionChanged:Fire(nil)
 	end
+	self:_setCurrentActionAttribute(nil)
 	if activeAction and self.ActionCompleted then
 		self.ActionCompleted:Fire(activeAction, false, cancelReason)
 	end
@@ -255,6 +272,7 @@ function ResidentState:BindConnections()
 			self.CurrentAction = actionName
 			self.IsBusy = true
 			self.ActionChanged:Fire(actionName)
+			self:_setCurrentActionAttribute(actionName)
 		end)
 	)
 
@@ -265,6 +283,7 @@ function ResidentState:BindConnections()
 			self.ActionCompleted:Fire(actionName, succeeded, errorMessage)
 			self.CurrentAction = nil
 			self:ResetCancelToken()
+			self:_setCurrentActionAttribute(nil)
 		end)
 	)
 	table.insert(
@@ -273,6 +292,7 @@ function ResidentState:BindConnections()
 			self.CurrentAction = nil
 			self.IsBusy = false
 			self.ActionChanged:Fire(nil)
+			self:_setCurrentActionAttribute(nil)
 		end)
 	)
 	return connections

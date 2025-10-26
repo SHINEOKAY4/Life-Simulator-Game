@@ -10,7 +10,7 @@ local Formatter = require(ReplicatedStorage.Shared.Utilities.Formatter)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local VisualFX = require(ReplicatedStorage.Shared.Utilities.VisualFX)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
-local ResidentNeedsUI = require(script.Parent:WaitForChild("ResidentNeedsUI"))
+local ResidentNeedsUI = require(script.Parent.ResidentNeedsUI)
 local CurrencyPackets = require(ReplicatedStorage.Network.CurrencyPackets)
 local BillingPackets = require(ReplicatedStorage.Network.BillingPackets)
 local SoundtrackManager = require(script.Parent.Parent.Modules.SoundtrackManager)
@@ -23,6 +23,7 @@ local BillContext = InputContextsFolder:WaitForChild("BillContext")
 
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local HUDBottomRightEnabled = ActiveQueryFolder:FindFirstChild("HUDBottomRightEnabled") :: BoolValue
+local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
 
 local MainHUDGui = PlayerGui:WaitForChild("MainHUD") :: ScreenGui
 local BillFrame = MainHUDGui:WaitForChild("BillFrame") :: Frame
@@ -717,6 +718,13 @@ function MainHUD.Init()
 		end, Player.UserId)
 	end)
 
+	JobSelectionUIEnabled.Changed:Connect(function()
+		if JobSelectionUIEnabled.Value then
+			MainHUD.Hide()
+		else
+			MainHUD.Show()
+		end
+	end)
 	-- Initial request on script load
 	task.defer(requestAndUpdateBillingInfo)
 

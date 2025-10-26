@@ -15,10 +15,15 @@ local SOUND_IDS = {
 	BillToggle = "rbxassetid://135041843438612",
 	BillPaid = "rbxassetid://5613553529",
 	PlacementSuccess = "rbxassetid://9119999441",
+	Notification = "rbxassetid://9119999441",
 }
 
 local BILLING_SFX_OPTIONS = {
 	Volume = 0.85,
+}
+
+local NOTIFICATION_SFX_OPTIONS = {
+	Volume = 0.55,
 }
 
 local BUTTON_SFX_OPTIONS = {
@@ -182,7 +187,18 @@ function SoundtrackManager.PlayNotificationSound(
 	soundId: string?,
 	options: { Volume: number?, PlaybackSpeed: number? }?
 )
-	playSfx(soundId, options)
+	if soundId == "" then
+		return
+	end
+	local resolvedId = soundId
+	if resolvedId == nil or resolvedId == "" then
+		resolvedId = SOUND_IDS.Notification
+	end
+	local resolvedOptions = options
+	if resolvedId == SOUND_IDS.Notification then
+		resolvedOptions = options or NOTIFICATION_SFX_OPTIONS
+	end
+	playSfx(resolvedId, resolvedOptions)
 end
 
 function SoundtrackManager.PlayBillToggle()
@@ -196,5 +212,7 @@ end
 function SoundtrackManager.PlayPlacementSuccess()
 	playSfx(SOUND_IDS.PlacementSuccess, PLACEMENT_SFX_OPTIONS)
 end
+
+SoundtrackManager.NotificationSoundId = SOUND_IDS.Notification
 
 return SoundtrackManager

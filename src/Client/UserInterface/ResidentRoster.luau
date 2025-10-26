@@ -89,6 +89,8 @@ type FrameInfo = {
 	PlaySizeTween: (UDim2) -> (),
 	UpdateGradient: () -> (),
 	UpdateResidentSnapshot: (any) -> (),
+	ResidentModel: Model?,
+	GetResidentSnapshot: () -> any?,
 }
 
 local ResidentRoster = {}
@@ -98,6 +100,14 @@ local SelectedResidentName: string? = nil
 local cachedMovementState: { WalkSpeed: number?, JumpPower: number?, AutoJumpEnabled: boolean? }? = nil
 local isMovementDisabled = false
 
+local function getOffsiteFolder(): Folder?
+	local container = ReplicatedStorage:FindFirstChild("ResidentOffsite")
+	if container and container:IsA("Folder") then
+		return container
+	end
+	return nil
+end
+
 local function scaleUDim2(baseSize: UDim2, multiplier: number): UDim2
 	return UDim2.new(
 		baseSize.X.Scale * multiplier,
@@ -106,6 +116,47 @@ local function scaleUDim2(baseSize: UDim2, multiplier: number): UDim2
 		math.round(baseSize.Y.Offset * multiplier)
 	)
 end
+
+local function resolveResidentModel(residentName: string): Model?
+	local plotIndexValue = Player:GetAttribute("OwnedPlotIndex")
+	if typeof(plotIndexValue) == "number" then
+		local plotModel = PlotFinder.FindPlot(plotIndexValue)
+		if plotModel then
+			local residentsFolder = plotModel:FindFirstChild("Residents")
+			if residentsFolder then
+				local instance = residentsFolder:FindFirstChild(residentName)
+				if instance and instance:IsA("Model") then
+					local frameInfo = FrameData[residentName]
+					if frameInfo then
+						frameInfo.ResidentModel = instance
+					end
+					return instance
+				end
+			end
+		end
+	end
+
+	local offsite = getOffsiteFolder()
+	if offsite then
+		local instance = offsite:FindFirstChild(residentName)
+		if instance and instance:IsA("Model") then
+			local frameInfo = FrameData[residentName]
+			if frameInfo then
+				frameInfo.ResidentModel = instance
+			end
+			return instance
+		end
+	end
+
+	local frameInfo = FrameData[residentName]
+	if frameInfo and frameInfo.ResidentModel and frameInfo.ResidentModel.Parent then
+		return frameInfo.ResidentModel
+	end
+
+	return nil
+end
+
+-- Shift status display removed; roster frames focus on name and needs only.
 
 local function registerButtonHover(button: TextButton, registryKey: string)
 	local imageFrame = button:FindFirstChild("Image")
@@ -267,17 +318,25 @@ local function refreshRosterVisibility()
 	local shouldShow = ResidentRosterEnabled.Value and not isRosterBlocked()
 	if shouldShow then
 		setRosterVisible(true)
+		if SelectedResidentName then
+			ResidentNeedsFrame.Visible = true
+		end
 		return
 	end
 
 	if isRosterVisible then
-		deselectResident()
+		-- Only hide UI elements if job selection is open; otherwise fully deselect
+		if JobSelectionUIEnabled and JobSelectionUIEnabled.Value then
+			ResidentNeedsUI.Hide(true)
+		else
+			deselectResident()
+		end
 	end
 
 	setRosterVisible(false)
 end
 
-local function selectResident(residentName: string, residentModel: Model)
+local function selectResident(residentName: string)
 	if SelectedResidentName == residentName then
 		deselectResident()
 		return
@@ -295,6 +354,12 @@ local function selectResident(residentName: string, residentModel: Model)
 		return
 	end
 
+	local residentModel = resolveResidentModel(residentName)
+	if not residentModel then
+		warn(string.format("[ResidentRoster] Could not locate resident model for '%s'", residentName))
+		return
+	end
+
 	SelectedResidentName = residentName
 	ResidentRosterEnabled.Value = true
 	setRosterVisible(true)
@@ -305,16 +370,21 @@ local function selectResident(residentName: string, residentModel: Model)
 	local currentData = FrameData[residentName]
 	if currentData then
 		currentData.PlaySizeTween(HoverSizeGoal)
+		currentData.ResidentModel = residentModel
 	end
-	local focusFrame = computeIsometricCameraCFrame(residentModel)
-	if focusFrame then
-		local cameraSubject = findResidentCameraSubject(residentModel)
-		CameraUtils.FocusOn(focusFrame, {
-			duration = CAMERA_FOCUS_DURATION_SECONDS,
-			restoreOnComplete = false,
-			cameraTypeOnComplete = Enum.CameraType.Custom,
-			cameraSubjectOnComplete = cameraSubject,
-		})
+	if residentModel:IsDescendantOf(workspace) then
+		local focusFrame = computeIsometricCameraCFrame(residentModel)
+		if focusFrame then
+			local cameraSubject = findResidentCameraSubject(residentModel)
+			CameraUtils.FocusOn(focusFrame, {
+				duration = CAMERA_FOCUS_DURATION_SECONDS,
+				restoreOnComplete = false,
+				cameraTypeOnComplete = Enum.CameraType.Custom,
+				cameraSubjectOnComplete = cameraSubject,
+			})
+		end
+	else
+		CameraUtils.CancelFocus()
 	end
 	setPlayerMovementEnabled(false)
 end
@@ -437,6 +507,10 @@ local function CreateResidentImageButton(residentData: any)
 		PlaySizeTween = playSizeTween,
 		UpdateGradient = updateResidentGradient,
 		UpdateResidentSnapshot = updateResidentSnapshot,
+		ResidentModel = residentModel,
+		GetResidentSnapshot = function()
+			return currentResidentSnapshot
+		end,
 	}
 	updateResidentGradient()
 	newFrame.Parent = Roster
@@ -478,12 +552,12 @@ function ResidentRoster.Init(): ()
 		if not ResidentGui.Enabled then
 			ResidentGui.Enabled = true
 		end
-		local residentFrame, residentModel = CreateResidentImageButton(residentData)
+		local residentFrame = CreateResidentImageButton(residentData)
 		local portraitButton = residentFrame.PortraitButton :: TextButton
 		local activationConnection = portraitButton.Activated:Connect(function()
 			runDebounced(string.format("Select/%s", residentData.Name), function()
 				print("Selected resident:", residentData.Name)
-				selectResident(residentData.Name, residentModel)
+				selectResident(residentData.Name)
 			end)
 		end)
 		Connections[residentData.Name] = Connections[residentData.Name] or {}

@@ -2,6 +2,8 @@
 
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
 
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
@@ -15,8 +17,10 @@ local StationManager = require(script.Parent.StationManager)
 local ActionQueue = require(script.Parent.ActionQueue)
 local RandomProvider = require(script.Parent.RandomProvider)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
-
-local CareerService -- Lazy loaded to avoid circular dependency
+local ShiftSchedulerService = require(ServerScriptService.Server.Services.ShiftSchedulerService)
+local CareerShiftConfig = require(ReplicatedStorage.Shared.Configurations.CareerShiftConfig)
+local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
+local CareerService = require(ServerScriptService.Server.Services.CareerService)
 
 export type ResidentState = any
 type StationCache = { [string]: any }
@@ -45,11 +49,96 @@ local BEG_ROAM_MAX_DISTANCE = math.max(Constants.BEG_ROAM_MAX_DISTANCE or 25, BE
 local BEG_ROAM_HEIGHT_OFFSET = Constants.BEG_ROAM_HEIGHT_OFFSET or 0
 local BEG_MOVE_TIMEOUT_SECONDS = math.max(Constants.BEG_MOVE_TIMEOUT_SECONDS or 0, 1)
 local BEG_ROAM_INTERVAL_SECONDS = math.max(Constants.BEG_ROAM_INTERVAL_SECONDS or 8, 3)
+local SHIFT_START_LEAD_SECONDS = 12
 
 local function getResidentName(resident: ResidentState): string
 	local save = resident and resident.Save
 	local name = if typeof(save) == "table" and typeof(save.Name) == "string" then save.Name else nil
 	return name or "Resident"
+end
+
+local function clockBaselineHours(): number
+	return (tonumber(Lighting:GetAttribute("StartClockTime")) or 16.5) % 24
+end
+
+local function clockToDaySeconds(clockTime: number, secPerDay: number): number
+	local baseline = clockBaselineHours()
+	local deltaHours = (clockTime - baseline) % 24
+	return (deltaHours / 24) * secPerDay
+end
+
+local function computeShiftDuration(template: CareerShiftConfig.ShiftTemplate, secPerDay: number): (number, number)
+	local startSeconds = clockToDaySeconds(template.StartClockTime, secPerDay)
+	local endSeconds = clockToDaySeconds(template.EndClockTime, secPerDay)
+	local duration = (endSeconds - startSeconds) % secPerDay
+	if duration <= 0 then
+		duration = secPerDay
+	end
+	return startSeconds, duration
+end
+
+local function isDayAllowed(template: CareerShiftConfig.ShiftTemplate, dayIndex: number): boolean
+	local dayOfWeek = dayIndex % 7
+	for _, allowedDay in template.Days do
+		if allowedDay == dayOfWeek then
+			return true
+		end
+	end
+	return false
+end
+
+local function isWithinTemplateWindow(
+	template: CareerShiftConfig.ShiftTemplate,
+	now: number,
+	secPerDay: number
+): boolean
+	local startOffset, duration = computeShiftDuration(template, secPerDay)
+	local baseDayIndex = math.floor(now / secPerDay)
+	for dayOffset = 0, 1 do
+		local dayIndex = baseDayIndex - dayOffset
+		if dayIndex < 0 then
+			break
+		end
+		if isDayAllowed(template, dayIndex) then
+			local startTime = dayIndex * secPerDay + startOffset
+			local endTime = startTime + duration
+			if now >= startTime and now < endTime then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function shouldAttemptShift(player: Player, residentName: string, assignedShiftId: string): boolean
+	local snapshot = ShiftSchedulerService.GetShiftRuntimeSnapshot(player, residentName)
+	if snapshot then
+		if snapshot.Active then
+			return false
+		end
+		local now = Workspace:GetServerTimeNow()
+		if snapshot.IsWithinWindow then
+			local windowEnd = snapshot.WindowEndTime
+			if windowEnd == nil or now < windowEnd then
+				return true
+			end
+		end
+		local nextStartTime = snapshot.NextStartTime
+		if nextStartTime then
+			if now >= nextStartTime - SHIFT_START_LEAD_SECONDS and now <= nextStartTime + SHIFT_START_LEAD_SECONDS then
+				return true
+			end
+		end
+		return false
+	end
+
+	local template = CareerShiftConfig.GetShift(assignedShiftId)
+	if not template then
+		return false
+	end
+	local now = Workspace:GetServerTimeNow()
+	local secPerDay = TimeScale.GetSecondsPerFullDay()
+	return isWithinTemplateWindow(template, now, secPerDay)
 end
 
 -- Picks a random position within the plot at a specified distance range from spawn
@@ -371,29 +460,29 @@ function FallbackActions.evaluateResidentJob(
 
 	local hasJob = typeof(currentCareerId) == "string" and currentCareerId ~= ""
 
-	-- If resident has a career and auto-job is enabled, send them to work
-	if hasJob then
-		-- Lazy load CareerService to avoid circular dependency
-		if not CareerService then
-			CareerService = require(ServerScriptService.Server.Services.CareerService)
-		end
+	local waitingForShiftWindow = false
 
-		-- Only start shift if not already working
-		if not resident.IsOnShift then
+	-- If resident has a career and auto-job is enabled, send them to work when allowed
+	if hasJob then
+		if resident.IsOnShift then
+			return false
+		end
+		local assignedShiftId = if save and typeof(save.AssignedShiftId) == "string" then save.AssignedShiftId else ""
+		if assignedShiftId ~= "" and shouldAttemptShift(player, residentName, assignedShiftId) then
 			local success, message = CareerService.StartResidentShift(player, residentName)
 			if success then
 				return true
-			else
-				-- If unable to start shift (e.g., low energy), fall through to begging/roaming
-				if message and message:find("exhausted") then
-					-- Let them rest instead of begging when exhausted
-					return FallbackActions.enqueueRoamAction(player, residentName, resident)
-				end
 			end
-		else
-			-- Already at work, don't queue other actions
-			return false
+			if message and message:find("exhausted") then
+				return FallbackActions.enqueueRoamAction(player, residentName, resident)
+			end
+		elseif assignedShiftId ~= "" then
+			waitingForShiftWindow = true
 		end
+	end
+
+	if waitingForShiftWindow then
+		return FallbackActions.enqueueRoamAction(player, residentName, resident)
 	end
 
 	-- No career or unable to work, fall back to begging

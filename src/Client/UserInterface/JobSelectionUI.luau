@@ -10,6 +10,7 @@ local ResidentNeedsUI = require(script.Parent.ResidentNeedsUI)
 local GigManager = require(script.Parent.Parent.Modules.GigManager)
 local JobPackets = require(ReplicatedStorage.Network.JobPackets)
 local JobCatalog = require(ReplicatedStorage.Shared.Configurations.JobCatalog)
+local CareerShiftConfig = require(ReplicatedStorage.Shared.Configurations.CareerShiftConfig)
 local Timer = require(ReplicatedStorage.Shared.Utilities.Timer)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
@@ -57,6 +58,7 @@ type JobFolder = Folder & {
 }
 
 type JobInfo = JobCatalog.JobEntry
+type ShiftTemplate = CareerShiftConfig.ShiftTemplate
 type TimerInstance = Timer.TimerInstance
 
 type CardMetadata = {
@@ -73,6 +75,82 @@ local catalogJobs = JobCatalog.Jobs :: { JobInfo }
 local jobsById: { [string]: JobInfo } = {}
 for _, job in ipairs(catalogJobs) do
 	jobsById[job.Id] = job
+end
+
+local DAY_NAMES = {
+	"Sun",
+	"Mon",
+	"Tue",
+	"Wed",
+	"Thu",
+	"Fri",
+	"Sat",
+}
+
+local function formatClockTime(clockTime: number?): string?
+	if typeof(clockTime) ~= "number" then
+		return nil
+	end
+	local totalMinutes = math.floor(clockTime * 60 + 0.5)
+	local hours24 = math.floor(totalMinutes / 60) % 24
+	local minutes = totalMinutes % 60
+	local period = if hours24 >= 12 then "PM" else "AM"
+	local hour12 = hours24 % 12
+	if hour12 == 0 then
+		hour12 = 12
+	end
+	return string.format("%d:%02d %s", hour12, minutes, period)
+end
+
+local function summarizeShift(template: ShiftTemplate?): (string?, string?)
+	if not template then
+		return nil, nil
+	end
+	local label = template.Label ~= "" and template.Label or template.Id
+	local startText = formatClockTime(template.StartClockTime)
+	local endText = formatClockTime(template.EndClockTime)
+	local shortSummary = nil
+	if startText and endText then
+		shortSummary = string.format("%s · %s–%s", label, startText, endText)
+	elseif startText then
+		shortSummary = string.format("%s · Starts %s", label, startText)
+	else
+		shortSummary = label
+	end
+	local detailSummary = shortSummary
+	local days = template.Days
+	if type(days) == "table" and #days > 0 then
+		local sortedDays = table.create(#days)
+		for index, dayNumber in ipairs(days) do
+			sortedDays[index] = dayNumber
+		end
+		table.sort(sortedDays)
+		local names = table.create(#sortedDays)
+		for index, dayNumber in ipairs(sortedDays) do
+			local dayName = DAY_NAMES[(dayNumber % 7) + 1] or tostring(dayNumber)
+			names[index] = dayName
+		end
+		local dayText = table.concat(names, ", ")
+		if startText and endText then
+			detailSummary = string.format("%s • %s–%s (%s)", label, startText, endText, dayText)
+		else
+			detailSummary = string.format("%s (%s)", shortSummary or label, dayText)
+		end
+	end
+	return shortSummary, detailSummary
+end
+
+local function getShiftTemplateFromFolder(jobFolder: JobFolder): ShiftTemplate?
+	local shiftIdAttr = jobFolder:GetAttribute("ShiftId")
+	if type(shiftIdAttr) ~= "string" or shiftIdAttr == "" then
+		return nil
+	end
+	return CareerShiftConfig.GetShift(shiftIdAttr)
+end
+
+local function getShiftSummaries(jobFolder: JobFolder): (string?, string?)
+	local template = getShiftTemplateFromFolder(jobFolder)
+	return summarizeShift(template)
 end
 
 local function getJobInfo(jobId: string): JobInfo?
@@ -198,13 +276,27 @@ end
 local function updateDetailPanel(jobInfo: JobInfo, jobFolder: JobFolder)
 	DetailPanel.Title.Text = jobInfo.Name
 	DetailPanel.Description.Text = jobInfo.Description or ""
-	DetailPanel.Highlight.Text = jobInfo.Highlight or ""
+
+	local shiftShort, shiftDetail = getShiftSummaries(jobFolder)
+	local highlightText = jobInfo.Highlight or ""
+	if shiftDetail then
+		if highlightText ~= "" then
+			highlightText = string.format("%s\nShift: %s", highlightText, shiftDetail)
+		else
+			highlightText = string.format("Shift: %s", shiftDetail)
+		end
+	end
+	DetailPanel.Highlight.Text = highlightText
 	local jobTypeAttr = jobFolder:GetAttribute("Type")
 	local rawJobType = if type(jobTypeAttr) == "string" then jobTypeAttr else getJobDisplayType(jobInfo)
 	local displayJobType = if rawJobType == "Profession" then "Career" else tostring(rawJobType)
 	local basePay = tostring(jobInfo.BasePay)
 	local payUnit = tostring(jobInfo.PayUnit)
-	DetailPanel.Subtitle.Text = string.format("%s • %s per %s", displayJobType, basePay, payUnit)
+	local subtitle = string.format("%s • %s per %s", displayJobType, basePay, payUnit)
+	if shiftShort then
+		subtitle = string.format("%s • %s", subtitle, shiftShort)
+	end
+	DetailPanel.Subtitle.Text = subtitle
 	DetailPanel.ApplyButton.Text = if jobTypeAttr == "Profession" then "Apply Now" else "Start Gig"
 	local requirementsLabel = getRequirementsLabel()
 	if requirementsLabel then
@@ -232,7 +324,17 @@ local function updateCardText(jobFolder: JobFolder, jobCard: TextButton, jobInfo
 	local payUnit = tostring(jobInfo.PayUnit)
 	local maxSlots = jobFolder:GetAttribute("MaxSlots")
 	local slotsRemaining = jobFolder:GetAttribute("SlotsRemaining")
-	blurb.Text = jobInfo.Highlight or ""
+	local shiftShort, _ = getShiftSummaries(jobFolder)
+	local highlightText = jobInfo.Highlight or ""
+	if shiftShort then
+		if highlightText ~= "" then
+			blurb.Text = string.format("%s\nShift: %s", highlightText, shiftShort)
+		else
+			blurb.Text = string.format("Shift: %s", shiftShort)
+		end
+	else
+		blurb.Text = highlightText
+	end
 	pay.Text = string.format("$ %s per %s", tostring(basePay), payUnit)
 	title.Text = jobInfo.Name
 	if availableSlots then
@@ -317,6 +419,16 @@ local function createCard(jobFolder: JobFolder): TextButton?
 		end)
 	)
 
+	table.insert(
+		connections,
+		jobFolder:GetAttributeChangedSignal("ShiftId"):Connect(function()
+			updateCardText(jobFolder, jobCard, jobInfo)
+			if selectedCard == jobCard then
+				updateDetailPanel(jobInfo, jobFolder)
+			end
+		end)
+	)
+
 	activeCards[jobFolder] = {
 		Button = jobCard,
 		Action = inputAction,
@@ -378,6 +490,11 @@ function JobSelectionUI.Init()
 		end
 	end)
 
+	JobSelectionContext.CloseButtonAction.Pressed:Connect(function()
+		runDebounced("Close", function()
+			JobSelectionUI.Hide()
+		end)
+	end)
 	JobSelectionContext.ApplyButtonAction.Pressed:Connect(function()
 		runDebounced("Apply", function()
 			if selectedCard then
@@ -421,7 +538,6 @@ function JobSelectionUI.Init()
 	JobSelectionContext.Toggle.Pressed:Connect(function()
 		runDebounced("Toggle", function()
 			if JobSelectionGui.Enabled then
-				print("Hiding Job Selection UI")
 				JobSelectionUI.Hide()
 			else
 				JobSelectionUI.Show()
@@ -458,17 +574,23 @@ function JobSelectionUI.Init()
 end
 
 function JobSelectionUI.Show()
+	if JobSelectionUIEnabled.Value then
+		return
+	end
+	JobSelectionUIEnabled.Value = true
 	JobSelectionGui.Enabled = true
 	InputContext.Enabled = true
-	JobSelectionUIEnabled.Value = true
 	if BlurEffect then
 		BlurEffect.Enabled = true
 	end
 end
 
 function JobSelectionUI.Hide()
-	JobSelectionGui.Enabled = false
+	if not JobSelectionUIEnabled.Value then
+		return
+	end
 	JobSelectionUIEnabled.Value = false
+	JobSelectionGui.Enabled = false
 	InputContext.Enabled = false
 	if BlurEffect then
 		BlurEffect.Enabled = false

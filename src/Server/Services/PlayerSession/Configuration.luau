@@ -1,13 +1,13 @@
 local Configuration = {
-	
-	STORE_NAME = "Test1",
-	
+
+	STORE_NAME = "Test144",
+
 	SCOPE = "Global",
-	
+
 	TIMEOUT = 10,
-	
+
 	DEBUG = false,
-	
+
 	DEBUGOPTIONS = {
 		tag = "PlayerSession",
 		includeTimestamp = true,

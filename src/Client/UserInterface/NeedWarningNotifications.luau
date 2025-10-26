@@ -14,7 +14,6 @@ type NeedSeverity = "Low" | "Critical" | "Satisfied"
 
 type NeedEntry = {
 	lastShownSeverity: NeedSeverity?,
-	lastShownTime: number,
 	pendingSeverity: NeedSeverity?,
 	currentValue: number?,
 	lastSatisfiedShown: boolean,
@@ -54,8 +53,7 @@ local NEED_SEVERITY_COLORS: { [NeedSeverity]: Color3 } = {
 local NEED_DEFINITIONS = NeedConfig.Needs
 local SOUND_ID = "rbxassetid://109149869070031"
 local TOAST_DURATION_SECONDS = 4.5
-local REMINDER_INTERVAL_SECONDS = 60
-
+-- Toast spam felt noisy; rely on threshold crossings instead of periodic reminders.
 local NEED_PLACEMENT: NotificationPlacement = {
 	Parent = ResidentGui,
 	AnchorPoint = Vector2.new(0, 0.5),
@@ -126,7 +124,6 @@ local function ensureNeedEntry(residentName: string, needName: string): NeedEntr
 	if not entry then
 		entry = {
 			lastShownSeverity = nil,
-			lastShownTime = 0,
 			pendingSeverity = nil,
 			currentValue = nil,
 			lastSatisfiedShown = false,
@@ -186,15 +183,11 @@ local function handleNeedValue(residentName: string, needName: string, needValue
 		return
 	end
 
-	local now = os.clock()
-	local shouldShow = entry.lastShownSeverity == nil
-		or entry.lastShownSeverity ~= severity
-		or now - entry.lastShownTime >= REMINDER_INTERVAL_SECONDS
+	local shouldShow = entry.lastShownSeverity == nil or entry.lastShownSeverity ~= severity
 
 	if shouldShow then
 		showNeedToast(residentName, needName, severity)
 		entry.lastShownSeverity = severity
-		entry.lastShownTime = now
 		entry.pendingSeverity = nil
 	else
 		entry.pendingSeverity = nil
@@ -237,19 +230,14 @@ local function processPendingWarnings()
 				stillValid = typeof(needValue) == "number" and needValue <= needDefinition.Low
 			end
 			if stillValid then
-				local now = os.clock()
 				if severityToShow == "Satisfied" then
 					if not entry.lastSatisfiedShown then
 						showNeedToast(residentName, needName, severityToShow)
 						entry.lastSatisfiedShown = true
 					end
-				elseif
-					entry.lastShownSeverity ~= severityToShow
-					or now - entry.lastShownTime >= REMINDER_INTERVAL_SECONDS
-				then
+				elseif entry.lastShownSeverity ~= severityToShow then
 					showNeedToast(residentName, needName, severityToShow)
 					entry.lastShownSeverity = severityToShow
-					entry.lastShownTime = now
 				end
 			else
 				if severityToShow ~= "Satisfied" then

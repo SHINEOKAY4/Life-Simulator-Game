@@ -4,17 +4,20 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
 
 local JobCatalog = require(ReplicatedStorage.Shared.Configurations.JobCatalog)
+local CareerShiftConfig = require(ReplicatedStorage.Shared.Configurations.CareerShiftConfig)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local JobPackets = require(ReplicatedStorage.Network.JobPackets)
 local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
+local PayrollService = require(ServerScriptService.Server.Services.PayrollService)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ResidentPlacer = require(ServerScriptService.Server.Utilities.ResidentPlacer)
 local ResidentMovement = require(ServerScriptService.Server.Utilities.ResidentMovement)
-
-local PayrollService -- Lazy loaded to avoid circular dependency
+local ShiftSchedulerService = require(ServerScriptService.Server.Services.ShiftSchedulerService)
 
 export type CareerResult = {
 	Success: boolean,
@@ -50,11 +53,112 @@ end
 
 type ActiveResidentShift = {
 	JobId: string,
-	StartClock: number,
+	ShiftId: string?,
+	StartServerTime: number,
 	SecondsPerMinute: number,
+	AccumulatedSeconds: number,
 	EnergyConnection: RBXScriptConnection?,
 	ForcedReason: string?,
 }
+
+type ShiftOperationOptions = {
+	Source: "Manual" | "Scheduler",
+}
+
+type ShiftRuntimeSnapshot = ShiftSchedulerService.ShiftRuntimeSnapshot
+
+local function sanitizeMessage(raw: string?): string
+	if type(raw) ~= "string" then
+		return ""
+	end
+	return raw:match("^%s*(.-)%s*$") or ""
+end
+
+local function resolveResidentName(residentName: string?): string
+	if type(residentName) == "string" and residentName ~= "" then
+		return residentName
+	end
+	return "Resident"
+end
+
+local function formatClockTime(clockValue: number?): string?
+	if typeof(clockValue) ~= "number" then
+		return nil
+	end
+	local totalMinutes = math.floor(clockValue * 60 + 0.5)
+	local hour24 = math.floor(totalMinutes / 60) % 24
+	local minutes = totalMinutes % 60
+	local period = if hour24 >= 12 then "PM" else "AM"
+	local hour12 = hour24 % 12
+	if hour12 == 0 then
+		hour12 = 12
+	end
+	return string.format("%d:%02d %s", hour12, minutes, period)
+end
+
+local function formatClockFromServerSeconds(serverSeconds: number?): string?
+	if typeof(serverSeconds) ~= "number" then
+		return nil
+	end
+	return formatClockTime(TimeScale.ClockTimeFromServerSeconds(serverSeconds))
+end
+
+local function describeClosedWindow(
+	residentName: string,
+	template: CareerShiftConfig.ShiftTemplate,
+	snapshot: ShiftRuntimeSnapshot?
+): string
+	local shiftLabel = if template.Label and template.Label ~= "" then template.Label else "shift"
+	local readableTime: string? = nil
+	if snapshot then
+		readableTime = formatClockFromServerSeconds(snapshot.NextStartTime)
+		if not readableTime then
+			readableTime = formatClockFromServerSeconds(snapshot.WindowStartTime)
+		end
+	end
+	if not readableTime then
+		readableTime = formatClockTime(template.StartClockTime)
+	end
+	if readableTime then
+		return string.format("%s's %s window opens at %s. Try again then.", residentName, shiftLabel, readableTime)
+	end
+	return string.format(
+		"%s's %s window is closed right now. Try again during the scheduled window.",
+		residentName,
+		shiftLabel
+	)
+end
+
+local function isSchedulerSource(options: ShiftOperationOptions?): boolean
+	return options ~= nil and options.Source == "Scheduler"
+end
+
+local function sendShiftNotice(
+	player: Player?,
+	residentName: string,
+	shift: CareerShiftConfig.ShiftTemplate?,
+	noticeType: string,
+	serverSeconds: number?,
+	message: string
+)
+	if not player or player.Parent == nil then
+		return
+	end
+	if not shift then
+		return
+	end
+	local clockTime = if typeof(serverSeconds) == "number"
+		then TimeScale.ClockTimeFromServerSeconds(serverSeconds)
+		else TimeScale.GetClockTime()
+	JobPackets.ShiftNotice:FireClient(player, {
+		ResidentName = residentName,
+		ShiftId = shift.Id,
+		ShiftLabel = shift.Label,
+		NoticeType = noticeType,
+		ClockTime = clockTime,
+		Message = message,
+	})
+end
 
 local activeShiftsByUser: { [number]: { [string]: ActiveResidentShift } } = {}
 
@@ -74,9 +178,154 @@ local function ensureCareerFields(save: any)
 	if typeof(save.CareerStreak) ~= "number" then
 		save.CareerStreak = 0
 	end
-	if typeof(save.MomentumExpireClock) ~= "number" then
-		save.MomentumExpireClock = 0
+	if typeof(save.AssignedShiftId) ~= "string" then
+		save.AssignedShiftId = ""
 	end
+	if typeof(save.PendingShiftResume) ~= "table" then
+		save.PendingShiftResume = nil
+	end
+end
+
+local function clockBaselineHours(): number
+	return (tonumber(Lighting:GetAttribute("StartClockTime")) or 16.5) % 24
+end
+
+local function clockToDaySeconds(clockTime: number, secPerDay: number): number
+	local baseline = clockBaselineHours()
+	local deltaHours = (clockTime - baseline) % 24
+	return (deltaHours / 24) * secPerDay
+end
+
+local function computeShiftDurationSeconds(template: CareerShiftConfig.ShiftTemplate): number
+	local secPerDay = TimeScale.GetSecondsPerFullDay()
+	local startSeconds = clockToDaySeconds(template.StartClockTime, secPerDay)
+	local endSeconds = clockToDaySeconds(template.EndClockTime, secPerDay)
+	local duration = (endSeconds - startSeconds) % secPerDay
+	if duration <= 0 then
+		duration = secPerDay
+	end
+	return duration
+end
+
+local function isShiftWindowOpen(template: CareerShiftConfig.ShiftTemplate): boolean
+	local secPerDay = TimeScale.GetSecondsPerFullDay()
+	local nowSeconds = Workspace:GetServerTimeNow()
+	local startSeconds = clockToDaySeconds(template.StartClockTime, secPerDay)
+	local duration = computeShiftDurationSeconds(template)
+	local baseDayIndex = math.floor(nowSeconds / secPerDay)
+	for dayOffset = 0, 1 do
+		local dayIndex = baseDayIndex - dayOffset
+		if dayIndex < 0 then
+			break
+		end
+		local dayOfWeek = dayIndex % 7
+		for _, allowedDay in template.Days do
+			if allowedDay == dayOfWeek then
+				local startTime = dayIndex * secPerDay + startSeconds
+				local endTime = startTime + duration
+				if nowSeconds >= startTime and nowSeconds < endTime then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
+type PendingShiftResume = {
+	JobId: string?,
+	ShiftId: string?,
+	AccumulatedSeconds: number?,
+	SavedAt: number?,
+}
+
+local function consumePendingShiftResume(save: any, jobId: string, currentShiftId: string?): (number, string?)
+	local resume = save.PendingShiftResume
+	if typeof(resume) ~= "table" then
+		return 0, currentShiftId
+	end
+	local resumeJobId = if typeof(resume.JobId) == "string" then resume.JobId else nil
+	if resumeJobId ~= jobId then
+		save.PendingShiftResume = nil
+		return 0, currentShiftId
+	end
+	local resumeShiftId = if typeof(resume.ShiftId) == "string" and resume.ShiftId ~= "" then resume.ShiftId else nil
+	local resolvedShiftId = currentShiftId
+	if resolvedShiftId == nil or resolvedShiftId == "" then
+		resolvedShiftId = resumeShiftId
+	elseif resumeShiftId ~= nil and resumeShiftId ~= resolvedShiftId then
+		save.PendingShiftResume = nil
+		return 0, resolvedShiftId
+	end
+	local template: CareerShiftConfig.ShiftTemplate? = nil
+	if resolvedShiftId and resolvedShiftId ~= "" then
+		template = CareerShiftConfig.GetShift(resolvedShiftId)
+	end
+	if not template then
+		save.PendingShiftResume = nil
+		return 0, resolvedShiftId
+	end
+	if not isShiftWindowOpen(template) then
+		save.PendingShiftResume = nil
+		return 0, resolvedShiftId
+	end
+	local accumulated = tonumber(resume.AccumulatedSeconds)
+	if not accumulated or accumulated <= 0 then
+		save.PendingShiftResume = nil
+		return 0, resolvedShiftId
+	end
+	local maxDuration = computeShiftDurationSeconds(template)
+	accumulated = math.clamp(accumulated, 0, maxDuration)
+	save.PendingShiftResume = nil
+	return accumulated, resolvedShiftId
+end
+
+local function storePendingShiftResume(residentState: any, shiftRecord: ActiveResidentShift)
+	local save = residentState.Save
+	ensureCareerFields(save)
+	local shiftId = shiftRecord.ShiftId
+	if shiftId == nil or shiftId == "" then
+		shiftId = if typeof(save.AssignedShiftId) == "string" and save.AssignedShiftId ~= ""
+			then save.AssignedShiftId
+			else nil
+	end
+	if not shiftId then
+		return
+	end
+	local template = CareerShiftConfig.GetShift(shiftId)
+	if not template then
+		return
+	end
+	if template.JobId ~= shiftRecord.JobId then
+		return
+	end
+	if not isShiftWindowOpen(template) then
+		return
+	end
+	local nowSeconds = Workspace:GetServerTimeNow()
+	local startServer = shiftRecord.StartServerTime or nowSeconds
+	local elapsed = math.max(0, nowSeconds - startServer) + (shiftRecord.AccumulatedSeconds or 0)
+	local maxDuration = computeShiftDurationSeconds(template)
+	if maxDuration <= 0 then
+		return
+	end
+	local clamped = math.clamp(elapsed, 0, maxDuration)
+	if clamped <= 0 then
+		return
+	end
+	local previous = save.PendingShiftResume
+	if typeof(previous) == "table" then
+		local prevSeconds = tonumber(previous.AccumulatedSeconds)
+		if prevSeconds and prevSeconds > clamped then
+			clamped = math.min(prevSeconds, maxDuration)
+		end
+	end
+	save.PendingShiftResume = {
+		JobId = shiftRecord.JobId,
+		ShiftId = shiftId,
+		AccumulatedSeconds = clamped,
+		SavedAt = os.time(),
+	} :: PendingShiftResume
 end
 
 local function getResidentState(player: Player, residentName: string?): (any?, string?)
@@ -125,10 +374,29 @@ function CareerService.Init()
 	Players.PlayerRemoving:Connect(function(player)
 		local map = activeShiftsByUser[player.UserId]
 		if map then
-			for _, shiftRecord in pairs(map) do
+			for residentName, shiftRecord in pairs(map) do
 				if shiftRecord.EnergyConnection then
 					shiftRecord.EnergyConnection:Disconnect()
 					shiftRecord.EnergyConnection = nil
+				end
+				local residentState = ResidentService.GetResident(player, residentName)
+				if residentState then
+					storePendingShiftResume(residentState, shiftRecord)
+					local shiftState = residentState._CareerShiftState
+					if shiftState and shiftState.CommuteToken then
+						shiftState.CommuteToken.Cancelled = true
+						shiftState.CommuteToken.Reason = "PlayerDisconnected"
+					end
+					if shiftState then
+						residentState:SetAutoActionEnabled(
+							shiftState.AutoActionsEnabled == nil or shiftState.AutoActionsEnabled
+						)
+						residentState:SetAutoJobEnabled(shiftState.AutoJobEnabled == nil or shiftState.AutoJobEnabled)
+					else
+						residentState:EnableAutomation()
+					end
+					residentState._CareerShiftState = nil
+					residentState.IsOnShift = false
 				end
 			end
 		end
@@ -140,7 +408,14 @@ function CareerService.Init()
 			warn(string.format("[CareerService] StartResidentShift failed: %s", tostring(success)))
 			return false, "Could not start the shift."
 		end
-		return success, message or ""
+		local trimmedMessage = sanitizeMessage(message)
+		if trimmedMessage == "" then
+			local label = resolveResidentName(residentName)
+			trimmedMessage = if success
+				then string.format("%s is heading to work.", label)
+				else "Could not start the shift."
+		end
+		return success, trimmedMessage
 	end
 	JobPackets.StopResidentShift.OnServerInvoke = function(player: Player, residentName: string?)
 		local ok, success, message, payout = pcall(CareerService.StopResidentShift, player, residentName or "")
@@ -148,8 +423,133 @@ function CareerService.Init()
 			warn(string.format("[CareerService] StopResidentShift failed: %s", tostring(success)))
 			return false, "Could not complete the shift.", 0
 		end
-		return success, message or "", payout or 0
+		local trimmedMessage = sanitizeMessage(message)
+		if trimmedMessage == "" then
+			local label = resolveResidentName(residentName)
+			trimmedMessage = if success
+				then string.format("%s is heading back home.", label)
+				else "Could not complete the shift."
+		end
+		return success, trimmedMessage, payout or 0
 	end
+	JobPackets.AssignResidentShift.OnServerInvoke = function(player: Player, residentName: string?, shiftId: string?)
+		local ok, result = pcall(CareerService.AssignResidentShift, player, residentName or "", shiftId or "")
+		if not ok then
+			warn(string.format("[CareerService] AssignResidentShift failed: %s", tostring(result)))
+			return false, "Could not update the schedule."
+		end
+		return result.Success, result.Message or ""
+	end
+
+	ShiftSchedulerService.ShiftReminder:Connect(function(payload)
+		local player = payload.Player
+		if not player or player.Parent == nil then
+			return
+		end
+		local shiftRaw = payload.Shift
+		if not shiftRaw then
+			return
+		end
+		local shift = shiftRaw :: CareerShiftConfig.ShiftTemplate
+		sendShiftNotice(
+			player,
+			payload.ResidentName,
+			shift,
+			"Reminder",
+			payload.StartServerTime,
+			string.format("%s shift starts soon.", shift.Label)
+		)
+	end)
+
+	ShiftSchedulerService.ShiftStartDue:Connect(function(payload)
+		local player = payload.Player
+		if not player or player.Parent == nil then
+			payload.Confirm({ Outcome = "Missed", Reason = "PlayerUnavailable" })
+			return
+		end
+		local residentName = payload.ResidentName
+		local shiftRaw = payload.Shift
+		if not shiftRaw then
+			payload.Confirm({ Outcome = "Missed", Reason = "ShiftUnavailable" })
+			return
+		end
+		local shift = shiftRaw :: CareerShiftConfig.ShiftTemplate
+		local residentState = ResidentService.GetResident(player, residentName)
+		if not residentState then
+			payload.Confirm({ Outcome = "Missed", Reason = "ResidentUnavailable" })
+			sendShiftNotice(player, residentName, shift, "Missed", payload.StartServerTime, "Resident unavailable.")
+			return
+		end
+		ensureCareerFields(residentState.Save)
+		local assignedShiftId = residentState.Save.AssignedShiftId
+		if typeof(assignedShiftId) == "string" and assignedShiftId ~= shift.Id then
+			payload.Confirm({ Outcome = "Missed", Reason = "ShiftChanged" })
+			sendShiftNotice(player, residentName, shift, "Missed", payload.StartServerTime, "Shift changed.")
+			return
+		end
+		if residentState.IsOnShift then
+			payload.Confirm({ Outcome = "Skipped", Reason = "AlreadyOnShift" })
+			return
+		end
+		local success, message = CareerService.StartResidentShift(player, residentName, { Source = "Scheduler" })
+		if success then
+			payload.Confirm({
+				Outcome = "Started",
+				StartServerTimeOverride = payload.StartServerTime,
+				EndServerTimeOverride = nil :: number?,
+				Reason = "",
+			})
+			sendShiftNotice(
+				player,
+				residentName,
+				shift,
+				"AutoStart",
+				payload.StartServerTime,
+				string.format("%s clocked in automatically.", residentName)
+			)
+		else
+			payload.Confirm({ Outcome = "Missed", Reason = message })
+			sendShiftNotice(player, residentName, shift, "Missed", payload.StartServerTime, message)
+		end
+	end)
+
+	ShiftSchedulerService.ShiftEndDue:Connect(function(payload)
+		local player = payload.Player
+		if not player or player.Parent == nil then
+			payload.Confirm({ Outcome = "Skipped", Reason = "PlayerUnavailable", NextStartFrom = payload.EndServerTime })
+			return
+		end
+		local residentName = payload.ResidentName
+		local shiftRaw = payload.Shift
+		if not shiftRaw then
+			payload.Confirm({ Outcome = "Skipped", Reason = "ShiftUnavailable", NextStartFrom = payload.EndServerTime })
+			return
+		end
+		local shift = shiftRaw :: CareerShiftConfig.ShiftTemplate
+		local residentState = ResidentService.GetResident(player, residentName)
+		if not residentState or not residentState.IsOnShift then
+			payload.Confirm({ Outcome = "Skipped", Reason = "NotOnShift", NextStartFrom = payload.EndServerTime })
+			return
+		end
+		local success, message = CareerService.StopResidentShift(player, residentName, { Source = "Scheduler" })
+		if success then
+			payload.Confirm({ Outcome = "Ended", Reason = "", NextStartFrom = payload.EndServerTime })
+			sendShiftNotice(player, residentName, shift, "AutoEnd", payload.EndServerTime, message)
+		else
+			payload.Confirm({ Outcome = "Skipped", Reason = message, NextStartFrom = payload.EndServerTime })
+		end
+	end)
+
+	ShiftSchedulerService.ShiftMissed:Connect(function(payload)
+		sendShiftNotice(
+			payload.Player,
+			payload.ResidentName,
+			payload.Shift,
+			"Missed",
+			nil,
+			payload.Reason or "Missed shift."
+		)
+	end)
 end
 
 function CareerService.GetCareerInfo(careerId: string): JobCatalog.JobEntry?
@@ -176,7 +576,15 @@ function CareerService.ClearCareerForResident(player: Player, residentName: stri
 	save.CurrentCareerId = ""
 	save.Occupation = "Unemployed"
 	save.CareerStreak = 0
-	save.MomentumExpireClock = 0
+	save.PendingShiftResume = nil
+	if save.AssignedShiftId ~= "" then
+		save.AssignedShiftId = ""
+		local resolvedName = residentState.Save.Name
+		if type(resolvedName) == "string" and resolvedName ~= "" then
+			ShiftSchedulerService.ClearShift(player, resolvedName)
+		end
+	end
+	ResidentService.DispatchResidentUpdate(player, residentState)
 	return { Success = true, Message = "Career cleared." }
 end
 
@@ -219,7 +627,54 @@ function CareerService.SetCareerForResident(player: Player, residentName: string
 	end
 	save.CurrentCareerId = career.Id
 	save.Occupation = career.Id
+	save.AssignedShiftId = ""
+	save.PendingShiftResume = nil
+	local resolvedName = residentState.Save.Name
+	if type(resolvedName) == "string" and resolvedName ~= "" then
+		ShiftSchedulerService.ClearShift(player, resolvedName)
+	end
+	ResidentService.DispatchResidentUpdate(player, residentState)
 	return { Success = true, Message = career.Name .. " secured." }
+end
+
+function CareerService.AssignResidentShift(player: Player, residentName: string?, shiftId: string): CareerResult
+	local residentState, errorMessage = getResidentState(player, residentName)
+	if not residentState then
+		return { Success = false, Message = errorMessage }
+	end
+	local save = residentState.Save
+	ensureCareerFields(save)
+	local residentCareer = save.CurrentCareerId
+	if type(residentCareer) ~= "string" or residentCareer == "" then
+		return { Success = false, Message = "Assign a career first." }
+	end
+	if type(shiftId) ~= "string" or shiftId == "" then
+		if save.AssignedShiftId ~= "" then
+			save.AssignedShiftId = ""
+			save.PendingShiftResume = nil
+			ShiftSchedulerService.ClearShift(player, residentState.Save.Name)
+		end
+		ResidentService.DispatchResidentUpdate(player, residentState)
+		return { Success = true, Message = "Shift assignment cleared." }
+	end
+	local shift = CareerShiftConfig.GetShift(shiftId)
+	if not shift then
+		return { Success = false, Message = "Unknown shift." }
+	end
+	if shift.JobId ~= residentCareer then
+		return {
+			Success = false,
+			Message = string.format("Shift does not belong to %s's career.", residentName or "this resident"),
+		}
+	end
+	save.PendingShiftResume = nil
+	save.AssignedShiftId = shiftId
+	ShiftSchedulerService.ApplyShiftAssignment(player, residentState, shiftId)
+	ResidentService.DispatchResidentUpdate(player, residentState)
+	return {
+		Success = true,
+		Message = string.format("%s scheduled for %s.", residentName or "Resident", shift.Label),
+	}
 end
 
 local function getGigState(player: Player)
@@ -431,7 +886,11 @@ local function secondsPerInGameMinute(): number
 	return seconds
 end
 
-function CareerService.StartResidentShift(player: Player, residentName: string): (boolean, string)
+function CareerService.StartResidentShift(
+	player: Player,
+	residentName: string,
+	options: ShiftOperationOptions?
+): (boolean, string)
 	local residentState, errorMessage = getResidentState(player, residentName)
 	if not residentState then
 		return false, errorMessage or "Unknown resident."
@@ -457,14 +916,45 @@ function CareerService.StartResidentShift(player: Player, residentName: string):
 	if shiftMap[residentName] then
 		return false, string.format("%s is already clocked in.", residentName)
 	end
+	local assignedShiftId = if typeof(save.AssignedShiftId) == "string" then save.AssignedShiftId else ""
+	local pendingResumeSnapshot = save.PendingShiftResume
+
+	local carriedSeconds = 0
+	local resumeShiftId: string?
+	carriedSeconds, resumeShiftId = consumePendingShiftResume(save, job.Id, assignedShiftId)
+	local resolvedShiftId = assignedShiftId
+	if resumeShiftId and resumeShiftId ~= "" then
+		resolvedShiftId = resumeShiftId
+	end
+
+	local runtimeSnapshot: ShiftRuntimeSnapshot? = ShiftSchedulerService.GetShiftRuntimeSnapshot(player, residentName)
+	local shiftTemplate: CareerShiftConfig.ShiftTemplate? = nil
+	if resolvedShiftId ~= "" then
+		shiftTemplate = CareerShiftConfig.GetShift(resolvedShiftId)
+	end
+	if runtimeSnapshot and runtimeSnapshot.Template then
+		shiftTemplate = shiftTemplate or runtimeSnapshot.Template
+	end
+
+	if not isSchedulerSource(options) and shiftTemplate then
+		local windowOpen = if runtimeSnapshot then runtimeSnapshot.IsWithinWindow else isShiftWindowOpen(shiftTemplate)
+		if not windowOpen then
+			save.PendingShiftResume = pendingResumeSnapshot
+			local denialMessage = describeClosedWindow(residentName, shiftTemplate, runtimeSnapshot)
+			return false, denialMessage
+		end
+	end
 	local spawnCFrame = getPlotSpawnCFrame(player)
 	if not prepareResidentForShift(residentName, residentState, spawnCFrame) then
+		save.PendingShiftResume = pendingResumeSnapshot
 		return false, string.format("Could not send %s to work.", residentName)
 	end
 	local shiftRecord: ActiveResidentShift = {
 		JobId = job.Id,
-		StartClock = os.clock(),
+		ShiftId = if resolvedShiftId ~= "" then resolvedShiftId else nil,
+		StartServerTime = Workspace:GetServerTimeNow(),
 		SecondsPerMinute = secondsPerInGameMinute(),
+		AccumulatedSeconds = carriedSeconds,
 		EnergyConnection = nil,
 		ForcedReason = nil,
 	}
@@ -504,15 +994,18 @@ function CareerService.StartResidentShift(player: Player, residentName: string):
 			end)
 		end
 	end
-	return true, string.format("%s started working as %s.", residentName, job.Name)
+	local message = string.format("%s started working as %s.", residentName, job.Name)
+	if not isSchedulerSource(options) then
+		ShiftSchedulerService.NotifyClockIn(player, residentName)
+	end
+	return true, message
 end
 
-function CareerService.StopResidentShift(player: Player, residentName: string): (boolean, string, number?)
-	-- Lazy load PayrollService to avoid circular dependency
-	if not PayrollService then
-		PayrollService = require(ServerScriptService.Server.Services.PayrollService)
-	end
-
+function CareerService.StopResidentShift(
+	player: Player,
+	residentName: string,
+	options: ShiftOperationOptions?
+): (boolean, string, number?)
 	local shiftMap = activeShiftsByUser[player.UserId]
 	if not shiftMap then
 		return false, string.format("%s is not clocked in.", residentName)
@@ -535,11 +1028,28 @@ function CareerService.StopResidentShift(player: Player, residentName: string): 
 	resumeResidentFromShift(player, residentState)
 	clearActiveShift(player, residentName, activeShift)
 	ensureCareerFields(residentState.Save)
-	local elapsedSeconds = math.max(0, os.clock() - activeShift.StartClock)
+	local save = residentState.Save
+	local nowServer = Workspace:GetServerTimeNow()
+	local elapsedSeconds = math.max(0, nowServer - activeShift.StartServerTime)
+		+ math.max(0, activeShift.AccumulatedSeconds or 0)
+	local shiftIdForClamp = activeShift.ShiftId
+	if (shiftIdForClamp == nil or shiftIdForClamp == "") and typeof(save.AssignedShiftId) == "string" then
+		shiftIdForClamp = save.AssignedShiftId
+	end
+	if shiftIdForClamp and shiftIdForClamp ~= "" then
+		local templateForClamp = CareerShiftConfig.GetShift(shiftIdForClamp)
+		if templateForClamp then
+			local maxDuration = computeShiftDurationSeconds(templateForClamp)
+			if maxDuration > 0 then
+				elapsedSeconds = math.min(elapsedSeconds, maxDuration)
+			end
+		end
+	end
 	local secondsPerMinute = math.max(0.001, activeShift.SecondsPerMinute)
 	local minutesWorked = elapsedSeconds / secondsPerMinute
 	local gigState = getGigState(player)
 	local momentumMultiplier, _ = pullMomentumMultiplier(gigState)
+	save.PendingShiftResume = nil
 
 	-- Calculate payout for display purposes
 	local estimatedPayout = computePayoutForResident(job, residentState.Save, minutesWorked, momentumMultiplier)
@@ -552,7 +1062,7 @@ function CareerService.StopResidentShift(player: Player, residentName: string): 
 			+ math.min((residentState.Save.CareerStreak :: any or 0) * STREAK_STEP, MAX_STREAK_BONUS)
 		adjustedBasePay = adjustedBasePay * streakMultiplier
 
-		PayrollService.RecordWorkTime(player, residentName, elapsedSeconds, job.Id, adjustedBasePay / 60)
+		PayrollService.RecordWorkTime(player, residentName, minutesWorked, job.Id, adjustedBasePay)
 		residentState.Save.CareerStreak = math.max(0, (residentState.Save.CareerStreak :: any) or 0) + 1
 	end
 
@@ -584,6 +1094,9 @@ function CareerService.StopResidentShift(player: Player, residentName: string): 
 			activeShift.ForcedReason or "Manual"
 		)
 	)
+	if not isSchedulerSource(options) then
+		ShiftSchedulerService.NotifyClockOut(player, residentName)
+	end
 	return true, message, estimatedPayout
 end
 

@@ -6,6 +6,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
+local Players = game:GetService("Players")
+
 local ResidentsStore = {}
 local PlayersResidents = {}
 
@@ -97,6 +99,63 @@ end
 function ResidentsStore.RequestDeleteResident(residentName: string)
 	local success, message = ResidentsPackets.DeleteResidentRequest:Fire(residentName)
 	return success, message
+end
+
+local function deepClone(value: any): any
+	if typeof(value) ~= "table" then
+		return value
+	end
+	local copy = table.clone(value)
+	for key, item in value do
+		copy[key] = deepClone(item)
+	end
+	return copy
+end
+
+local function resolveUserId(userId: number?): number?
+	if typeof(userId) == "number" then
+		return userId
+	end
+	local localPlayer = Players.LocalPlayer
+	if not localPlayer then
+		return nil
+	end
+	return localPlayer.UserId
+end
+
+function ResidentsStore.GetResident(userId: number?, residentName: string): any?
+	if type(residentName) ~= "string" or residentName == "" then
+		return nil
+	end
+	local resolvedUserId = resolveUserId(userId)
+	if not resolvedUserId then
+		return nil
+	end
+	local residents = PlayersResidents[resolvedUserId]
+	if not residents then
+		return nil
+	end
+	local data = residents[residentName]
+	if data == nil then
+		return nil
+	end
+	return deepClone(data)
+end
+
+function ResidentsStore.GetResidents(userId: number?): { [string]: any }?
+	local resolvedUserId = resolveUserId(userId)
+	if not resolvedUserId then
+		return nil
+	end
+	local residents = PlayersResidents[resolvedUserId]
+	if not residents then
+		return nil
+	end
+	local snapshot = {}
+	for name, data in residents do
+		snapshot[name] = deepClone(data)
+	end
+	return snapshot
 end
 
 return ResidentsStore

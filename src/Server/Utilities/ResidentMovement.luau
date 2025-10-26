@@ -94,14 +94,14 @@ end
 local PATH_VARIANTS = {
 	{
 		AgentHeight = 4,
-		AgentRadius = 1.4,
+		AgentRadius = 1,
 		AgentCanJump = true,
 		AgentCanClimb = false,
 		WaypointSpacing = 4,
 	},
 	{
 		AgentHeight = 4,
-		AgentRadius = 1.25,
+		AgentRadius = 0.8,
 		AgentCanJump = true,
 		AgentCanClimb = false,
 		WaypointSpacing = 3,

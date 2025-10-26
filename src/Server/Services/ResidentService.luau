@@ -24,6 +24,17 @@ local Config = {
 	MaxResidentsPerHousehold = 8,
 }
 
+local function cloneTable(value: any): any
+	if typeof(value) ~= "table" then
+		return value
+	end
+	local copy = table.clone(value)
+	for key, item in value do
+		copy[key] = cloneTable(item)
+	end
+	return copy
+end
+
 local function ensureHouseholdState(player: Player, data: any?)
 	if data == nil then
 		warn(string.format("[ResidentService] Household data unavailable for %s", player.Name))
@@ -50,8 +61,8 @@ local function ensureResidentCareerState(save: any)
 	if typeof(save.CareerStreak) ~= "number" then
 		save.CareerStreak = 0
 	end
-	if typeof(save.MomentumExpireClock) ~= "number" then
-		save.MomentumExpireClock = 0
+	if typeof(save.AssignedShiftId) ~= "string" then
+		save.AssignedShiftId = ""
 	end
 end
 
@@ -113,7 +124,7 @@ function ResidentService.Load(player: Player)
 	local filteredResidents = {}
 	local residentsMap = PlayersResidents[userId]
 	local indexMap = NameToIndexMap[userId]
-	
+
 	for _, resident in ipairs(data.Residents) do
 		if typeof(resident) == "table" and type(resident.Name) == "string" then
 			ensureResidentCareerState(resident)
@@ -181,7 +192,7 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 		Occupation = "Unemployed",
 		CurrentCareerId = "",
 		CareerStreak = 0,
-		MomentumExpireClock = 0,
+		AssignedShiftId = "",
 		Statistics = {
 			Intelligence = 1,
 			Discipline = 1,
@@ -300,5 +311,26 @@ function ResidentService.GetResident(player: Player, residentName: string)
 		return nil
 	end
 	return residents[residentName]
+end
+
+function ResidentService.DispatchResidentUpdate(player: Player, residentState: any)
+	if residentState == nil then
+		return
+	end
+	local save = residentState.Save
+	if typeof(save) ~= "table" then
+		return
+	end
+	ensureResidentCareerState(save)
+	local residentName = save.Name
+	if type(residentName) ~= "string" or residentName == "" then
+		return
+	end
+	local payload = {
+		UserId = player.UserId,
+		ResidentName = residentName,
+		ResidentDelta = { cloneTable(save) },
+	}
+	ResidentsPackets.PlayerResidentDelta:Fire(payload)
 end
 return ResidentService

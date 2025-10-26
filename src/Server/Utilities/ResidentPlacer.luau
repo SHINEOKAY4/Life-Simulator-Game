@@ -16,12 +16,14 @@ export type ResidentData = {
 	Statistics: { [string]: number }?,
 	CurrentCareerId: string?,
 	CareerStreak: number?,
-	MomentumExpireClock: number?,
+	AssignedShiftId: string?,
 }
 
 local ResidentPlacer = {}
 
 local hiddenFolder: Folder?
+local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
+local residentsTemplateFolder = assetsFolder and assetsFolder:FindFirstChild("Residents")
 
 local function getHiddenFolder(): Folder
 	if hiddenFolder and hiddenFolder.Parent then
@@ -56,23 +58,46 @@ local function hydrateNeeds(save: ResidentData)
 	return needs
 end
 
-local function LoadResidentAppearance(residentState: any)
-	local AssetsFolder = ReplicatedStorage.Assets
-	local ResidentsTemplateFolder = AssetsFolder.Residents
-	local needs = hydrateNeeds(residentState.Save)
-	local ResidentOffsite = getHiddenFolder()
-	local model = ResidentsTemplateFolder:FindFirstChild(residentState.Save.Gender):Clone() :: Model
+local function ensureResidentModel(residentState: any): Model?
+	local existing = residentState.Model
+	if existing and existing.Parent then
+		return existing
+	end
+
+	if not assetsFolder then
+		warn("ResidentPlacer: missing Assets folder in ReplicatedStorage")
+		return existing
+	end
+	local residentsFolder = residentsTemplateFolder or assetsFolder:FindFirstChild("Residents")
+	if not residentsFolder then
+		warn("ResidentPlacer: missing Residents folder in Assets")
+		return existing
+	end
+	local gender = residentState.Save.Gender
+	local template = gender and residentsFolder:FindFirstChild(gender)
+	if not template or not template:IsA("Model") then
+		warn("ResidentPlacer: missing template for resident", residentState.Save and residentState.Save.Name)
+		return existing
+	end
+	local model = template:Clone()
+	model.Parent = getHiddenFolder()
+	residentState.Model = model
+	return model
+end
+
+local function loadResidentAppearance(residentState: any): Model?
+	local model = ensureResidentModel(residentState)
+	if not model then
+		return nil
+	end
 	model.Name = residentState.Save.Name
-	model.Parent = ResidentOffsite
 
-	--#TODO Future stub for handling resident clothes, accessories for character appearance
-	-- After appearance is set we can clone the model for other systems to use like viewport
-
-	----========----
+	local needs = hydrateNeeds(residentState.Save)
 	for needName, value in pairs(needs) do
 		model:SetAttribute(needName, value)
 	end
-	residentState.Model = model
+
+	residentState:SyncCurrentActionAttribute()
 	return model
 end
 function ResidentPlacer.Spawn(player, residentState)
@@ -86,7 +111,10 @@ function ResidentPlacer.Spawn(player, residentState)
 	local plotResidentsFolder = plotModel:FindFirstChild("Residents") :: Folder
 	local spawnLocation = plotModel:FindFirstChild("Spawn") :: BasePart
 
-	local loadedResidentModel = LoadResidentAppearance(residentState)
+	local loadedResidentModel = loadResidentAppearance(residentState)
+	if not loadedResidentModel then
+		return
+	end
 
 	local humanoidRootPart = loadedResidentModel:FindFirstChild("HumanoidRootPart") :: BasePart
 	if not humanoidRootPart then

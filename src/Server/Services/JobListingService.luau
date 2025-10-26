@@ -6,6 +6,7 @@ local HttpService = game:GetService("HttpService")
 local CareerService = require(ServerScriptService.Server.Services.CareerService)
 local JobPackets = require(ReplicatedStorage.Network.JobPackets)
 local JobCatalog = require(ReplicatedStorage.Shared.Configurations.JobCatalog)
+local CareerShiftConfig = require(ReplicatedStorage.Shared.Configurations.CareerShiftConfig)
 local DataStore = require(ServerStorage.ServerPackages.DataStore)
 local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 
@@ -33,6 +34,7 @@ type ListingState = {
 	LastTakenAt: number?,
 	LastTakenBy: number?,
 	Unlimited: boolean,
+	ShiftId: string?,
 }
 
 type BoardState = {
@@ -83,7 +85,7 @@ local function createEmptyMetrics(): Metrics
 end
 
 local BOARD_TEMPLATE: BoardState = {
-	Version = 1,
+	Version = 2,
 	RestockId = "",
 	LastRestock = 0,
 	NextRestock = 0,
@@ -103,6 +105,31 @@ local currentBoardHash = ""
 local JOBS_BY_ID: { [string]: JobEntry } = {}
 for _, job in JobCatalog.Jobs do
 	JOBS_BY_ID[job.Id] = job
+end
+
+local function chooseShiftForJob(
+	jobId: string,
+	existingShiftId: string?,
+	rng: Random?
+): (string?, CareerShiftConfig.ShiftTemplate?)
+	local shifts = CareerShiftConfig.GetShiftsForJob(jobId)
+	if #shifts == 0 then
+		return nil, nil
+	end
+	if type(existingShiftId) == "string" and existingShiftId ~= "" then
+		for _, shift in ipairs(shifts) do
+			if shift.Id == existingShiftId then
+				return existingShiftId, shift
+			end
+		end
+	end
+	local template: CareerShiftConfig.ShiftTemplate
+	if rng then
+		template = shifts[rng:NextInteger(1, #shifts)]
+	else
+		template = shifts[1]
+	end
+	return template.Id, template
 end
 
 local function getCareerDisplayName(careerIdentifier: string?): string
@@ -153,15 +180,23 @@ local function debugPrintBoard(context: string, board: BoardState)
 			break
 		end
 		if listing.Unlimited then
-			print(("    * %s (Gig) unlimited"):format(listing.JobId))
+			local shiftSuffix = ""
+			if type(listing.ShiftId) == "string" and listing.ShiftId ~= "" then
+				shiftSuffix = string.format(" shift=%s", listing.ShiftId)
+			end
+			print(("    * %s (Gig) unlimited%s"):format(listing.JobId, shiftSuffix))
 		else
+			local shiftSuffix = ""
+			if type(listing.ShiftId) == "string" and listing.ShiftId ~= "" then
+				shiftSuffix = string.format(" shift=%s", listing.ShiftId)
+			end
 			print(
 				("    * %s (%s) slots=%d/%d"):format(
 					listing.JobId,
 					listing.Rarity,
 					listing.SlotsRemaining or 0,
 					listing.MaxSlots or 0
-				)
+				) .. shiftSuffix
 			)
 		end
 	end
@@ -296,6 +331,7 @@ local function sanitizeListing(rawListing: any): ListingState?
 			LastTakenAt = lastTakenAt,
 			LastTakenBy = lastTakenBy,
 			Unlimited = true,
+			ShiftId = nil,
 		}
 	end
 	local maxSlots = asInteger(rawListing.MaxSlots, 0)
@@ -309,6 +345,11 @@ local function sanitizeListing(rawListing: any): ListingState?
 	if slotsRemaining <= 0 then
 		return nil
 	end
+	local preferredShiftId = rawListing.ShiftId
+	if type(preferredShiftId) ~= "string" then
+		preferredShiftId = nil
+	end
+	local resolvedShiftId, _ = chooseShiftForJob(job.Id, preferredShiftId, nil)
 	return {
 		JobId = job.Id,
 		Rarity = job.Rarity,
@@ -319,6 +360,7 @@ local function sanitizeListing(rawListing: any): ListingState?
 		LastTakenAt = lastTakenAt,
 		LastTakenBy = lastTakenBy,
 		Unlimited = false,
+		ShiftId = resolvedShiftId,
 	}
 end
 
@@ -377,6 +419,7 @@ local function cloneBoard(board: BoardState): BoardState
 			LastTakenAt = listing.LastTakenAt,
 			LastTakenBy = listing.LastTakenBy,
 			Unlimited = listing.Unlimited,
+			ShiftId = listing.ShiftId,
 		}
 	end
 	return {
@@ -401,7 +444,7 @@ end
 
 local function computeBoardHash(board: BoardState): string
 	local listingCount = #board.Listings
-	local parts = table.create(listingCount * 9 + 5)
+	local parts = table.create(listingCount * 10 + 5)
 	parts[#parts + 1] = tostring(board.Version)
 	parts[#parts + 1] = board.RestockId
 	parts[#parts + 1] = tostring(board.LastRestock)
@@ -416,6 +459,7 @@ local function computeBoardHash(board: BoardState): string
 		parts[#parts + 1] = tostring(listing.PostedAt)
 		parts[#parts + 1] = tostring(listing.LastTakenAt or 0)
 		parts[#parts + 1] = tostring(listing.LastTakenBy or 0)
+		parts[#parts + 1] = listing.ShiftId or ""
 	end
 	return table.concat(parts, "|")
 end
@@ -463,6 +507,7 @@ local function applyBoard(board: BoardState)
 		listingFolder:SetAttribute("LastTakenBy", listing.LastTakenBy or 0)
 		listingFolder:SetAttribute("RestockId", boardCopy.RestockId)
 		listingFolder:SetAttribute("Unlimited", listing.Unlimited)
+		listingFolder:SetAttribute("ShiftId", listing.ShiftId or "")
 		seenFolders[listingFolder] = true
 	end
 	for _, child in ipairs(jobListingFolder:GetChildren()) do
@@ -583,10 +628,12 @@ local function buildRestockBoard(now: number, previous: BoardState?): BoardState
 				LastTakenAt = nil,
 				LastTakenBy = nil,
 				Unlimited = true,
+				ShiftId = nil,
 			}
 		else
 			local minSlots, maxSlots = resolveSlotRange(job.Rarity)
 			local slots = rng:NextInteger(minSlots, maxSlots)
+			local shiftId, _ = chooseShiftForJob(job.Id, nil, rng)
 			listing = {
 				JobId = job.Id,
 				Rarity = job.Rarity,
@@ -597,6 +644,7 @@ local function buildRestockBoard(now: number, previous: BoardState?): BoardState
 				LastTakenAt = nil,
 				LastTakenBy = nil,
 				Unlimited = false,
+				ShiftId = shiftId,
 			}
 		end
 
@@ -791,6 +839,7 @@ local function reserveJobSlot(player: Player, jobId: string, residentName: strin
 
 	-- == This is for gigs == --
 	local listing = board.Listings[listingIndex]
+	local assignedShiftId = listing.ShiftId
 	if listing.Unlimited then
 		listing.LastTakenAt = now
 		listing.LastTakenBy = player.UserId
@@ -848,6 +897,19 @@ local function reserveJobSlot(player: Player, jobId: string, residentName: strin
 				tostring(result.Message)
 			)
 		)
+	else
+		if type(assignedShiftId) == "string" and assignedShiftId ~= "" then
+			local shiftResult = CareerService.AssignResidentShift(player, residentName, assignedShiftId)
+			if not shiftResult.Success then
+				warn(
+					("[JobListingService] Shift assignment failed for %s (%s): %s"):format(
+						tostring(residentName),
+						tostring(jobId),
+						shiftResult.Message or ""
+					)
+				)
+			end
+		end
 	end
 	return true, result.Message or (job.Name .. " secured!")
 end

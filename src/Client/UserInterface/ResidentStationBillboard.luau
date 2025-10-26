@@ -114,7 +114,7 @@ local function createBillboard(model: Model): Tracker
 	billboard.LightInfluence = 0
 	billboard.MaxDistance = 40
 	billboard.Size = UDim2.fromOffset(14, 50)
-	billboard.StudsOffsetWorldSpace = Vector3.new(0, 3.5, 0)
+	billboard.StudsOffsetWorldSpace = Vector3.new(2, 0, 0)
 	billboard.Enabled = false
 
 	local adornee = getAdornee(model)

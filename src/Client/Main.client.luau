@@ -1,7 +1,10 @@
---!strict
--- StarterPlayer/StarterPlayerScripts/Client/Main.client.lua
-
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local NetworkFolder = ReplicatedStorage:WaitForChild("Network")
+
+-- Require shared packet definitions early so responses are decoded correctly.
+local _PayrollPackets = require(NetworkFolder:WaitForChild("PayrollPackets"))
 
 local LocalPlayer = Players.LocalPlayer
 local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -29,9 +32,11 @@ local NeedWarningNotifications = require(script.Parent.UserInterface.NeedWarning
 local JobSelectionUI = require(script.Parent.UserInterface.JobSelectionUI)
 local ResidentStationBillboard = require(script.Parent.UserInterface.ResidentStationBillboard)
 local ResidentChatBubbles = require(script.Parent.UserInterface.ResidentChatBubbles)
+local ResidentNameBillboard = require(script.Parent.UserInterface.ResidentNameBillboard)
 local ResidentRoster = require(script.Parent.UserInterface.ResidentRoster)
 local MainHUD = require(script.Parent.UserInterface.MainHUD)
 local TimeUI = require(script.Parent.UserInterface.TimeUI)
+local ShiftStatusPanel = require(script.Parent.UserInterface.ShiftStatusPanel)
 
 SoundtrackManager.Init()
 DayAndNight.Init()
@@ -47,6 +52,7 @@ ObjectSelector.Init()
 ResidentSelector.Init()
 ResidentController.Init()
 ResidentNeedsUI.Init()
+ShiftStatusPanel.Init()
 NeedWarningNotifications.Init()
 ObjectAction.Init()
 PlotBuilderUI:Init()
@@ -55,6 +61,7 @@ StationRadialUI.Init()
 JobSelectionUI.Init()
 ResidentStationBillboard.Init()
 ResidentChatBubbles.Init()
+ResidentNameBillboard.Init()
 PlotSelector.Init()
 local ResidentsStore = require(script.Parent.ClientStores.ResidentsStore)
 local NewResidentUI = require(script.Parent.UserInterface.NewResidentUI)

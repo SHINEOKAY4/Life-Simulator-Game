@@ -38,7 +38,7 @@
                     end,
                 },
             },
-            SoundId = "rbxassetid://6026984225", -- optional sound to play on show
+			SoundId = SoundtrackManager.NotificationSoundId, -- optional sound to play on show
             Priority = 2, -- larger values appear above lower values
         })
 
