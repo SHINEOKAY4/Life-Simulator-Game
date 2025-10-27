@@ -44,10 +44,10 @@ local NEED_SATISFIED_TEXT = {
 	Social = "fulfilled",
 	Hygiene = "refreshed",
 }
-local NEED_SEVERITY_COLORS: { [NeedSeverity]: Color3 } = {
-	Low = Color3.fromRGB(236, 187, 92),
-	Critical = Color3.fromRGB(220, 98, 86),
-	Satisfied = Color3.fromRGB(82, 199, 107),
+local SEVERITY_EMOJIS: { [NeedSeverity]: string } = {
+	Low = "⚠️",
+	Critical = "🚨",
+	Satisfied = "✅",
 }
 
 local NEED_DEFINITIONS = NeedConfig.Needs
@@ -96,15 +96,19 @@ local function showNeedToast(residentName: string, needName: string, severity: N
 	else
 		feelingText = NEED_FEELING_TEXT[needName] or string.lower(needName)
 	end
-	local message = string.format("%s is feeling %s.", residentName, feelingText)
-	local backgroundColor = NEED_SEVERITY_COLORS[severity]
+	local prefix = SEVERITY_EMOJIS[severity] or "ℹ️"
+	local message = string.format("%s %s is feeling %s.", prefix, residentName, feelingText)
 	local priority = if severity == "Critical" then 2 elseif severity == "Satisfied" then 0 else 1
+	local title = if severity == "Satisfied"
+		then string.format("%s Need Satisfied", prefix)
+		elseif severity == "Critical" then string.format("%s Critical Need", prefix)
+		else string.format("%s Need Warning", prefix)
 
 	local handle = NotificationModule.Show({
-		Title = if severity == "Satisfied" then "Need Satisfied" else "Need Warning",
+		Title = title,
 		Text = message,
-		BackgroundColor = backgroundColor,
-		TextColor = Color3.new(1, 1, 1),
+		BackgroundTransparency = 1,
+		StrokeTransparency = 1,
 		Duration = TOAST_DURATION_SECONDS,
 		SoundId = SOUND_ID,
 		Priority = priority,

@@ -553,6 +553,8 @@ local function createRestShouldEnd(mode: string, targetEnergy: number?): ((any) 
 				end
 				return "EnergySatisfied"
 			end
+			-- Don't exit early if we haven't reached target yet
+			return nil
 		end
 		if mode ~= "Sleep" and energyDefLocal then
 			local energy = residentState:GetNeed("Energy")

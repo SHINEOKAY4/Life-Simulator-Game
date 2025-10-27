@@ -56,6 +56,7 @@ State.ResidentCooldowns = setmetatable({} :: { [ResidentState]: { [string]: numb
 State.ResidentPending = setmetatable({} :: { [ResidentState]: string? }, { __mode = "k" })
 State.ResidentNextEvaluation = setmetatable({} :: { [ResidentState]: number }, { __mode = "k" })
 State.ResidentLastRoam = setmetatable({} :: { [ResidentState]: number }, { __mode = "k" })
+State.ResidentLastJog = setmetatable({} :: { [ResidentState]: number }, { __mode = "k" })
 State.NonSurvivalSuppressed = setmetatable({} :: { [ResidentState]: { [string]: number } }, { __mode = "k" })
 State.MissingStationComplaints = setmetatable({} :: { [ResidentState]: { [string]: boolean } }, { __mode = "k" })
 State.StationIteratorState = {} :: { [number]: { [string]: { version: number, order: { string }, index: number } } }
@@ -279,6 +280,18 @@ end
 
 function State.clearLastRoam(resident: ResidentState)
 	State.ResidentLastRoam[resident] = nil
+end
+
+function State.getLastJog(resident: ResidentState): number?
+	return State.ResidentLastJog[resident]
+end
+
+function State.recordJog(resident: ResidentState, when: number)
+	State.ResidentLastJog[resident] = when
+end
+
+function State.clearLastJog(resident: ResidentState)
+	State.ResidentLastJog[resident] = nil
 end
 
 function State.computeNextEvaluationDelay(resident: ResidentState): number

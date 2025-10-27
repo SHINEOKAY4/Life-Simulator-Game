@@ -34,6 +34,14 @@ local FallbackActions = {}
 local roamRandom = RandomProvider.get()
 local begRandom = RandomProvider.get()
 
+local JOG_ACTION_NAME = Constants.JOG_ACTION_NAME or "Auto:Jog"
+local JOG_MIN_INTERVAL_SECONDS = math.max(Constants.JOG_MIN_INTERVAL_SECONDS or 0, 0)
+local JOG_SEGMENT_COUNT = math.max(Constants.JOG_SEGMENT_COUNT or 1, 1)
+local JOG_SEGMENT_DELAY_SECONDS = math.max(Constants.JOG_SEGMENT_DELAY_SECONDS or 0, 0)
+local JOG_FUN_GAIN = math.max(Constants.JOG_FUN_GAIN or 0, 0)
+local JOG_MOVE_TIMEOUT_SECONDS = math.max(Constants.JOG_MOVE_TIMEOUT_SECONDS or 1, 1)
+local JOG_CHAT_LINES = Constants.JOG_CHAT_LINES
+
 local BEG_ACTION_NAME = Constants.BEG_ACTION_NAME
 local BEG_ACTION_LABEL = Constants.BEG_ACTION_LABEL
 local BEG_TICK_SECONDS = Constants.BEG_TICK_SECONDS
@@ -232,6 +240,102 @@ local function chooseRoamPosition(player: Player): Vector3?
 		return grid:ChunkCenterCFrame(chunkX, chunkZ, chunkSize, 0).Position
 	end
 	return nil
+end
+
+local function enqueueJogAction(player: Player, resident: ResidentState, stationCache: StationCache?): boolean
+	local needs = State.getNeeds()
+	local funDef = needs.Fun
+	if funDef == nil then
+		return false
+	end
+
+	local startingFun = resident:GetNeed("Fun")
+	local comfortThreshold = math.min(funDef.Low + funDef.Hysteresis, funDef.Max)
+	if startingFun >= comfortThreshold then
+		return false
+	end
+
+	if Utils.hasBlockingCriticalNeed(player, resident, "Fun", stationCache) then
+		return false
+	end
+
+	local now = os.clock()
+	local lastJog = State.getLastJog(resident)
+	if lastJog and now - lastJog < JOG_MIN_INTERVAL_SECONDS then
+		return false
+	end
+
+	local pendingAction = JOG_ACTION_NAME
+	State.setPending(resident, pendingAction)
+	State.clearNextEvaluation(resident)
+	State.recordJog(resident, now)
+
+	resident:EnqueueAction(pendingAction, function(context)
+		local cancelToken = context.CancelToken
+		local finalized = false
+		local funPausePushed = false
+		local function finalize(cancelled: boolean)
+			if finalized then
+				return
+			end
+			finalized = true
+			if funPausePushed then
+				resident:PopNeedPause("Fun")
+				funPausePushed = false
+			end
+			State.setPending(resident, nil)
+			if cancelled then
+				return
+			end
+			local targetThreshold = math.min(funDef.Max, funDef.Low + funDef.Hysteresis)
+			local desired = math.max(targetThreshold, startingFun + JOG_FUN_GAIN)
+			local clamped = math.clamp(desired, funDef.Min, funDef.Max)
+			local currentFun = resident:GetNeed("Fun")
+			if currentFun < clamped then
+				resident:SetNeed("Fun", clamped)
+			end
+			State.setNeedCooldown(resident, "Fun")
+			State.recordJog(resident, os.clock())
+		end
+
+		resident:PushNeedPause("Fun")
+		funPausePushed = true
+
+		if type(JOG_CHAT_LINES) == "table" and #JOG_CHAT_LINES > 0 then
+			ResidentChat.ShowAction(resident, JOG_CHAT_LINES)
+		end
+
+		for segmentIndex = 1, JOG_SEGMENT_COUNT do
+			if cancelToken.Cancelled then
+				finalize(true)
+				return
+			end
+			local targetPosition = chooseRoamPosition(player)
+			local segmentWait = JOG_SEGMENT_DELAY_SECONDS
+			if targetPosition then
+				ResidentMovement.GoToWorldPosition(resident, targetPosition, {
+					CancelToken = cancelToken,
+					TimeoutSeconds = JOG_MOVE_TIMEOUT_SECONDS,
+					DebugName = string.format("Jog:%s#%d", getResidentName(resident), segmentIndex),
+				})
+			else
+				segmentWait = math.max(segmentWait, 0.5)
+			end
+			if cancelToken.Cancelled then
+				finalize(true)
+				return
+			end
+			if segmentWait > 0 then
+				task.wait(segmentWait)
+			else
+				task.wait()
+			end
+		end
+
+		finalize(false)
+	end)
+
+	return true
 end
 
 local function hasStationForNeed(player: Player, stationType: string, stationCache: StationCache?): boolean
@@ -505,6 +609,14 @@ function FallbackActions.evaluateResidentJob(
 		if ActionQueue.enqueueNeedAction(player, residentName, resident, decision) then
 			return true
 		end
+	end
+
+	if enqueueJogAction(player, resident, stationCache) then
+		return true
+	end
+
+	if enqueueBegAction(player, resident, stationCache) then
+		return true
 	end
 
 	return FallbackActions.enqueueRoamAction(player, residentName, resident)

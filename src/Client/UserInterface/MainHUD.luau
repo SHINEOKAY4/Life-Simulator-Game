@@ -24,6 +24,7 @@ local BillContext = InputContextsFolder:WaitForChild("BillContext")
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local HUDBottomRightEnabled = ActiveQueryFolder:FindFirstChild("HUDBottomRightEnabled") :: BoolValue
 local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
+local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled") :: BoolValue
 
 local MainHUDGui = PlayerGui:WaitForChild("MainHUD") :: ScreenGui
 local BillFrame = MainHUDGui:WaitForChild("BillFrame") :: Frame
@@ -720,6 +721,14 @@ function MainHUD.Init()
 
 	JobSelectionUIEnabled.Changed:Connect(function()
 		if JobSelectionUIEnabled.Value then
+			MainHUD.Hide()
+		else
+			MainHUD.Show()
+		end
+	end)
+
+	PlotBuilderEnabled.Changed:Connect(function()
+		if PlotBuilderEnabled.Value then
 			MainHUD.Hide()
 		else
 			MainHUD.Show()

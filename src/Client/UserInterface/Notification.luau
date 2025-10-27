@@ -103,6 +103,8 @@ export type NotificationOptions = {
 	Priority: number?,
 	-- Background color for the notification panel.  If omitted a dark gray theme is used.
 	BackgroundColor: Color3?,
+	-- Background transparency for the notification panel. Defaults to 0 (fully opaque).
+	BackgroundTransparency: number?,
 	-- Color used for the title and message text. Defaults to white for the
 	-- title and light gray for the body.
 	TextColor: Color3?,
@@ -112,6 +114,8 @@ export type NotificationOptions = {
 	SoundId: string?,
 	-- Optional placement overrides controlling where the notification stack appears.
 	Placement: NotificationPlacement?,
+	-- Optional transparency override for the border stroke (0-1). Defaults to 0.9.
+	StrokeTransparency: number?,
 }
 
 export type NotificationHandle = {
@@ -343,7 +347,7 @@ local function createToast(options: NotificationOptions): (CanvasGroup, Containe
 	-- Main panel
 	local panel = Instance.new("Frame")
 	panel.Name = "Panel"
-	panel.BackgroundTransparency = 0
+	panel.BackgroundTransparency = math.clamp(options.BackgroundTransparency or 0, 0, 1)
 	panel.BackgroundColor3 = options.BackgroundColor or Color3.fromRGB(33, 33, 33)
 	panel.AutomaticSize = Enum.AutomaticSize.Y
 	panel.Size = UDim2.fromScale(1, 0)
@@ -358,7 +362,7 @@ local function createToast(options: NotificationOptions): (CanvasGroup, Containe
 	stroke.Thickness = 1
 	stroke.Color = options.BackgroundColor and options.BackgroundColor:Lerp(Color3.new(1, 1, 1), 0.2)
 		or Color3.fromRGB(255, 255, 255)
-	stroke.Transparency = 0.9
+	stroke.Transparency = math.clamp(options.StrokeTransparency or 0.9, 0, 1)
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Parent = panel
 

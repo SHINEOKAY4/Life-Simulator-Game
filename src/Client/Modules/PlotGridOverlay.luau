@@ -27,6 +27,7 @@ function PlotGridOverlay.Init()
 			PlotGridOverlay.Hide()
 			PlotContext.ToggleGridAction.Enabled = false
 		else
+			PlotGridOverlay.Show()
 			PlotContext.ToggleGridAction.Enabled = true
 		end
 	end)

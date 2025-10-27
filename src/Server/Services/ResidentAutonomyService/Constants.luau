@@ -7,6 +7,18 @@ Constants.AUTONOMY_INTERVAL = 1.0
 Constants.ROAM_ACTION_NAME = "Auto:Roam"
 Constants.ROAM_MIN_INTERVAL_SECONDS = 15
 
+Constants.JOG_ACTION_NAME = "Auto:Jog"
+Constants.JOG_MIN_INTERVAL_SECONDS = 45
+Constants.JOG_SEGMENT_COUNT = 3
+Constants.JOG_SEGMENT_DELAY_SECONDS = 1.5
+Constants.JOG_FUN_GAIN = 18
+Constants.JOG_MOVE_TIMEOUT_SECONDS = 10
+Constants.JOG_CHAT_LINES = {
+	"Quick jog to shake off the boredom.",
+	"Going for a short run.",
+	"Need to stretch my legs for a bit.",
+}
+
 Constants.BEG_ACTION_NAME = "Auto:Beg"
 Constants.BEG_ACTION_LABEL = "beg"
 Constants.BEG_TICK_SECONDS = 1

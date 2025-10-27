@@ -7,11 +7,16 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local PlotBuilder = require(script.Parent.Parent.Modules.PlotBuilder)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
+local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 local PlotBuilderGui = PlayerGui:WaitForChild("PlotBuilderGui")
+local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
+local InterfacesTemplates = AssetsFolder:WaitForChild("InterfacesTemplates")
+local ItemButtonTemplate = InterfacesTemplates:WaitForChild("ItemButtonTemplate")
 
+local CloseButtonContext = PlotBuilderGui:WaitForChild("CloseButtonContext")
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local LeftDock = PlotBuilderGui:WaitForChild("Main").Bottom.LeftDock
 local RightDock = PlotBuilderGui:WaitForChild("Main").Bottom.RightDock
@@ -30,6 +35,7 @@ local PlotBuilderUI = {}
 local ActiveView: string? = nil
 type CategoryPanel = "Home" | "Furnitures" | "Environment"
 local ActivePanel: CategoryPanel? = nil
+type SelectionButton = ImageButton
 local INPUT_DEBOUNCE_SECONDS = 0.2
 
 local function connectDebounced(action: InputAction, actionName: string, callback: () -> ()): ()
@@ -59,8 +65,36 @@ local CATEGORY_TAGS = {
 	Appliances = "Appliance",
 }
 
-local buttonCache: { [string]: { TextButton } } = {}
+local buttonCache: { [string]: { SelectionButton } } = {}
 local emptyStateLabel: TextLabel? = nil
+local PLACEHOLDER_THUMBNAIL = "rbxasset://textures/ui/GuiImagePlaceholder.png"
+local THUMBNAIL_TEMPLATE = "rbxthumb://type=Asset&id=%d&w=420&h=420"
+
+local ITEM_THUMBNAIL_ASSET_IDS: { [string]: number } = {
+	Bed = 136367494509090,
+	StandardBed = 136367494509090,
+	Refridgerator = 95612768406124,
+	WoodenChair = 97857212871579,
+	BigWoodenTable = 76848440269937,
+	Lamp = 116003840493275,
+	Campfire = 116024324956421,
+}
+
+local function buildThumbnailUri(itemName: string): string
+	local assetId = ITEM_THUMBNAIL_ASSET_IDS[itemName]
+	if typeof(assetId) == "number" and assetId > 0 then
+		return string.format(THUMBNAIL_TEMPLATE, assetId)
+	end
+	return PLACEHOLDER_THUMBNAIL
+end
+
+local function formatCost(cost: number?): string
+	if typeof(cost) ~= "number" then
+		return "—"
+	end
+	local rounded = math.floor(cost + 0.5)
+	return string.format("$%d", rounded)
+end
 
 local function getScrollingFrame(): ScrollingFrame
 	local scrollingFrame = RightDock:FindFirstChild("ScrollingFrame")
@@ -107,7 +141,7 @@ local function hideEmptyStateLabel()
 	end
 end
 
-local function createButtonsForCategory(category: string): { TextButton }
+local function createButtonsForCategory(category: string): { SelectionButton }
 	local tag = CATEGORY_TAGS[category]
 	if tag == nil then
 		warn("PlotBuilderUI received unknown category", category)
@@ -116,20 +150,25 @@ local function createButtonsForCategory(category: string): { TextButton }
 
 	local buttons = {}
 	for _, itemModel in ipairs(CollectionService:GetTagged(tag)) do
-		local button = Instance.new("TextButton")
+		local buttonIndex = #buttons + 1
+		local button = ItemButtonTemplate:Clone()
 		button.Name = itemModel.Name
-		button.Text = itemModel.Name
-		button.Size = UDim2.new(1, -8, 0, 40)
-		button.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-		button.TextColor3 = Color3.fromRGB(230, 230, 230)
-		button.Font = Enum.Font.Gotham
-		button.TextSize = 18
-		button.AutoButtonColor = true
-		button.LayoutOrder = #buttons
+		button.LayoutOrder = buttonIndex
+		button.Visible = true
+		button.Image = buildThumbnailUri(itemModel.Name)
+		button.ImageColor3 = Color3.new(1, 1, 1)
+		button.ImageTransparency = 0
 
-		local uICorner = Instance.new("UICorner")
-		uICorner.CornerRadius = UDim.new(0, 90)
-		uICorner.Parent = button
+		local itemSpec = ItemFinder.FindItemById(itemModel.Name)
+		local costText = formatCost(itemSpec and itemSpec.Cost)
+		local infoContainer = button:FindFirstChild("Info")
+		if infoContainer and infoContainer:IsA("Frame") then
+			local costLabel = infoContainer:FindFirstChild("ItemCost")
+			if costLabel and costLabel:IsA("TextLabel") then
+				costLabel.Text = costText
+			end
+		end
+
 		button.MouseButton1Click:Connect(function()
 			print("Selected item: " .. itemModel.Name)
 			PlotBuilder.PreviewSelected(itemModel.Name)
@@ -142,7 +181,7 @@ local function createButtonsForCategory(category: string): { TextButton }
 	return buttons
 end
 
-local function getButtonsForCategory(category: string): { TextButton }
+local function getButtonsForCategory(category: string): { SelectionButton }
 	local cached = buttonCache[category]
 	if cached ~= nil then
 		return cached
@@ -151,13 +190,13 @@ local function getButtonsForCategory(category: string): { TextButton }
 	return createButtonsForCategory(category)
 end
 
-local function detachButtons(buttons: { TextButton })
+local function detachButtons(buttons: { SelectionButton })
 	for _, button in ipairs(buttons) do
 		button.Parent = nil
 	end
 end
 
-local function attachButtons(scrollFrame: ScrollingFrame, buttons: { TextButton })
+local function attachButtons(scrollFrame: ScrollingFrame, buttons: { SelectionButton })
 	for _, button in ipairs(buttons) do
 		button.Parent = scrollFrame
 	end
@@ -306,7 +345,10 @@ function PlotBuilderUI:Init()
 		print("EnvironmentSelection Rocks button pressed")
 		setActiveCategory("Rocks")
 	end)
-
+	connectDebounced(CloseButtonContext.CloseButton, "ClosePlotBuilderUI", function()
+		print("CloseButtonContext Close button pressed")
+		PlotBuilder.Hide()
+	end)
 	switchCategoryPanel("Home")
 end
 
