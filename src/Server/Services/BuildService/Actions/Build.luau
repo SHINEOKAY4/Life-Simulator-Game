@@ -48,6 +48,13 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		local widthCells = itemData.WidthCells or itemData.Width or 1
 		local depthCells = itemData.DepthCells or itemData.Depth or 1
 		local floorFacing: Facing = "North"
+		local totalCells = widthCells * depthCells
+
+		local canAfford, failureReason, totalCost, currencyState =
+			Helpers.ensurePlacementFunds(player, itemData, totalCells)
+		if not canAfford then
+			return false, failureReason or "Not enough cash"
+		end
 		local success =
 			state:PlaceFloor(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, floorFacing)
 		if not success then
@@ -73,6 +80,8 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			metadata
 		)
 
+		Helpers.deductPlacementCost(player, currencyState, totalCost)
+
 		return true, "Floor placed"
 	elseif itemData.PlacementType == "CellObject" then
 		local widthCells = itemData.WidthCells or itemData.Width or 1
@@ -82,6 +91,11 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			if not state:HasFloorUnderFootprint(payload.CellX, payload.CellZ, widthCells, depthCells, facing) then
 				return false, "Floor required under all cells"
 			end
+		end
+
+		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1)
+		if not canAfford then
+			return false, failureReason or "Not enough cash"
 		end
 
 		local success = state:Place(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, facing)
@@ -98,9 +112,15 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing)
 
 		Helpers.sendPlacementDelta(player, "Placed", payload.ItemId, payload.CellX, payload.CellZ, facing, nil)
+
+		Helpers.deductPlacementCost(player, currencyState, totalCost)
 		return true, "Cell object placed"
 	elseif itemData.PlacementType == "Wall" then
 		local requiresFloorOnBothSides = itemData.RequiresFloorOnBothSides or false
+		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1)
+		if not canAfford then
+			return false, failureReason or "Not enough cash"
+		end
 		if itemData.RequiresExistingWall then
 			local replacedId, err = state:ReplaceWallSegment(
 				payload.ItemId,
@@ -133,6 +153,8 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 				savedDoor and savedDoor.Metadata
 			)
 
+			Helpers.deductPlacementCost(player, currencyState, totalCost)
+
 			return true, "Door installed"
 		end
 
@@ -145,31 +167,26 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing)
 
 		Helpers.sendPlacementDelta(player, "Placed", payload.ItemId, payload.CellX, payload.CellZ, facing, nil)
+		Helpers.deductPlacementCost(player, currencyState, totalCost)
 
 		return true, "Wall placed"
 	elseif itemData.PlacementType == "Roof" then
+		local widthCells = itemData.WidthCells or itemData.Width or 1
+		local depthCells = itemData.DepthCells or itemData.Depth or 1
 		if itemData.Rules and itemData.Rules.RequiresFloorUnderAllCells then
-			if
-				not state:HasFloorUnderFootprint(
-					payload.CellX,
-					payload.CellZ,
-					itemData.WidthCells,
-					itemData.DepthCells,
-					facing
-				)
-			then
+			if not state:HasFloorUnderFootprint(payload.CellX, payload.CellZ, widthCells, depthCells, facing) then
 				return false, "Floor required under roof"
 			end
 		end
 
-		local success = state:PlaceRoof(
-			payload.ItemId,
-			payload.CellX,
-			payload.CellZ,
-			itemData.WidthCells,
-			itemData.DepthCells,
-			facing
-		)
+		local totalCells = widthCells * depthCells
+		local canAfford, failureReason, totalCost, currencyState =
+			Helpers.ensurePlacementFunds(player, itemData, totalCells)
+		if not canAfford then
+			return false, failureReason or "Not enough cash"
+		end
+
+		local success = state:PlaceRoof(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, facing)
 		if not success then
 			return false, "Failed to place roof"
 		end
@@ -177,6 +194,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing)
 
 		Helpers.sendPlacementDelta(player, "Placed", payload.ItemId, payload.CellX, payload.CellZ, facing, nil)
+		Helpers.deductPlacementCost(player, currencyState, totalCost)
 
 		return true, "Roof placed"
 	else

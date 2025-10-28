@@ -8,15 +8,17 @@ Constants.ROAM_ACTION_NAME = "Auto:Roam"
 Constants.ROAM_MIN_INTERVAL_SECONDS = 15
 
 Constants.JOG_ACTION_NAME = "Auto:Jog"
-Constants.JOG_MIN_INTERVAL_SECONDS = 45
-Constants.JOG_SEGMENT_COUNT = 3
-Constants.JOG_SEGMENT_DELAY_SECONDS = 1.5
-Constants.JOG_FUN_GAIN = 18
-Constants.JOG_MOVE_TIMEOUT_SECONDS = 10
+Constants.JOG_MIN_INTERVAL_SECONDS = 20 -- Reduced from 45 so jogging happens more often
+Constants.JOG_DURATION_SECONDS = 30 -- Total time spent jogging (like using a station)
+Constants.JOG_TICK_INTERVAL = 3 -- How often to update Fun during jog (every 3 seconds)
+Constants.JOG_FUN_PER_TICK = 6 -- Fun gained per tick (30s / 3s = 10 ticks * 6 = 60 total Fun)
+Constants.JOG_MOVE_SPEED_MULTIPLIER = 1.8 -- Run faster than normal walk (increased from 1.5)
+Constants.JOG_MOVE_TIMEOUT_SECONDS = 12 -- Increased timeout for longer distances
+Constants.JOG_WAYPOINT_COUNT = 8 -- More waypoints for continuous movement
 Constants.JOG_CHAT_LINES = {
-	"Quick jog to shake off the boredom.",
-	"Going for a short run.",
-	"Need to stretch my legs for a bit.",
+	"Going for a jog!",
+	"Time for some exercise.",
+	"Running around to clear my head.",
 }
 
 Constants.BEG_ACTION_NAME = "Auto:Beg"

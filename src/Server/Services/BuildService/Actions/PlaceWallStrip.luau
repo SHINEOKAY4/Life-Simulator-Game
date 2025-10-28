@@ -150,6 +150,16 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 		end
 	end
 
+	local segmentCount = #plannedSegments
+	if segmentCount < 1 then
+		return false, "Nothing to place"
+	end
+
+	local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, spec, segmentCount)
+	if not canAfford then
+		return false, failureReason or "Not enough cash"
+	end
+
 	for _, segment in plannedSegments do
 		local placed = state:PlaceWall(itemId, segment.cellX, segment.cellZ, 1, 1, facing, requiresFloorOnBothSides)
 		if not placed then
@@ -159,6 +169,8 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 		WorldPlacer.Spawn(player, grid, itemId, segment.cellX, segment.cellZ, facing)
 		Helpers.sendPlacementDelta(player, "Placed", itemId, segment.cellX, segment.cellZ, facing, nil)
 	end
+
+	Helpers.deductPlacementCost(player, currencyState, totalCost)
 
 	return true, "Wall strip placed"
 end

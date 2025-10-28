@@ -80,6 +80,12 @@ local function PlaceRoofArea(player: Player, payload: Payload): (boolean, string
 		end
 	end
 
+	local canAfford, failureReason, totalCost, currencyState =
+		Helpers.ensurePlacementFunds(player, itemData, totalCells)
+	if not canAfford then
+		return false, failureReason or "Not enough cash"
+	end
+
 	local success = state:PlaceRoof(itemId, minCellX, minCellZ, widthCells, depthCells, facing)
 	if not success then
 		return false, "Failed to place roof"
@@ -96,6 +102,7 @@ local function PlaceRoofArea(player: Player, payload: Payload): (boolean, string
 	})
 
 	Helpers.sendPlacementDelta(player, "Placed", itemId, minCellX, minCellZ, facing, metadata)
+	Helpers.deductPlacementCost(player, currencyState, totalCost)
 
 	return true, "Roof placed"
 end

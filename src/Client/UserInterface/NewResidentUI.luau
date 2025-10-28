@@ -1,10 +1,19 @@
 --!strict
 -- StarterPlayerScripts/Client/UserInterface/NewResident.lua
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local ResidentStore = require(script.Parent.Parent.ClientStores.ResidentsStore)
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+local ResidentGui = PlayerGui:WaitForChild("ResidentGui")
+local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
+local AddResidentContext = InputContextsFolder:WaitForChild("AddResidentContext")
+local AddResidentButton = ResidentGui.ResidentSelectionFrame.Background.Roster.AddResidentButton
 
 local NewResidentUI = {}
 
@@ -32,6 +41,11 @@ function NewResidentUI.Init()
 
 		local success2, message2 = ResidentStore.RequestAddResident(janeDoe)
 		print("AddResidentRequest response:", success2, message2)
+	end)
+
+	AddResidentContext.AddResidentButton.Pressed:Connect(function()
+		-- Open the resident creation UI when the button is pressed
+		print("Add Resident Button Pressed. Opening resident creation UI...")
 	end)
 end
 

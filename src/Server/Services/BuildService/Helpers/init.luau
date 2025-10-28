@@ -3,6 +3,8 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
+local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local PlotStateModule = require(ServerScriptService.Server.Classes.PlotState)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
@@ -11,6 +13,10 @@ local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 type Facing = PlotStateModule.Facing
 type PlotRuntimeState = PlotStateModule.PlotState
 type SavedPlacedObject = PlotStateModule.SavedPlacedObject
+
+type CurrencyState = { [string]: number }
+
+local PRIMARY_CURRENCY_NAME = "Cash"
 
 type Metadata = { [string]: any }
 
@@ -101,6 +107,72 @@ function Helpers.resolvePlacedItem(
 	end
 
 	return nil, nil, nil, nil
+end
+
+local function computeQuantityMultiplier(quantity: number?): number
+	if typeof(quantity) ~= "number" then
+		return 1
+	end
+	if quantity <= 0 then
+		return 0
+	end
+	local floored = math.floor(quantity)
+	if floored < 1 then
+		return 1
+	end
+	return floored
+end
+
+function Helpers.computePlacementCost(itemSpec: { [string]: any }?, quantity: number?): number
+	if typeof(itemSpec) ~= "table" then
+		return 0
+	end
+	local unitCost = itemSpec.Cost
+	if typeof(unitCost) ~= "number" or unitCost <= 0 then
+		return 0
+	end
+	local multiplier = computeQuantityMultiplier(quantity)
+	if multiplier <= 0 then
+		return 0
+	end
+	return unitCost * multiplier
+end
+
+function Helpers.ensurePlacementFunds(
+	player: Player,
+	itemSpec: { [string]: any }?,
+	quantity: number?
+): (boolean, string?, number, CurrencyState?)
+	local totalCost = Helpers.computePlacementCost(itemSpec, quantity)
+	if totalCost <= 0 then
+		return true, nil, 0, nil
+	end
+
+	local currencyState = PlayerSession.GetDataAwait(player, "CurrencyState")
+	if typeof(currencyState) ~= "table" then
+		warn(("[BuildService] Currency state unavailable for %s"):format(player.Name))
+		return false, "Unable to process placement right now.", 0, nil
+	end
+
+	local balanceValue = currencyState[PRIMARY_CURRENCY_NAME]
+	local balance = if typeof(balanceValue) == "number" then balanceValue else 0
+	if balance < totalCost then
+		local itemNameValue = itemSpec and itemSpec.Name
+		local itemName = if typeof(itemNameValue) == "string" and itemNameValue ~= "" then itemNameValue else "item"
+		return false, ("Not enough cash for %s (need %d)."):format(itemName, totalCost), totalCost, currencyState
+	end
+
+	return true, nil, totalCost, currencyState
+end
+
+function Helpers.deductPlacementCost(player: Player, currencyState: CurrencyState?, totalCost: number)
+	if totalCost <= 0 then
+		return
+	end
+	if currencyState == nil then
+		return
+	end
+	CurrencyService.Remove(player, PRIMARY_CURRENCY_NAME, totalCost, currencyState)
 end
 
 return Helpers

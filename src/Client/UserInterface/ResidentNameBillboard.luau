@@ -392,7 +392,7 @@ local function attachResident(model: Model)
 		backgroundTransparency = 1,
 		size = UDim2.fromScale(5, 1.4),
 		studsOffsetWorldSpace = Vector3.new(0, 2, 0),
-		alwaysOnTop = true,
+		alwaysOnTop = false,
 		maxDistance = 40,
 		textSize = 22,
 		richText = true,

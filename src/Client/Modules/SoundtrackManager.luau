@@ -38,10 +38,6 @@ local BILL_PAID_SFX_OPTIONS = {
 	Volume = 0.75,
 }
 
-local PLACEMENT_SFX_OPTIONS = {
-	Volume = 0.7,
-}
-
 local DEFAULT_AMBIENT_VOLUME = 0.45
 
 local SoundtrackManager = {}
@@ -210,7 +206,7 @@ function SoundtrackManager.PlayBillPaid()
 end
 
 function SoundtrackManager.PlayPlacementSuccess()
-	playSfx(SOUND_IDS.PlacementSuccess, PLACEMENT_SFX_OPTIONS)
+	playSfx(SOUND_IDS.BillPaid, BILL_PAID_SFX_OPTIONS)
 end
 
 SoundtrackManager.NotificationSoundId = SOUND_IDS.Notification

@@ -74,6 +74,12 @@ local function PlaceFloorArea(player: Player, payload: Payload): (boolean, strin
 		return false, "Selection blocked"
 	end
 
+	local canAfford, failureReason, totalCost, currencyState =
+		Helpers.ensurePlacementFunds(player, itemData, totalCells)
+	if not canAfford then
+		return false, failureReason or "Not enough cash"
+	end
+
 	local success = state:PlaceFloor(itemId, minCellX, minCellZ, widthCells, depthCells, facing)
 	if not success then
 		return false, "Failed to place floor"
@@ -90,6 +96,7 @@ local function PlaceFloorArea(player: Player, payload: Payload): (boolean, strin
 	})
 
 	Helpers.sendPlacementDelta(player, "Placed", itemId, minCellX, minCellZ, facing, metadata)
+	Helpers.deductPlacementCost(player, currencyState, totalCost)
 
 	return true, "Floors placed"
 end

@@ -9,6 +9,9 @@ local ObjectPreview = require(script.Parent.ObjectPreview)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local SoundtrackManager = require(script.Parent.SoundtrackManager)
+local PlacementCelebration = require(script.Parent.PlacementCelebration)
+local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
+local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -30,8 +33,148 @@ local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEn
 type Facing = ObjectPreview.Facing
 type WallStripSelectionInfo = ObjectPreview.WallStripSelectionInfo
 type RoofSelectionInfo = ObjectPreview.RoofSelectionInfo
+type PreviewPose = ObjectPreview.PreviewPose
+
 local PlotBuilder = {}
 local INPUT_DEBOUNCE_SECONDS = 0.25
+local PREVIEW_RESTORE_DELAY = 0.6
+
+local previewRestoreToken = 0
+
+local function cancelPendingPreviewRestore()
+	previewRestoreToken += 1
+end
+
+local function temporarilyHidePreviewForPlacement(pose: PreviewPose)
+	if pose.Kind ~= "CellObject" then
+		return
+	end
+
+	local itemId = pose.ItemId
+	local facing = pose.Facing
+	if typeof(itemId) ~= "string" or itemId == "" then
+		return
+	end
+
+	cancelPendingPreviewRestore()
+	local token = previewRestoreToken
+	local wasEnabled = PlacePreviewAction.Enabled
+
+	ObjectPreview.ClearPreview()
+	PlacePreviewAction.Enabled = false
+
+	task.delay(PREVIEW_RESTORE_DELAY, function()
+		if previewRestoreToken ~= token then
+			return
+		end
+
+		if PlotBuilderEnabled.Value ~= true then
+			return
+		end
+
+		if PlotBuilderMain.Visible ~= true then
+			return
+		end
+
+		if ObjectPreviewEnabled.Value ~= true then
+			return
+		end
+
+		if
+			JobSelectionUIEnabled.Value == true
+			or PlotExpansionEnabled.Value == true
+			or ObjectSelectorEnabled.Value == true
+		then
+			return
+		end
+
+		ObjectPreview.RenderPreview(itemId, facing :: Facing)
+		PlacePreviewAction.Enabled = wasEnabled
+	end)
+end
+
+local function computeFootprintPosition(
+	cellX: number,
+	cellZ: number,
+	widthCells: number,
+	depthCells: number,
+	facing: string
+): Vector3?
+	local grid = PlotStateStore.GetGrid()
+	if not grid then
+		return nil
+	end
+	local ok, cframe = pcall(function()
+		return grid:FootprintCenterCFrame(cellX, cellZ, widthCells, depthCells, facing)
+	end)
+	if not ok then
+		return nil
+	end
+	return (cframe :: CFrame).Position
+end
+
+local function computeCellObjectPosition(itemId: string?, cellX: number, cellZ: number, facing: string): Vector3?
+	local widthCells = 1
+	local depthCells = 1
+	if typeof(itemId) == "string" then
+		local spec = ItemFinder.FindItemById(itemId)
+		if spec then
+			widthCells = spec.WidthCells or spec.Width or widthCells
+			depthCells = spec.DepthCells or spec.Depth or depthCells
+		end
+	end
+	return computeFootprintPosition(cellX, cellZ, widthCells, depthCells, facing)
+end
+
+local function computeAreaPlacementPosition(
+	startCellX: number,
+	startCellZ: number,
+	endCellX: number,
+	endCellZ: number,
+	widthCells: number?,
+	depthCells: number?,
+	facing: string?
+): Vector3?
+	local anchorCellX = math.min(startCellX, endCellX)
+	local anchorCellZ = math.min(startCellZ, endCellZ)
+	local resolvedWidth = widthCells or math.abs(endCellX - startCellX) + 1
+	local resolvedDepth = depthCells or math.abs(endCellZ - startCellZ) + 1
+	return computeFootprintPosition(anchorCellX, anchorCellZ, resolvedWidth, resolvedDepth, facing or "North")
+end
+
+local function computeWallStripPosition(selection: WallStripSelectionInfo): Vector3?
+	local grid = PlotStateStore.GetGrid()
+	if not grid then
+		return nil
+	end
+	local facing = selection.Facing
+	local minCellX = math.min(selection.StartCellX, selection.EndCellX)
+	local minCellZ = math.min(selection.StartCellZ, selection.EndCellZ)
+	local maxCellX = math.max(selection.StartCellX, selection.EndCellX)
+	local maxCellZ = math.max(selection.StartCellZ, selection.EndCellZ)
+
+	local okStart, startCFrame = pcall(function()
+		return grid:CellToWorldEdgeCenterCFrame(minCellX, minCellZ, facing)
+	end)
+	if not okStart then
+		return nil
+	end
+	local startPosition = (startCFrame :: CFrame).Position
+
+	if minCellX == maxCellX and minCellZ == maxCellZ then
+		return startPosition
+	end
+
+	local okEnd, endCFrame = pcall(function()
+		return grid:CellToWorldEdgeCenterCFrame(maxCellX, maxCellZ, facing)
+	end)
+	if okEnd then
+		local endPosition = (endCFrame :: CFrame).Position
+		return (startPosition + endPosition) * 0.5
+	end
+
+	return startPosition
+end
 
 local function runDebounced(actionName: string, callback: () -> ()): ()
 	local key = string.format("PlotBuilder/%s", actionName)
@@ -129,11 +272,13 @@ function PlotBuilder.Hide()
 end
 
 function PlotBuilder.PreviewSelected(itemId: string, initialFacing: string?)
+	cancelPendingPreviewRestore()
 	ObjectPreview.RenderPreview(itemId, initialFacing :: Facing?)
 	PlacePreviewAction.Enabled = true
 end
 
 function PlotBuilder.RemovePreview()
+	cancelPendingPreviewRestore()
 	ObjectPreview.ClearPreview()
 	PlacePreviewAction.Enabled = false
 end
@@ -185,8 +330,15 @@ function PlotBuilder.PlaceSelectedPreview()
 	})
 
 	if not success then
-		warn("Placement failed: " .. message)
+		warn("Placement failed: " .. (message or "unknown reason"))
+		local failurePosition = computeCellObjectPosition(pose.ItemId, pose.CellX, pose.CellZ, pose.Facing)
+		PlacementCelebration.ShowFailure(failurePosition, pose.ItemId, message)
+		return
 	end
+
+	SoundtrackManager.PlayPlacementSuccess()
+	PlacementCelebration.CellObjectSuccess(pose.ItemId, pose.CellX, pose.CellZ, pose.Facing)
+	temporarilyHidePreviewForPlacement(pose)
 
 	-- Optional: keep previewing for batch placement; or call RemovePreview()
 end
@@ -241,10 +393,15 @@ function PlotBuilder.PlaceFloorSelection(selection: any)
 		DepthCells = depthCells,
 	})
 
+	local placementPosition = computeAreaPlacementPosition(startX, startZ, endX, endZ, widthCells, depthCells, "North")
+
 	if success then
 		SoundtrackManager.PlayPlacementSuccess()
+		PlacementCelebration.ShowSuccess(placementPosition, itemId)
+		PlacementCelebration.CelebrateFloorArea(itemId, minCellX, minCellZ, widthCells, depthCells)
 	else
-		warn("Placement failed: " .. message)
+		warn("Placement failed: " .. (message or "unknown reason"))
+		PlacementCelebration.ShowFailure(placementPosition, itemId, message)
 	end
 end
 
@@ -299,10 +456,15 @@ function PlotBuilder.PlaceWallStrip(selection: WallStripSelectionInfo)
 		EndCellZ = endCellZ,
 	})
 
+	local placementPosition = computeWallStripPosition(selection)
+
 	if success then
 		SoundtrackManager.PlayPlacementSuccess()
+		PlacementCelebration.ShowSuccess(placementPosition, itemId)
+		PlacementCelebration.CelebrateWallStrip(itemId, startCellX, endCellX, startCellZ, endCellZ, facing, orientation)
 	else
-		warn("Placement failed: " .. message)
+		warn("Placement failed: " .. (message or "unknown reason"))
+		PlacementCelebration.ShowFailure(placementPosition, itemId, message)
 	end
 end
 
@@ -338,9 +500,17 @@ function PlotBuilder.PlaceRoofSelection(selection: RoofSelectionInfo)
 		EndCellZ = endZ,
 	})
 
+	local placementPosition =
+		computeAreaPlacementPosition(startX, startZ, endX, endZ, selection.WidthCells, selection.DepthCells, "North")
+
 	if not success then
-		warn("Placement failed: " .. message)
+		warn("Placement failed: " .. (message or "unknown reason"))
+		PlacementCelebration.ShowFailure(placementPosition, itemId, message)
+		return
 	end
+
+	SoundtrackManager.PlayPlacementSuccess()
+	PlacementCelebration.ShowSuccess(placementPosition, itemId)
 end
 
 --#TODO: More functions for rotating, selecting already placed items, deleting placed items, etc.

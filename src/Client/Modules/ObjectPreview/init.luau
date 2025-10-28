@@ -17,6 +17,7 @@ local RoofPreview = require(script:WaitForChild("RoofPreview"))
 local WallStripPreview = require(script:WaitForChild("WallStripPreview"))
 local WallConstraints = require(script:WaitForChild("WallConstraints"))
 local Renderer = require(script:WaitForChild("Renderer"))
+local PlacementCostDisplay = require(script.Parent:WaitForChild("PlacementCostDisplay"))
 
 type PreviewFacing = string
 type PreviewKind = "CellObject" | "Floor" | "Wall" | "Roof"
@@ -82,6 +83,7 @@ local function resetFloorState(shouldReleasePreviewPart: boolean?)
 		FloorPreview.ReleasePreviewPart()
 	end
 	LastPrimaryMouseDown = false
+	PlacementCostDisplay.Hide()
 end
 
 local function resetRoofState(shouldReleasePreviewPart: boolean?)
@@ -90,6 +92,7 @@ local function resetRoofState(shouldReleasePreviewPart: boolean?)
 		RoofPreview.ReleasePreviewPart()
 	end
 	LastPrimaryMouseDown = false
+	PlacementCostDisplay.Hide()
 end
 
 local function computeIgnorePlacement(): MoveOriginInfo?
@@ -270,6 +273,22 @@ local function renderFloorPreview(
 	if result then
 		PreviewHighlight.FillColor = result.fillColor
 		PreviewHighlight.OutlineColor = result.outlineColor
+		local summary = result.summary
+		if summary and typeof(itemId) == "string" then
+			local widthCells = summary.WidthCells or (summary.MaxCellX - summary.MinCellX + 1)
+			local depthCells = summary.DepthCells or (summary.MaxCellZ - summary.MinCellZ + 1)
+			local centerCFrame =
+				grid:FootprintCenterCFrame(summary.MinCellX, summary.MinCellZ, widthCells, depthCells, "North")
+			local upVector = surface.CFrame.UpVector
+			local maxDimension = math.max(widthCells, depthCells)
+			local heightOffset = 1.75 + math.max(0, maxDimension - 1) * 0.35
+			local worldPosition = centerCFrame.Position + upVector * heightOffset
+			PlacementCostDisplay.UpdateFloor(itemId, summary.CellCount, result.canPlace, worldPosition)
+		else
+			PlacementCostDisplay.Hide()
+		end
+	else
+		PlacementCostDisplay.Hide()
 	end
 end
 
@@ -562,8 +581,38 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 			if roofResult then
 				PreviewHighlight.FillColor = roofResult.fillColor
 				PreviewHighlight.OutlineColor = roofResult.outlineColor
+				local summary = roofResult.summary
+				if summary and typeof(CurrentItemId) == "string" then
+					local widthCells = summary.WidthCells or (summary.MaxCellX - summary.MinCellX + 1)
+					local depthCells = summary.DepthCells or (summary.MaxCellZ - summary.MinCellZ + 1)
+					local centerCFrame =
+						grid:FootprintCenterCFrame(summary.MinCellX, summary.MinCellZ, widthCells, depthCells, "North")
+					local upVector = surface.CFrame.UpVector
+					local heightStuds = 0
+					if typeof(CurrentItemSpec) == "table" then
+						local specHeight = (CurrentItemSpec :: any).HeightStuds
+						if typeof(specHeight) == "number" then
+							heightStuds = specHeight
+						end
+					end
+					local maxDimension = math.max(widthCells, depthCells)
+					local heightOffset = math.max(0, heightStuds) + 2.25 + math.max(0, maxDimension - 1) * 0.25
+					local worldPosition = centerCFrame.Position + upVector * heightOffset
+					PlacementCostDisplay.UpdateRoof(
+						CurrentItemId,
+						summary.CellCount,
+						roofResult.canPlace,
+						worldPosition
+					)
+				else
+					PlacementCostDisplay.Hide()
+				end
 			end
 			return
+		end
+
+		if resolvedPreviewKind == "Roof" then
+			PlacementCostDisplay.Hide()
 		end
 
 		withMarkerPool(function()
@@ -628,6 +677,24 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 					MarkerPool.RenderFootprintMarkers(grid, surface, highlightCells, stripResult.canPlace, "Wall")
 					local summary = stripResult.summary
 					if summary then
+						if typeof(CurrentItemId) == "string" then
+							local startCFrame =
+								grid:CellToWorldEdgeCenterCFrame(summary.StartCellX, summary.StartCellZ, summary.Facing)
+							local endCFrame =
+								grid:CellToWorldEdgeCenterCFrame(summary.EndCellX, summary.EndCellZ, summary.Facing)
+							local midpoint = (startCFrame.Position + endCFrame.Position) * 0.5
+							local upVector = surface.CFrame.UpVector
+							local heightOffset = 2.75 + math.max(0, summary.SegmentCount - 1) * 0.15
+							local worldPosition = midpoint + upVector * heightOffset
+							PlacementCostDisplay.UpdateWall(
+								CurrentItemId,
+								summary.SegmentCount,
+								stripResult.canPlace,
+								worldPosition
+							)
+						else
+							PlacementCostDisplay.Hide()
+						end
 						previewWall(
 							model,
 							grid,
@@ -638,10 +705,16 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 							summary
 						)
 					else
+						PlacementCostDisplay.Hide()
 						previewWall(model, grid, cellX, cellZ, previewFacing, lift)
 					end
 					return
 				end
+				PlacementCostDisplay.Hide()
+			end
+
+			if resolvedPreviewKind == "Wall" then
+				PlacementCostDisplay.Hide()
 			end
 
 			if resolvedPreviewKind == "Wall" then
@@ -771,6 +844,8 @@ function ObjectPreview.ClearPreview()
 		SelectedItem:Destroy()
 		SelectedItem = nil
 	end
+
+	PlacementCostDisplay.Hide()
 
 	if Connection then
 		Connection:Disconnect()
