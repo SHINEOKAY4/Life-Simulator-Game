@@ -27,13 +27,9 @@
 
 ## Data & Persistence
 
-- Version `GigState` for future slot count tuning.
-- Guard against multi-session gig slot exhaustion exploits.
+- Version `WorldEventState` schema for future rotation tuning.
+- Guard against multi-session world event boost exploits.
 - Ensure autosave captures pending payouts and outstanding fees.
 
 ## Tech Debt / Observations
 
-- Replace legacy `Occupation` references with `CurrentCareerId` across services.
-- Audit ResidentAutonomy fallback actions once career scheduling lands.
-- Add unit tests or assertions for CurrencyService when applying modifiers.
--- Need to Fix problem with hunger not being able to interrupt collapsed resident while >= 4 percent energy. Only problem is the resident physically does not get up but need seem to interupt it backend.

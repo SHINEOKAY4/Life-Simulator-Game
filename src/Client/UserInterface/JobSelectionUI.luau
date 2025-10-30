@@ -7,7 +7,6 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ResidentNeedsUI = require(script.Parent.ResidentNeedsUI)
-local GigManager = require(script.Parent.Parent.Modules.GigManager)
 local JobPackets = require(ReplicatedStorage.Network.JobPackets)
 local JobCatalog = require(ReplicatedStorage.Shared.Configurations.JobCatalog)
 local CareerShiftConfig = require(ReplicatedStorage.Shared.Configurations.CareerShiftConfig)
@@ -34,7 +33,6 @@ local DetailPanel = Container.Body.DetailPanel
 local ListContainer = Container.Body.ListContainer
 
 local CareerTemplate = InterfacesTemplateFolder:FindFirstChild("CareerTemplate") :: TextButton
-local GigTemplate = InterfacesTemplateFolder:FindFirstChild("GigTemplate") :: TextButton
 local JobListScrollingFrame = ListContainer.JobList
 
 local JobSelectionContext = JobSelectionGui:WaitForChild("JobSelectionContext")
@@ -297,7 +295,7 @@ local function updateDetailPanel(jobInfo: JobInfo, jobFolder: JobFolder)
 		subtitle = string.format("%s • %s", subtitle, shiftShort)
 	end
 	DetailPanel.Subtitle.Text = subtitle
-	DetailPanel.ApplyButton.Text = if jobTypeAttr == "Profession" then "Apply Now" else "Start Gig"
+	DetailPanel.ApplyButton.Text = "Apply Now"
 	local requirementsLabel = getRequirementsLabel()
 	if requirementsLabel then
 		requirementsLabel.Text = describeRequirements(jobInfo.Requirements)
@@ -338,11 +336,7 @@ local function updateCardText(jobFolder: JobFolder, jobCard: TextButton, jobInfo
 	pay.Text = string.format("$ %s per %s", tostring(basePay), payUnit)
 	title.Text = jobInfo.Name
 	if availableSlots then
-		if jobInfo.Type == "Gig" then
-			availableSlots.Text = "Available: Unlimited"
-		else
-			availableSlots.Text = string.format("Available: %s/%s", tostring(slotsRemaining), tostring(maxSlots))
-		end
+		availableSlots.Text = string.format("Available: %s/%s", tostring(slotsRemaining), tostring(maxSlots))
 	end
 end
 
@@ -357,12 +351,9 @@ local function createCard(jobFolder: JobFolder): TextButton?
 		warn("JobSelectionUI: No catalog entry for", jobId)
 		return nil
 	end
-	local jobTypeAttr = jobFolder:GetAttribute("Type")
-	local rawJobType = if type(jobTypeAttr) == "string" then jobTypeAttr else jobInfo.Type
-	local isCareer = rawJobType == "Career" or rawJobType == "Profession"
-	local template = if isCareer then CareerTemplate else GigTemplate
+	local template = CareerTemplate
 	if not template then
-		warn("JobSelectionUI: Missing template for job type", rawJobType)
+		warn("JobSelectionUI: Missing career template")
 		return nil
 	end
 	local jobCard = template:Clone()
@@ -502,16 +493,6 @@ function JobSelectionUI.Init()
 				local jobInfo = getJobInfo(jobId)
 				if jobInfo then
 					print("Applying for job:", jobInfo.Name)
-					if jobInfo.Type == "Gig" then
-						local success, message, runId = GigManager.StartGig(jobId)
-						print("Gig start result:", success, message, runId)
-						if not success then
-							warn(message)
-							return
-						end
-						JobSelectionUI.Hide()
-						return
-					end
 					local residentModel = ResidentNeedsUI.GetCurrentSelectedResident()
 					local residentName = if residentModel then residentModel.Name else nil
 					if not residentName then

@@ -14,13 +14,15 @@ local Profile = {
 		Cash = 0,
 		OutstandingBalance = 0,
 	},
-	GigState = {
-		SlotsUsedToday = 0,
-		LastRefreshDay = 0,
-		Cooldowns = {},
-		MomentumBoost = {
+	WorldEventState = {
+		RotationId = "",
+		RotationEndsAt = 0,
+		ActiveEvents = {},
+		CareerBoost = {
 			Amount = 0,
 			ExpiresAt = 0,
+			SourceId = "",
+			Description = "",
 		},
 	},
 	BillingState = {
@@ -33,9 +35,16 @@ local Profile = {
 		OutstandingBreakdown = {
 			PlotTax = 0,
 			Electric = 0,
-			Food = 0,
 			Interest = 0,
 		},
+	},
+	KitchenState = {
+		Version = 1,
+		Seeded = false,
+		Ingredients = {},
+		Meals = {},
+		LastCookedAt = 0,
+		Containers = {},
 	},
 	EnergyState = {
 		BaseLoad = 0,

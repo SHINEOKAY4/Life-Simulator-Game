@@ -28,7 +28,7 @@ src/
     ├── ResidentsPackets.luau    # Resident creation/deletion/sync
     ├── PlacementPackets.luau    # Plot claiming/building/unlocking
     ├── JobPackets.luau          # Career management
-    ├── GigPackets.luau          # Player gig system
+  ├── WorldEventPackets.luau   # World event sync and boosts
     └── BillingPackets.luau      # Payment/billing info
 ```
 

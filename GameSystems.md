@@ -11,7 +11,7 @@
   - [5. Needs & Autonomy System](#5-needs--autonomy-system)
   - [6. Direct Action System](#6-direct-action-system)
   - [7. Career System](#7-career-system)
-  - [8. Gig System](#8-gig-system)
+  - [8. World Event System](#8-world-event-system)
   - [9. Shift Scheduler System](#9-shift-scheduler-system)
   - [10. Stat & Progression System](#10-stat--progression-system)
 - [Economy Systems](#economy-systems)
@@ -71,7 +71,7 @@
 
 - **PlayerSession Wrapper:** Encapsulates DataStore operations
 - Custom DataStore package: auto-save, session locking, compression, retries
-- Profile schema categories: `PlotState`, `HouseholdState`, `CurrencyState`, `GigState`, `BillingState`, `PayrollState`, `EnergyState`
+- Profile schema categories: `PlotState`, `HouseholdState`, `CurrencyState`, `WorldEventState`, `BillingState`, `PayrollState`, `EnergyState`
 - Blocking API: `PlayerSession.GetDataAwait(player, category)` - waits until ready
 - Non-blocking API: `PlayerSession.TryGetData(player, category)` - returns nil if not ready
 - Template reconciliation on first load ensures schema consistency
@@ -117,22 +117,19 @@
 - Energy depletion monitoring: forces shift end when Energy ≤ threshold
 - Payout calculation: `basePay * moodMultiplier * streakMultiplier * momentumMultiplier`
 - Streak system: +2% per consecutive successful shift (max +25%)
-- Momentum boost: consumed from GigState when shift starts
+- Momentum boost: consumed from WorldEventService when shift starts
 - Integration with PayrollService: earnings recorded for batch payout
 - Shift lifecycle: `StartShift()` → energy tracking → `EndShift()` → payroll recording
 - Location: `Server/Services/CareerService.luau`, `Shared/Configurations/JobCatalog.luau`
 
-### 8. Gig System
+### 8. World Event System
 
-- **Player Active Income:** Short instanced challenges with cooldowns
-- Gig types: Courier Sprint, Cafe Pop-Up, Debug Jam (tunable base payout + variance)
-- Daily slot system: 3 slots refresh at dawn (in-game day boundary)
-- Performance tiers: Bronze/Silver/Gold multiply final payout
-- Momentum generation: successful gigs grant +10% career boost for 1 in-game hour
-- Cooldown tracking: per-gig timers prevent spam (6-10 min real-time)
-- Run lifecycle: `RequestStart` → player UI → `SubmitScore` → currency award + momentum
-- GigState persistence: slots used, cooldowns, momentum expiry timestamp
-- Location: `Server/Services/GigService.luau`, `Client/Modules/GigManager.luau`
+- **Rotating Boosts & Activities:** WorldEventService seeds time-bound events that modify progression or unlock limited activities.
+- Rotation template: generates event windows (start/end timestamps) and persists them in `WorldEventState` for each profile.
+- Career boost rewards: events can grant temporary payout multipliers that CareerService consumes on shift start.
+- Client mirroring: WorldEventController tracks snapshots and fires `StateChanged` / `CareerBoostChanged` signals for HUD surfaces.
+- Networking: `WorldEventPackets` handles state snapshot replication plus boost granted/expired/consumed notifications.
+- Location: `Server/Services/WorldEventService.luau`, `Client/Modules/WorldEventController.luau`, `src/Network/WorldEventPackets.luau`
 
 ### 9. Shift Scheduler System
 
@@ -166,7 +163,7 @@
 - Primary currency: Cash (stored in CurrencyState)
 - Operations: `Add(player, currency, amount, source)`, `Remove(player, currency, amount, reason)`
 - Rate limiting: prevents exploit spam (transaction throttling)
-- Transaction logging: records currency sources ("Career", "Gig", "Begging")
+- Transaction logging: records currency sources ("Career", "WorldEvent", "Begging")
 - Attribute mirroring: player attributes sync for client UI
 - Outstanding balance tracking: separate from cash for billing
 - Location: `Server/Services/CurrencyService.luau`
@@ -246,7 +243,7 @@
   - ResidentsPackets: resident creation, deletion, station assignment, movement
   - PlacementPackets: plot claiming, chunk unlocking, object placement
   - JobPackets: career start/stop, shift management
-  - GigPackets: gig start, score submission
+  - WorldEventPackets: state sync, boost lifecycle updates
   - BillingPackets: billing info requests, payment, breakdown updates
   - PayrollPackets: payroll info requests, payout notifications
 - Request/response pattern: `.OnServerInvoke` for blocking calls
@@ -349,7 +346,7 @@
 - **Job Board Management:** Periodically restocks available careers
 - DataStore-backed: separate store for shared job listings
 - Restock logic: regenerates listings when time threshold met
-- Job filtering: by type (Profession, Gig), requirements, pay tier
+- Job filtering: by career type, requirements, pay tier
 - Template system: defines job pools, spawn weights, rotation schedules
 - Singleton pattern: one board instance across all players
 - Location: `Server/Services/JobListingService.luau`
@@ -394,7 +391,7 @@ Services initialize in this specific order in `Server/Main.server.luau`:
 3. **CareerService** - Career management (depends on residents)
 4. **BillingService** - Billing cycle setup
 5. **PayrollService** - Payroll cycle setup  
-6. **GigService** - Gig system initialization
+6. **WorldEventService** - World event rotation + boost management
 7. **PlotService** - Plot state management
 8. **BuildService** - Build validation and placement
 9. **ResidentAutonomyService** - Autonomy loop (depends on plots/stations)
@@ -410,6 +407,7 @@ Services initialize in this specific order in `Server/Main.server.luau`:
 ## Key System Interactions
 
 ### Resident Action Flow
+
 1. **Need Decay** (ResidentNeedService) → drops need value
 2. **Autonomy Evaluation** (ResidentAutonomyService) → detects low need
 3. **Station Selection** (NeedEvaluator + StationManager) → finds available station
@@ -419,6 +417,7 @@ Services initialize in this specific order in `Server/Main.server.luau`:
 7. **Action Completion** → releases station, returns to autonomy
 
 ### Career Shift Flow
+
 1. **Shift Scheduler** → fires `ShiftStartDue` event
 2. **CareerService** → calls `StartShift()`, validates resident readiness
 3. **Energy Monitoring** → tracks Energy drain during shift
@@ -428,6 +427,7 @@ Services initialize in this specific order in `Server/Main.server.luau`:
 7. **Payroll Cycle** → batch payout every 4 hours
 
 ### Billing Cycle Flow
+
 1. **BillingService Update** (every 2s) → checks cycle state
 2. **Active State** → accumulates usage (energy, food)
 3. **Due State** → calculates charges, adds to outstanding balance
@@ -436,6 +436,7 @@ Services initialize in this specific order in `Server/Main.server.luau`:
 6. **Payment** → player pays via UI, cycle resets, outage cleared
 
 ### Plot Placement Flow
+
 1. **Client Preview** (PlotBuilder) → shows ghost with validation
 2. **Placement Request** (PlacementPackets) → sent to server
 3. **Build Validation** (BuildService) → checks plot state, ownership

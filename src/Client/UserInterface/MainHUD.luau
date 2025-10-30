@@ -25,6 +25,7 @@ local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local HUDBottomRightEnabled = ActiveQueryFolder:FindFirstChild("HUDBottomRightEnabled") :: BoolValue
 local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled") :: BoolValue
+local CustomizationUIEnabled = ActiveQueryFolder:FindFirstChild("CustomizationUIEnabled") :: BoolValue
 
 local MainHUDGui = PlayerGui:WaitForChild("MainHUD") :: ScreenGui
 local BillFrame = MainHUDGui:WaitForChild("BillFrame") :: Frame
@@ -32,12 +33,10 @@ local BillPanel = BillFrame:WaitForChild("BillPanel")
 local ItemsContainer = BillPanel:WaitForChild("ItemsContainer")
 local PlotTaxFrame = ItemsContainer:WaitForChild("PlotTaxFrame")
 local ElectricityFrame = ItemsContainer:WaitForChild("ElectricityFrame")
-local FoodFrame = ItemsContainer:WaitForChild("FoodFrame")
 local OverdueFrame = ItemsContainer:WaitForChild("OverdueFrame")
 local TotalFrame = BillPanel:WaitForChild("TotalFrame")
 local PlotTaxAmountLabel = PlotTaxFrame:WaitForChild("TextLabel") :: TextLabel
 local ElectricAmountLabel = ElectricityFrame:WaitForChild("TextLabel") :: TextLabel
-local FoodAmountLabel = FoodFrame:WaitForChild("TextLabel") :: TextLabel
 local OverdueAmountLabel = OverdueFrame:WaitForChild("TextLabel") :: TextLabel
 local TotalRow = TotalFrame:WaitForChild("TotalRow")
 local TotalAmountLabel = TotalRow:WaitForChild("TotalLabel") :: TextLabel
@@ -58,6 +57,11 @@ local ResidentGui = PlayerGui:WaitForChild("ResidentGui") :: ScreenGui
 local ResidentSelectionFrame = ResidentGui:WaitForChild("ResidentSelectionFrame") :: Frame
 local ResidentRosterBackground = ResidentSelectionFrame:WaitForChild("Background") :: Frame
 local Roster = ResidentRosterBackground:WaitForChild("Roster") :: Frame
+
+local FoodFrame = ItemsContainer:FindFirstChild("FoodFrame")
+if FoodFrame and FoodFrame:IsA("Frame") then
+	FoodFrame.Visible = false
+end
 
 local rng = Random.new()
 local CASH_ATTRIBUTE_NAME = "Cash"
@@ -568,7 +572,6 @@ function MainHUD.Init()
 	local function resolveOverdueInterest(
 		plotTax: number?,
 		electricityCost: number?,
-		foodCost: number?,
 		totalCost: number?,
 		providedOverdue: number?
 	): number
@@ -588,9 +591,6 @@ function MainHUD.Init()
 		if typeof(electricityCost) == "number" then
 			baseSum += electricityCost
 		end
-		if typeof(foodCost) == "number" then
-			baseSum += foodCost
-		end
 
 		local interest = total - baseSum
 		if interest <= 0 then
@@ -603,19 +603,16 @@ function MainHUD.Init()
 	local function updateBillDisplay(
 		plotTax: number?,
 		electricityCost: number?,
-		foodCost: number?,
 		overdueInterest: number?,
 		totalCost: number?
 	)
 		local sanitizedPlotTax = clampAmount(plotTax)
 		local sanitizedElectric = clampAmount(electricityCost)
-		local sanitizedFood = clampAmount(foodCost)
 		local sanitizedOverdue = clampAmount(overdueInterest)
 		local sanitizedTotal = clampAmount(totalCost)
 
 		PlotTaxAmountLabel.Text = Formatter.formatCurrency(sanitizedPlotTax, CASH_FORMAT_OPTIONS)
 		ElectricAmountLabel.Text = Formatter.formatCurrency(sanitizedElectric, CASH_FORMAT_OPTIONS)
-		FoodAmountLabel.Text = Formatter.formatCurrency(sanitizedFood, CASH_FORMAT_OPTIONS)
 		OverdueAmountLabel.Text = Formatter.formatCurrency(sanitizedOverdue, CASH_FORMAT_OPTIONS)
 		TotalAmountLabel.Text = Formatter.formatCurrency(sanitizedTotal, CASH_FORMAT_OPTIONS)
 	end
@@ -658,11 +655,9 @@ function MainHUD.Init()
 
 		local plotTax = payload.PlotTax
 		local electricityCost = payload.Electric
-		local foodCost = payload.Food
 		local outstandingTotal = payload.OutstandingTotal
 		local totalCost = payload.Total
-		local overdueInterest =
-			resolveOverdueInterest(plotTax, electricityCost, foodCost, totalCost, rawget(payload, "Overdue"))
+		local overdueInterest = resolveOverdueInterest(plotTax, electricityCost, totalCost, rawget(payload, "Overdue"))
 		local dueClockTime = payload.DueClockTime
 		local timeRemaining = payload.TimeRemaining
 
@@ -670,7 +665,7 @@ function MainHUD.Init()
 
 		-- Only update bill breakdown if the bill frame is currently visible
 		if BillFrame.Visible then
-			updateBillDisplay(plotTax, electricityCost, foodCost, overdueInterest, totalCost)
+			updateBillDisplay(plotTax, electricityCost, overdueInterest, totalCost)
 		end
 	end)
 
@@ -682,18 +677,16 @@ function MainHUD.Init()
 
 		local plotTax = payload.PlotTax
 		local electricityCost = payload.Electric
-		local foodCost = payload.Food
 		local outstandingTotal = payload.OutstandingTotal
 		local totalCost = payload.Total
-		local overdueInterest =
-			resolveOverdueInterest(plotTax, electricityCost, foodCost, totalCost, rawget(payload, "Overdue"))
+		local overdueInterest = resolveOverdueInterest(plotTax, electricityCost, totalCost, rawget(payload, "Overdue"))
 		local dueClockTime = payload.DueClockTime
 		local timeRemaining = payload.TimeRemaining
 
 		updateDueLabel(dueClockTime, timeRemaining, outstandingTotal, false)
 
 		if BillFrame.Visible then
-			updateBillDisplay(plotTax, electricityCost, foodCost, overdueInterest, totalCost)
+			updateBillDisplay(plotTax, electricityCost, overdueInterest, totalCost)
 		end
 	end
 
@@ -707,6 +700,13 @@ function MainHUD.Init()
 		end, Player.UserId)
 	end)
 
+	CustomizationUIEnabled.Changed:Connect(function()
+		if CustomizationUIEnabled.Value then
+			MainHUD.Hide()
+		else
+			MainHUD.Show()
+		end
+	end)
 	BillContext.PayAction.Pressed:Connect(function()
 		Debounce.RunIfAvailable("BillPayPress", BILLING_PAY_DEBOUNCE, function()
 			local success, message = BillingPackets.PayBillRequest:Fire()

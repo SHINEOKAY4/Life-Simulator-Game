@@ -12,12 +12,12 @@ local CareerShiftConfig = require(ReplicatedStorage.Shared.Configurations.Career
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local JobPackets = require(ReplicatedStorage.Network.JobPackets)
 local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
-local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local PayrollService = require(ServerScriptService.Server.Services.PayrollService)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ResidentPlacer = require(ServerScriptService.Server.Utilities.ResidentPlacer)
 local ResidentMovement = require(ServerScriptService.Server.Utilities.ResidentMovement)
 local ShiftSchedulerService = require(ServerScriptService.Server.Services.ShiftSchedulerService)
+local WorldEventService = require(ServerScriptService.Server.Services.WorldEventService)
 
 export type CareerResult = {
 	Success: boolean,
@@ -677,26 +677,22 @@ function CareerService.AssignResidentShift(player: Player, residentName: string?
 	}
 end
 
-local function getGigState(player: Player)
-	return PlayerSession.TryGetData(player, "GigState")
-end
-
-local function pullMomentumMultiplier(gigState: any?): (number, boolean)
-	if typeof(gigState) ~= "table" then
+local function consumeCareerBoost(player: Player): (number, boolean)
+	if typeof(WorldEventService) ~= "table" then
 		return 1, false
 	end
-	local boost = gigState.MomentumBoost
-	if typeof(boost) ~= "table" then
+	if typeof(WorldEventService.ConsumeCareerBoost) ~= "function" then
 		return 1, false
 	end
-	local amount = tonumber(boost.Amount)
-	local expiresAt = tonumber(boost.ExpiresAt)
-	if amount and amount > 0 and expiresAt and expiresAt > os.time() then
-		boost.Amount = 0
-		boost.ExpiresAt = 0
-		return 1 + amount, true
+	local success, multiplier, consumed = pcall(WorldEventService.ConsumeCareerBoost, player)
+	if not success then
+		warn("[CareerService] Failed to consume world event boost:", multiplier)
+		return 1, false
 	end
-	return 1, false
+	if typeof(multiplier) ~= "number" or multiplier <= 0 then
+		return 1, false
+	end
+	return multiplier, consumed == true
 end
 
 local function getPlotSpawnCFrame(player: Player): CFrame?
@@ -1047,8 +1043,7 @@ function CareerService.StopResidentShift(
 	end
 	local secondsPerMinute = math.max(0.001, activeShift.SecondsPerMinute)
 	local minutesWorked = elapsedSeconds / secondsPerMinute
-	local gigState = getGigState(player)
-	local momentumMultiplier, _ = pullMomentumMultiplier(gigState)
+	local momentumMultiplier, boostConsumed = consumeCareerBoost(player)
 	save.PendingShiftResume = nil
 
 	-- Calculate payout for display purposes
@@ -1069,6 +1064,9 @@ function CareerService.StopResidentShift(
 	local message
 	if estimatedPayout > 0 and not shortShift then
 		local suffix = " Earnings will be paid during the next payroll cycle."
+		if boostConsumed then
+			suffix ..= " World event boost applied."
+		end
 		if activeShift.ForcedReason == "EnergyDepleted" then
 			message = string.format("%s left work exhausted and earned ~$%d.%s", residentName, estimatedPayout, suffix)
 		else
@@ -1081,6 +1079,9 @@ function CareerService.StopResidentShift(
 			message = string.format("%s ended the shift too quickly for a payout.", residentName)
 		else
 			message = string.format("%s ended the shift with no payout.", residentName)
+		end
+		if boostConsumed then
+			message ..= " World event boost consumed."
 		end
 	end
 

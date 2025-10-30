@@ -24,16 +24,17 @@ type Metrics = {
 	ByRarity: { [JobRarity]: ListingMetrics },
 }
 
+type JobType = "Career"
+
 type ListingState = {
 	JobId: string,
 	Rarity: JobRarity,
-	Type: "Gig" | "Profession",
+	Type: JobType,
 	SlotsRemaining: number?,
 	MaxSlots: number?,
 	PostedAt: number,
 	LastTakenAt: number?,
 	LastTakenBy: number?,
-	Unlimited: boolean,
 	ShiftId: string?,
 }
 
@@ -179,26 +180,13 @@ local function debugPrintBoard(context: string, board: BoardState)
 			print("  … (additional listings truncated)")
 			break
 		end
-		if listing.Unlimited then
-			local shiftSuffix = ""
-			if type(listing.ShiftId) == "string" and listing.ShiftId ~= "" then
-				shiftSuffix = string.format(" shift=%s", listing.ShiftId)
-			end
-			print(("    * %s (Gig) unlimited%s"):format(listing.JobId, shiftSuffix))
-		else
-			local shiftSuffix = ""
-			if type(listing.ShiftId) == "string" and listing.ShiftId ~= "" then
-				shiftSuffix = string.format(" shift=%s", listing.ShiftId)
-			end
-			print(
-				("    * %s (%s) slots=%d/%d"):format(
-					listing.JobId,
-					listing.Rarity,
-					listing.SlotsRemaining or 0,
-					listing.MaxSlots or 0
-				) .. shiftSuffix
-			)
+		local shiftSuffix = ""
+		if type(listing.ShiftId) == "string" and listing.ShiftId ~= "" then
+			shiftSuffix = string.format(" shift=%s", listing.ShiftId)
 		end
+		local remaining = listing.SlotsRemaining or 0
+		local maxSlots = listing.MaxSlots or remaining
+		print(("    * %s (%s) slots=%d/%d%s"):format(listing.JobId, listing.Rarity, remaining, maxSlots, shiftSuffix))
 	end
 end
 
@@ -223,9 +211,6 @@ local function deepCopyMetrics(source: Metrics): Metrics
 end
 
 local function validateResidentForJob(player: Player, residentName: string?, job: JobEntry): (boolean, string?)
-	if job.Type == "Gig" then
-		return true, nil
-	end
 	if residentName == nil or residentName == "" then
 		return false, "Select a resident to apply for this job."
 	end
@@ -281,11 +266,9 @@ local function computeMetrics(listings: { ListingState }): Metrics
 	for _, listing in ipairs(listings) do
 		local entry = metrics.ByRarity[listing.Rarity]
 		entry.Listings += 1
-		if not listing.Unlimited then
-			local remaining = listing.SlotsRemaining or 0
-			metrics.TotalSlotsRemaining += remaining
-			entry.SlotsRemaining += remaining
-		end
+		local remaining = listing.SlotsRemaining or 0
+		metrics.TotalSlotsRemaining += remaining
+		entry.SlotsRemaining += remaining
 	end
 	return metrics
 end
@@ -302,10 +285,6 @@ local function sanitizeListing(rawListing: any): ListingState?
 	if job == nil then
 		return nil
 	end
-	local isUnlimited = job.Type == "Gig"
-	if typeof(rawListing.Unlimited) == "boolean" then
-		isUnlimited = rawListing.Unlimited
-	end
 	local function asInteger(value: any, fallback: number): number
 		local numeric = tonumber(value)
 		if numeric == nil then
@@ -320,20 +299,6 @@ local function sanitizeListing(rawListing: any): ListingState?
 	local postedAt = asInteger(rawListing.PostedAt, os.time())
 	local lastTakenAt = rawListing.LastTakenAt and asInteger(rawListing.LastTakenAt, 0) or nil
 	local lastTakenBy = rawListing.LastTakenBy and asInteger(rawListing.LastTakenBy, 0) or nil
-	if isUnlimited then
-		return {
-			JobId = job.Id,
-			Rarity = job.Rarity,
-			Type = job.Type,
-			SlotsRemaining = nil,
-			MaxSlots = nil,
-			PostedAt = postedAt,
-			LastTakenAt = lastTakenAt,
-			LastTakenBy = lastTakenBy,
-			Unlimited = true,
-			ShiftId = nil,
-		}
-	end
 	local maxSlots = asInteger(rawListing.MaxSlots, 0)
 	if maxSlots <= 0 then
 		return nil
@@ -353,13 +318,12 @@ local function sanitizeListing(rawListing: any): ListingState?
 	return {
 		JobId = job.Id,
 		Rarity = job.Rarity,
-		Type = job.Type,
+		Type = "Career",
 		SlotsRemaining = slotsRemaining,
 		MaxSlots = maxSlots,
 		PostedAt = postedAt,
 		LastTakenAt = lastTakenAt,
 		LastTakenBy = lastTakenBy,
-		Unlimited = false,
 		ShiftId = resolvedShiftId,
 	}
 end
@@ -418,7 +382,6 @@ local function cloneBoard(board: BoardState): BoardState
 			PostedAt = listing.PostedAt,
 			LastTakenAt = listing.LastTakenAt,
 			LastTakenBy = listing.LastTakenBy,
-			Unlimited = listing.Unlimited,
 			ShiftId = listing.ShiftId,
 		}
 	end
@@ -455,7 +418,6 @@ local function computeBoardHash(board: BoardState): string
 		parts[#parts + 1] = listing.Type
 		parts[#parts + 1] = tostring(listing.SlotsRemaining or -1)
 		parts[#parts + 1] = tostring(listing.MaxSlots or -1)
-		parts[#parts + 1] = listing.Unlimited and "1" or "0"
 		parts[#parts + 1] = tostring(listing.PostedAt)
 		parts[#parts + 1] = tostring(listing.LastTakenAt or 0)
 		parts[#parts + 1] = tostring(listing.LastTakenBy or 0)
@@ -506,7 +468,6 @@ local function applyBoard(board: BoardState)
 		listingFolder:SetAttribute("LastTakenAt", listing.LastTakenAt or 0)
 		listingFolder:SetAttribute("LastTakenBy", listing.LastTakenBy or 0)
 		listingFolder:SetAttribute("RestockId", boardCopy.RestockId)
-		listingFolder:SetAttribute("Unlimited", listing.Unlimited)
 		listingFolder:SetAttribute("ShiftId", listing.ShiftId or "")
 		seenFolders[listingFolder] = true
 	end
@@ -615,38 +576,20 @@ local function buildRestockBoard(now: number, previous: BoardState?): BoardState
 
 		local jobIndex = rng:NextInteger(1, #pool)
 		local job = table.remove(pool, jobIndex)
-		local listing: ListingState
-
-		if job.Type == "Gig" then
-			listing = {
-				JobId = job.Id,
-				Rarity = job.Rarity,
-				Type = job.Type,
-				SlotsRemaining = nil,
-				MaxSlots = nil,
-				PostedAt = now,
-				LastTakenAt = nil,
-				LastTakenBy = nil,
-				Unlimited = true,
-				ShiftId = nil,
-			}
-		else
-			local minSlots, maxSlots = resolveSlotRange(job.Rarity)
-			local slots = rng:NextInteger(minSlots, maxSlots)
-			local shiftId, _ = chooseShiftForJob(job.Id, nil, rng)
-			listing = {
-				JobId = job.Id,
-				Rarity = job.Rarity,
-				Type = job.Type,
-				SlotsRemaining = slots,
-				MaxSlots = slots,
-				PostedAt = now,
-				LastTakenAt = nil,
-				LastTakenBy = nil,
-				Unlimited = false,
-				ShiftId = shiftId,
-			}
-		end
+		local minSlots, maxSlots = resolveSlotRange(job.Rarity)
+		local slots = rng:NextInteger(minSlots, maxSlots)
+		local shiftId, _ = chooseShiftForJob(job.Id, nil, rng)
+		local listing: ListingState = {
+			JobId = job.Id,
+			Rarity = job.Rarity,
+			Type = "Career",
+			SlotsRemaining = slots,
+			MaxSlots = slots,
+			PostedAt = now,
+			LastTakenAt = nil,
+			LastTakenBy = nil,
+			ShiftId = shiftId,
+		}
 
 		listings[#listings + 1] = listing
 	end
@@ -837,22 +780,8 @@ local function reserveJobSlot(player: Player, jobId: string, residentName: strin
 		return false, "Positions for that listing are gone."
 	end
 
-	-- == This is for gigs == --
 	local listing = board.Listings[listingIndex]
 	local assignedShiftId = listing.ShiftId
-	if listing.Unlimited then
-		listing.LastTakenAt = now
-		listing.LastTakenBy = player.UserId
-		board.Metrics = computeMetrics(board.Listings)
-		boardDirty = true
-		local saveResponse = commitBoard()
-		if saveResponse and saveResponse ~= DataStoreResponse.Saved then
-			return false, "Could not secure the job. Please try again."
-		end
-		applyBoard(board)
-		return true, job.Name .. " secured!"
-	end
-	--- ==================== ---
 	if (listing.SlotsRemaining or 0) <= 0 then
 		table.remove(board.Listings, listingIndex)
 		board.Metrics = computeMetrics(board.Listings)

@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local ResidentAppearanceUtils = require(ReplicatedStorage.Shared.Utilities.ResidentAppearanceUtils)
 
 export type ResidentData = {
 	Name: string,
@@ -17,6 +18,13 @@ export type ResidentData = {
 	CurrentCareerId: string?,
 	CareerStreak: number?,
 	AssignedShiftId: string?,
+	Appearance: {
+		SkinToneId: string,
+		HairId: string,
+		FaceId: string,
+		TopId: string,
+		PantsId: string,
+	},
 }
 
 local ResidentPlacer = {}
@@ -98,6 +106,10 @@ local function loadResidentAppearance(residentState: any): Model?
 	end
 
 	residentState:SyncCurrentActionAttribute()
+	local appearanceData = residentState.Save.Appearance
+	if typeof(appearanceData) == "table" then
+		ResidentAppearanceUtils.ApplyToModel(model, appearanceData, residentState.Save.Age)
+	end
 	return model
 end
 function ResidentPlacer.Spawn(player, residentState)

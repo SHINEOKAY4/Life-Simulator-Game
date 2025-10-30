@@ -12,6 +12,13 @@ export type ResidentData = {
 	CurrentCareerId: string?,
 	CareerStreak: number?,
 	AssignedShiftId: string?,
+	Appearance: {
+		SkinToneId: string,
+		HairId: string,
+		FaceId: string,
+		TopId: string,
+		PantsId: string,
+	},
 }
 
 type MoodletRuntime = {

@@ -54,6 +54,9 @@ local Furnitures = {
 		Rules = { RequiresFloorUnderAllCells = false },
 		Tags = { "Comfort", "Appliance" },
 		ModelPath = { "Furnitures", "Refridgerator" },
+		StorageConfig = {
+			Capacity = 24,
+		},
 		StationEffects = {
 			DurationSeconds = 16,
 			Effects = {

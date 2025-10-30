@@ -11,6 +11,14 @@ ResidentsPackets.PromptResidentCreation = Packet("PromptResidentCreation")
 ResidentsPackets.AddResidentRequest = Packet("CreateResidentRequest", {
 	Name = Packet.String,
 	Gender = Packet.String,
+	Age = Packet.NumberU8,
+	Appearance = {
+		SkinToneId = Packet.String,
+		HairId = Packet.String,
+		FaceId = Packet.String,
+		TopId = Packet.String,
+		PantsId = Packet.String,
+	},
 }):Response(Packet.Boolean8, Packet.StringLong)
 
 ResidentsPackets.DeleteResidentRequest =
@@ -42,6 +50,13 @@ ResidentsPackets.PlayerResidentDelta = Packet("PlayerResidentDelta", {
 				Fun = Packet.NumberU8,
 				Social = Packet.NumberU8,
 			},
+			Appearance = {
+				SkinToneId = Packet.String,
+				HairId = Packet.String,
+				FaceId = Packet.String,
+				TopId = Packet.String,
+				PantsId = Packet.String,
+			},
 		},
 	},
 })
@@ -63,6 +78,13 @@ ResidentsPackets.PlayersResidentsSync = Packet("ResidentStateSync", {
 				Hygiene = Packet.NumberU8,
 				Fun = Packet.NumberU8,
 				Social = Packet.NumberU8,
+			},
+			Appearance = {
+				SkinToneId = Packet.String,
+				HairId = Packet.String,
+				FaceId = Packet.String,
+				TopId = Packet.String,
+				PantsId = Packet.String,
 			},
 		},
 	},

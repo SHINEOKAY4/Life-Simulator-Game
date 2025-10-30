@@ -18,7 +18,6 @@ local BillingCalculator = {}
 -- Constants (tunable)
 local COST_PER_CHUNK = 15 -- Base plot tax per unlocked chunk
 local ELECTRICITY_RATE = 0.8 -- Currency charged per in-game kWh consumed
-local FOOD_COST_PER_USAGE = 12 -- Currency charged per successful cook interaction
 local BILLING_CYCLE_DURATION_SECONDS = math.max(1, BillingConstants.BillingCycleDurationSeconds or 1440)
 
 function BillingCalculator.CalculatePlotTax(plotStateData: PlotStateData): number
@@ -74,31 +73,5 @@ function BillingCalculator.EstimateCycleElectricCost(plotStateData: PlotStateDat
 	local estimatedEnergy = totalEnergyConsumption * billingHours
 	return BillingCalculator.CalculateElectricityCostFromUsage(estimatedEnergy)
 end
-
-function BillingCalculator.CalculateFoodCost(usageCount: number): number
-	if typeof(usageCount) ~= "number" or usageCount <= 0 or usageCount ~= usageCount then
-		return 0
-	end
-
-	local normalizedUsage = math.max(0, usageCount)
-	local rawCost = normalizedUsage * FOOD_COST_PER_USAGE
-	return math.floor(rawCost + 0.5)
-end
-
-function BillingCalculator.GetCookStationCount(plotStateData: PlotStateData): number
-	local placedObjects = plotStateData.PlacedObjects or {}
-	local cookStationCount = 0
-
-	for _, placedObject in pairs(placedObjects) do
-		local itemSpec = ItemFinder.FindItemById(placedObject.id)
-		if itemSpec and itemSpec.StationType == "CookStation" then
-			cookStationCount += 1
-		end
-	end
-
-	return cookStationCount
-end
-
-BillingCalculator.FOOD_COST_PER_USAGE = FOOD_COST_PER_USAGE
 
 return BillingCalculator

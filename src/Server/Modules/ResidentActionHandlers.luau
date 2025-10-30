@@ -4,7 +4,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DirectActionService = require(ServerScriptService.Server.Services.DirectActionService)
-local BillingService = require(ServerScriptService.Server.Services.BillingService)
+local KitchenService = require(ServerScriptService.Server.Services.KitchenService)
 local ResidentMovement = require(ServerScriptService.Server.Utilities.ResidentMovement)
 local NeedEffects = require(ServerScriptService.Server.Utilities.NeedEffects)
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
@@ -34,6 +34,7 @@ export type HandlerAssignment = {
 }
 
 local ResidentActionHandlers = {}
+type CookingSession = KitchenService.CookingSession
 
 type EmergencyGuard = (residentState: any, value: number, def: NeedConfig.NeedDef) -> boolean
 
@@ -85,6 +86,14 @@ local StationKindLabels: { [string]: string } = {
 	SocialStation = "hangout",
 	HygieneStation = "sink",
 	FunStation = "fun spot",
+}
+
+local KitchenFailurePhrases: { [string]: string } = {
+	NoCookableRecipe = "We need groceries before we can cook anything.",
+	InsufficientIngredients = "We are out of ingredients right now.",
+	KitchenStateUnavailable = "The kitchen isn't ready yet.",
+	RecipeMissing = "I can't figure out what to cook just yet.",
+	KitchenLocked = "The kitchen is closing up right now.",
 }
 
 type RawEffect = { [string]: any }
@@ -745,6 +754,30 @@ local function executeStationAction(stationType: string, context: HandlerContext
 			end
 		end
 	end
+
+	local cookingSession: CookingSession? = nil
+	if stationType == "CookStation" and assignment.Player then
+		local beginOk, beginResult = KitchenService.BeginCooking(assignment.Player, assignment, behavior, nil)
+		if not beginOk then
+			local reason = tostring(beginResult)
+			ResidentChat.ShowInterrupt(assignment.ResidentState, reason, {
+				StationType = stationType :: string,
+				StationId = assignment.StationId,
+				StationName = stationName,
+				NeedName = assignment.NeedName,
+				ActionName = actionLabel,
+				Player = assignment.Player,
+			})
+			ResidentDebug.Trace(ACTION_CHANNEL, string.format("Kitchen session blocked: %s", assignment.ResidentName), {
+				Resident = assignment.ResidentName,
+				StationType = stationType,
+				Failure = reason,
+				Hint = KitchenFailurePhrases[reason],
+			})
+			return
+		end
+		cookingSession = beginResult :: CookingSession
+	end
 	local arrived, arrival = ResidentMovement.GoToStation(assignment.ResidentState, assignment.StationModel, {
 		CancelToken = context.CancelToken,
 		ApproachDistance = behavior.ApproachDistance,
@@ -759,8 +792,12 @@ local function executeStationAction(stationType: string, context: HandlerContext
 		if cancelToken.Cancelled then
 			reason = cancelToken.Reason or "Cancelled"
 		end
+		if cookingSession then
+			KitchenService.CancelCooking(cookingSession, reason)
+			cookingSession = nil
+		end
 		ResidentChat.ShowInterrupt(assignment.ResidentState, reason, {
-			StationType = stationType,
+			StationType = stationType :: string,
 			StationId = assignment.StationId,
 			StationName = stationName,
 			NeedName = assignment.NeedName,
@@ -799,12 +836,6 @@ local function executeStationAction(stationType: string, context: HandlerContext
 		Behavior = behavior,
 	})
 
-	-- Track time spent cooking for billing
-	local cookingStartTime: number? = nil
-	if stationType == "CookStation" and assignment.Player then
-		cookingStartTime = os.clock()
-	end
-
 	local runOk, runResult = pcall(function()
 		return NeedEffects.Run(assignment.ResidentState, context.CancelToken, behavior, {
 			StationType = stationType,
@@ -819,24 +850,22 @@ local function executeStationAction(stationType: string, context: HandlerContext
 		ResidentMovement.ClearRestPose(assignment.ResidentState)
 	end
 	if not runOk then
+		if cookingSession then
+			KitchenService.CancelCooking(cookingSession, "ActionError")
+			cookingSession = nil
+		end
 		error(runResult)
 	end
 	if arrival and behavior.UseSeat then
 		ResidentMovement.LeaveSeat(assignment.ResidentState, arrival.Seat)
 	end
-
-	-- Bill based on actual time spent cooking (rewards efficient stations)
-	if stationType == "CookStation" and assignment.Player and cookingStartTime ~= nil then
-		local cookingEndTime = os.clock()
-		local timeSpentCooking = cookingEndTime - cookingStartTime
-		local maxDuration = behavior.DurationSeconds or 30
-
-		if timeSpentCooking > 0 and maxDuration > 0 then
-			-- Calculate proportional weight based on time consumed
-			-- Less time = less billing (rewards better stations)
-			local timeWeight = math.clamp(timeSpentCooking / maxDuration, 0, 1)
-			BillingService.RecordMealUsage(assignment.Player, timeWeight)
+	if cookingSession then
+		if context.CancelToken.Cancelled then
+			KitchenService.CancelCooking(cookingSession, context.CancelToken.Reason or "Cancelled")
+		else
+			KitchenService.CompleteCooking(cookingSession)
 		end
+		cookingSession = nil
 	end
 	ResidentDebug.Trace(
 		ACTION_CHANNEL,
