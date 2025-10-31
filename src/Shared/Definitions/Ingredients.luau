@@ -10,6 +10,8 @@ export type IngredientSpec = {
 	PurchaseQuantity: number,
 	Tags: { string }?,
 	PerMealCost: number?,
+	ImageAssetId: string?,
+	RawHungerRestore: number?,
 }
 
 local Ingredients: { [string]: IngredientSpec } = {
@@ -21,6 +23,31 @@ local Ingredients: { [string]: IngredientSpec } = {
 		PurchaseCost = 18,
 		PurchaseQuantity = 4,
 		Tags = { "Baseline", "Vegetable" },
+		RawHungerRestore = 28,
+	},
+	Raspberries = {
+		Id = "Raspberries",
+		Name = "Raspberries",
+		Category = "Fruit",
+		Description = "Sweet-tart berries for desserts and mood treats.",
+		PurchaseCost = 20,
+		PurchaseQuantity = 3,
+		Tags = { "Premium", "Fruit" },
+		PerMealCost = 6,
+		ImageAssetId = "rbxassetid://126557338728692",
+		RawHungerRestore = 18,
+	},
+	Blueberries = {
+		Id = "Blueberries",
+		Name = "Blueberries",
+		Category = "Fruit",
+		Description = "Bursting berries that keep breakfasts fresh and bright.",
+		PurchaseCost = 18,
+		PurchaseQuantity = 3,
+		Tags = { "Premium", "Fruit" },
+		PerMealCost = 5,
+		ImageAssetId = "rbxassetid://74171363806705",
+		RawHungerRestore = 18,
 	},
 	WholeGrains = {
 		Id = "WholeGrains",
@@ -30,6 +57,8 @@ local Ingredients: { [string]: IngredientSpec } = {
 		PurchaseCost = 14,
 		PurchaseQuantity = 4,
 		Tags = { "Baseline", "Carb" },
+		ImageAssetId = "rbxassetid://85319264147854",
+		RawHungerRestore = 12,
 	},
 	LeanProtein = {
 		Id = "LeanProtein",
@@ -39,6 +68,7 @@ local Ingredients: { [string]: IngredientSpec } = {
 		PurchaseCost = 22,
 		PurchaseQuantity = 3,
 		Tags = { "Baseline", "Protein" },
+		ImageAssetId = "rbxassetid://118405140838377",
 	},
 	ComfortSeasoning = {
 		Id = "ComfortSeasoning",

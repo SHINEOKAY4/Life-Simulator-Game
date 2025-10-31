@@ -264,8 +264,12 @@ function ResidentState:EnqueueMoveTo(targetPosition: Vector3, options: MoveOptio
 	end)
 end
 
-function ResidentState:EnqueueAction(actionName: string, actionFunction: (context: any?) -> ())
-	self.ActionQueue:Enqueue(actionName, actionFunction)
+function ResidentState:EnqueueAction(
+	actionName: string,
+	actionFunction: (context: any?) -> (),
+	cleanupFunction: (() -> ())?
+)
+	self.ActionQueue:Enqueue(actionName, actionFunction, cleanupFunction)
 end
 
 function ResidentState:BindConnections()

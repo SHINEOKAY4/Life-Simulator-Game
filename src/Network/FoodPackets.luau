@@ -79,4 +79,19 @@ FoodPackets.ContainerTransferRequest = Packet(
 	Packet.String
 ):Response(Packet.Boolean8, Packet.StringLong)
 
+FoodPackets.HarvestFoodSourceRequest =
+	Packet("HarvestFoodSourceRequest", Packet.String):Response(Packet.Boolean8, Packet.StringLong)
+
+FoodPackets.IngredientGrantNotice = Packet("IngredientGrantNotice", {
+	SourceId = Packet.String,
+	SourceName = Packet.String,
+	Entries = {
+		{
+			Id = Packet.String,
+			Quantity = Packet.NumberU8,
+			Image = Packet.String,
+		},
+	},
+})
+
 return FoodPackets

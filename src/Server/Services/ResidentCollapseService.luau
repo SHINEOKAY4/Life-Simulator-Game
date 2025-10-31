@@ -220,7 +220,7 @@ local function startCollapse(residentState: any, context: { UserId: number?, Nam
 		end
 
 		local cancelToken = if _context then _context.CancelToken else nil
-		local ok, result = pcall(function()
+		local ok, runResult, runReason = pcall(function()
 			return NeedEffects.Run(residentState, cancelToken, behavior, {
 				StationType = "GroundCollapse",
 				ActionName = "collapse",
@@ -250,12 +250,18 @@ local function startCollapse(residentState: any, context: { UserId: number?, Nam
 			ResidentMovement.ClearRestPose(residentState)
 		end
 
-		local succeeded = ok and result == true
+		local succeeded = ok and runResult == true
 		if succeeded then
 			AutonomyState.setNeedCooldown(residentState, "Energy")
 		else
+			local failureLabel
+			if ok then
+				failureLabel = runReason or "Cancelled"
+			else
+				failureLabel = tostring(runResult)
+			end
 			ResidentDebug.Trace(COLLAPSE_CHANNEL, string.format("Collapse run failed: %s", residentName), {
-				Error = if ok then "Cancelled" else result,
+				Error = failureLabel,
 			})
 		end
 

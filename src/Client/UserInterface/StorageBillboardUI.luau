@@ -63,7 +63,7 @@ local closeButton: TextButton = CloseButton
 
 local storeConnection: RBXScriptConnection?
 local currentContainerId: string? = nil
-local currentStationType = "CookStation"
+local currentStationType = "FoodStorage"
 local currentMeta: StorageMeta? = nil
 type Selection = { Source: "Pantry" | "Container", IngredientId: string }
 
@@ -236,6 +236,17 @@ local function buildList(frame: ScrollingFrame, entries: IngredientMap, source: 
 			buttonRegistry[source][entry.Id] = button
 		end
 
+		local imageLabel = row:FindFirstChild("ImageLabel")
+		if imageLabel and imageLabel:IsA("ImageLabel") then
+			local ingredientSpec = IngredientsCatalog[entry.Id]
+			local assetId = ingredientSpec and ingredientSpec.ImageAssetId
+			if typeof(assetId) == "string" and assetId ~= "" then
+				imageLabel.Image = assetId
+			else
+				imageLabel.Image = ""
+			end
+		end
+
 		local quantityLabel = row:FindFirstChild("TextLabel")
 		if quantityLabel and quantityLabel:IsA("TextLabel") then
 			quantityLabel.Text = string.format("x%d", entry.Quantity)
@@ -305,7 +316,7 @@ local function hideBillboard()
 	end
 	currentContainerId = nil
 	currentMeta = nil
-	currentStationType = "CookStation"
+	currentStationType = "FoodStorage"
 	pendingSelection = nil
 	refreshSelectionVisuals()
 

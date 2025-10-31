@@ -177,6 +177,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 
 	plotStateData.UnlockedChunks = plotStateData.UnlockedChunks or {}
 	plotStateData.PlacedObjects = plotStateData.PlacedObjects or {}
+	plotStateData.InteractableCooldowns = plotStateData.InteractableCooldowns or {}
 
 	-- If brand new: create default starter area once (persist + runtime)
 	if #plotStateData.UnlockedChunks == 0 then

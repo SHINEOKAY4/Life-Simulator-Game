@@ -966,23 +966,48 @@ function ResidentMovement.LeaveSeat(residentState: any, seat: Seat?)
 	ResidentDebug.Trace(MOVEMENT_CHANNEL, string.format("Leaving seat for %s", getResidentName(residentState)), {
 		SeatName = currentSeat.Name,
 	})
-	humanoid.Sit = false
-	humanoid.Jump = true
-	local start = os.clock()
-	while humanoid.SeatPart ~= nil and os.clock() - start < 2 do
-		RunService.Heartbeat:Wait()
-		humanoid.Sit = false
-		humanoid.Jump = true
+	local disabledSeatedState = false
+	do
+		local ok, seatedEnabled = pcall(humanoid.GetStateEnabled, humanoid, Enum.HumanoidStateType.Seated)
+		if ok and seatedEnabled == true then
+			humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+			disabledSeatedState = true
+		end
 	end
-	if humanoid.SeatPart ~= nil then
+	humanoid.Sit = false
+	humanoid.Jump = false
+	local jumpDelay = 0.2
+	-- Only force a jump if the resident is still seated after a brief release window
+	local maxReleaseDuration = 1.5
+	local jumpTriggered = false
+	local start = os.clock()
+	while humanoid.SeatPart == currentSeat and os.clock() - start < maxReleaseDuration do
+		if not jumpTriggered and os.clock() - start >= jumpDelay then
+			local shouldJump = true
+			if root then
+				local seatPosition = currentSeat.CFrame.Position
+				local distanceToSeat = (root.Position - seatPosition).Magnitude
+				if distanceToSeat > 6 then
+					shouldJump = false
+				end
+			end
+			if shouldJump then
+				humanoid.Jump = true
+				jumpTriggered = true
+			end
+		end
+		RunService.Heartbeat:Wait()
+	end
+	if humanoid.SeatPart == currentSeat then
 		ResidentDebug.Trace(
 			MOVEMENT_CHANNEL,
-			string.format("Seat release timeout for %s", getResidentName(residentState)),
+			string.format("Seat release fallback for %s", getResidentName(residentState)),
 			{
 				SeatName = currentSeat.Name,
 			}
 		)
 		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		humanoid.Sit = false
 		local weld: Instance? = currentSeat:FindFirstChild("SeatWeld")
 		if weld then
 			weld:Destroy()
@@ -994,10 +1019,34 @@ function ResidentMovement.LeaveSeat(residentState: any, seat: Seat?)
 			end
 		end)
 		if root then
-			local seatCFrame = currentSeat.CFrame
-			-- Push the resident slightly upward and forward so we break any lingering weld.
-			root.CFrame = seatCFrame * CFrame.new(0, 2, -2)
+			root.AssemblyLinearVelocity = Vector3.new()
+			root.AssemblyAngularVelocity = Vector3.new()
+			root.CFrame = root.CFrame * CFrame.new(0, 2, 0)
 		end
+		local releaseStart = os.clock()
+		while humanoid.SeatPart == currentSeat and os.clock() - releaseStart < 0.5 do
+			RunService.Heartbeat:Wait()
+		end
+		if humanoid.SeatPart == currentSeat then
+			ResidentDebug.Trace(
+				MOVEMENT_CHANNEL,
+				string.format("Seat release still pending for %s", getResidentName(residentState)),
+				{
+					SeatName = currentSeat.Name,
+				}
+			)
+		else
+			ResidentDebug.Trace(
+				MOVEMENT_CHANNEL,
+				string.format("Seat release recovered for %s", getResidentName(residentState)),
+				{
+					SeatName = currentSeat.Name,
+				}
+			)
+		end
+	end
+	if disabledSeatedState then
+		humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
 	end
 	if root then
 		root:SetNetworkOwner(nil)

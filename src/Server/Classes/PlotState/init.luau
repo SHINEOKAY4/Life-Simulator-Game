@@ -25,9 +25,15 @@ export type SavedPlacedObject = {
 
 export type PlacedObjectMap = { [string]: SavedPlacedObject }
 
+export type FoodSourceCooldownState = {
+	ChargesRemaining: number?,
+	RestockReadyUnix: number?,
+}
+
 export type SaveData = {
 	UnlockedChunks: { SavedChunk },
 	PlacedObjects: PlacedObjectMap,
+	InteractableCooldowns: { [string]: FoodSourceCooldownState }?,
 }
 
 export type PlotState = {
@@ -295,6 +301,7 @@ function PlotState.new(grid: any, chunkSizeInCells: number, save: SaveData): Plo
 	self.Save = save
 	self.Save.UnlockedChunks = self.Save.UnlockedChunks or {}
 	self.Save.PlacedObjects = self.Save.PlacedObjects or {}
+	self.Save.InteractableCooldowns = self.Save.InteractableCooldowns or {}
 
 	local normalizedPlaced: PlacedObjectMap = {}
 	for key, savedObject in pairs(self.Save.PlacedObjects) do
@@ -325,7 +332,7 @@ function PlotState:HydrateFromSave()
 		assert(spec, ("Unknown catalog item '%s'"):format(savedObject.id))
 		local placementType = spec.PlacementType
 		local facing = savedObject.facing or "North"
- 		local metadata = savedObject.Metadata
+		local metadata = savedObject.Metadata
 		local metaWidth = metadata and metadata.WidthCells or metadata and metadata.widthCells
 		local metaDepth = metadata and metadata.DepthCells or metadata and metadata.depthCells
 		local widthFallback = spec.WidthCells or spec.Width or 1
@@ -335,8 +342,13 @@ function PlotState:HydrateFromSave()
 
 		if placementType == "Floor" then
 			local floorFacing: Facing = "North"
-			local indices =
-				self.Grid:FootprintCells(savedObject.cellX, savedObject.cellZ, resolvedWidth, resolvedDepth, floorFacing)
+			local indices = self.Grid:FootprintCells(
+				savedObject.cellX,
+				savedObject.cellZ,
+				resolvedWidth,
+				resolvedDepth,
+				floorFacing
+			)
 			for j = 1, #indices do
 				self.FloorFilled[indices[j]] = true
 			end

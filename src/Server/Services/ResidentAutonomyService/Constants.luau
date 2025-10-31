@@ -7,6 +7,9 @@ Constants.AUTONOMY_INTERVAL = 1.0
 Constants.ROAM_ACTION_NAME = "Auto:Roam"
 Constants.ROAM_MIN_INTERVAL_SECONDS = 15
 
+Constants.INTERRUPTED_NEED_RETRY_SECONDS = 3
+Constants.FORCED_NEED_TIMEOUT_SECONDS = 6
+
 Constants.JOG_ACTION_NAME = "Auto:Jog"
 Constants.JOG_MIN_INTERVAL_SECONDS = 20 -- Reduced from 45 so jogging happens more often
 Constants.JOG_DURATION_SECONDS = 30 -- Total time spent jogging (like using a station)

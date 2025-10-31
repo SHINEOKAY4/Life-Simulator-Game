@@ -95,11 +95,14 @@ local function getStationIterator(
 	return state
 end
 
+type StationFilter = (string, StationRecord, { [string]: any }?, Model?) -> boolean
+
 function StationManager.findAvailableStation(
 	player: Player,
 	stationType: string,
 	residentName: string,
-	stationCacheOverride: { [string]: any }?
+	stationCacheOverride: { [string]: any }?,
+	filter: StationFilter?
 ): (string?, StationRecord?, { [string]: any }?, Model?)
 	local stationCache = stationCacheOverride or PlotService.GetStationsForPlayer(player)
 	local stationMap = stationCache[stationType] :: { [string]: StationRecord }?
@@ -153,6 +156,9 @@ function StationManager.findAvailableStation(
 							end
 							local model = station.Model
 							if model then
+								if filter and not filter(uniqueId, station, itemSpec, model) then
+									continue
+								end
 								return uniqueId, station, itemSpec, model
 							end
 						end
@@ -176,6 +182,79 @@ function StationManager.releaseStationOccupancy(station: StationRecord, resident
 	if station.ActiveOverride == residentName then
 		station.ActiveOverride = nil
 	end
+end
+
+function StationManager.getStationById(
+	player: Player,
+	stationType: string,
+	uniqueId: string,
+	stationCacheOverride: { [string]: any }?
+): (StationRecord?, { [string]: any }?, Model?)
+	local stationCache = stationCacheOverride or PlotService.GetStationsForPlayer(player)
+	local stationMap = stationCache[stationType] :: { [string]: StationRecord }?
+	if not stationMap then
+		return nil, nil, nil
+	end
+	local station = stationMap[uniqueId]
+	if not station then
+		return nil, nil, nil
+	end
+	if not station.Model then
+		station.Model = resolveStationModelForPlayer(player, uniqueId)
+	end
+	local itemSpec = State.ItemSpecCache[station.Id]
+	if itemSpec == nil then
+		itemSpec = ItemFinder.FindItemById(station.Id)
+		if itemSpec then
+			State.ItemSpecCache[station.Id] = itemSpec
+		end
+	end
+	if not itemSpec then
+		return nil, nil, station.Model
+	end
+	return station, itemSpec, station.Model
+end
+
+function StationManager.isStationBlockedByOutage(
+	player: Player,
+	stationType: string,
+	stationCacheOverride: { [string]: any }?
+): boolean
+	if player:GetAttribute("BillingPowerOutageActive") ~= true then
+		return false
+	end
+
+	local stationCache = stationCacheOverride or PlotService.GetStationsForPlayer(player)
+	local stationMap = stationCache[stationType] :: { [string]: StationRecord }?
+	if not stationMap then
+		return false
+	end
+	local nextStation = next(stationMap)
+	if nextStation == nil then
+		return false
+	end
+
+	local anyPowerRequired = false
+	for _, station in pairs(stationMap) do
+		local itemSpec = State.ItemSpecCache[station.Id]
+		if itemSpec == nil then
+			itemSpec = ItemFinder.FindItemById(station.Id)
+			if itemSpec then
+				State.ItemSpecCache[station.Id] = itemSpec
+			end
+		end
+		if not itemSpec then
+			return false
+		end
+		local energyPerHour = itemSpec.EnergyConsumptionPerHour
+		if typeof(energyPerHour) == "number" and energyPerHour > 0 then
+			anyPowerRequired = true
+		else
+			return false
+		end
+	end
+
+	return anyPowerRequired
 end
 
 return StationManager

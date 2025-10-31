@@ -97,6 +97,19 @@ function ResidentAutonomyService.TrySatisfyNeedsForResident(
 		stationCache
 	)
 	if not decision then
+		local forcedNeed = State.getForcedNeed(residentState, evaluationClock)
+		if forcedNeed then
+			local forcedDef = State.getNeeds()[forcedNeed]
+			if forcedDef then
+				local value = residentState:GetNeed(forcedNeed)
+				if value <= forcedDef.Critical then
+					State.setForcedNeed(residentState, forcedNeed, evaluationClock)
+				end
+			end
+			local delay = math.min(2, State.computeNextEvaluationDelay(residentState))
+			State.setNextEvaluation(residentState, evaluationClock + delay)
+			return false
+		end
 		local otherCriticalNeeds = Utils.hasBlockingCriticalNeed(player, residentState, "Social", stationCache)
 		if not otherCriticalNeeds and not attemptedDirectSocial then
 			if SocialCoordinator.attemptDirectSocial(player, residentName, residentState, stationCache) then

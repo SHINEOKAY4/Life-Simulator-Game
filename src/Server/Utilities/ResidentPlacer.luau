@@ -33,6 +33,44 @@ local hiddenFolder: Folder?
 local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
 local residentsTemplateFolder = assetsFolder and assetsFolder:FindFirstChild("Residents")
 
+local function ensurePlotResidentsFolder(plotModel: Model?): Folder?
+	if not plotModel then
+		return nil
+	end
+
+	local existing = plotModel:FindFirstChild("Residents")
+	if existing and existing:IsA("Folder") then
+		return existing
+	end
+
+	local residentsFolder = Instance.new("Folder")
+	residentsFolder.Name = "Residents"
+	residentsFolder.Parent = plotModel
+	return residentsFolder
+end
+
+local function resolveSpawnCFrame(plotModel: Model?): CFrame?
+	if not plotModel then
+		return nil
+	end
+
+	local spawnBase = plotModel:FindFirstChild("Spawn")
+	if spawnBase and spawnBase:IsA("BasePart") then
+		return spawnBase.CFrame
+	end
+
+	local surface = plotModel:FindFirstChild("Surface")
+	if surface and surface:IsA("BasePart") then
+		local up = surface.CFrame.UpVector
+		local look = surface.CFrame.LookVector
+		local height = surface.Size.Y * 0.5
+		local origin = surface.CFrame.Position + up * (height + 3)
+		return CFrame.lookAt(origin, origin + look)
+	end
+
+	return nil
+end
+
 local function getHiddenFolder(): Folder
 	if hiddenFolder and hiddenFolder.Parent then
 		return hiddenFolder
@@ -120,8 +158,13 @@ function ResidentPlacer.Spawn(player, residentState)
 	end
 
 	local plotModel = PlotFinder.FindPlot(plotIndex)
-	local plotResidentsFolder = plotModel:FindFirstChild("Residents") :: Folder
-	local spawnLocation = plotModel:FindFirstChild("Spawn") :: BasePart
+	if not plotModel then
+		warn("ResidentPlacer: no plot model for index", plotIndex, "player", player.Name)
+		return
+	end
+
+	local plotResidentsFolder = ensurePlotResidentsFolder(plotModel)
+	local spawnCFrame = resolveSpawnCFrame(plotModel)
 
 	local loadedResidentModel = loadResidentAppearance(residentState)
 	if not loadedResidentModel then
@@ -130,12 +173,27 @@ function ResidentPlacer.Spawn(player, residentState)
 
 	local humanoidRootPart = loadedResidentModel:FindFirstChild("HumanoidRootPart") :: BasePart
 	if not humanoidRootPart then
-		warn("Resident model is missing HumanoidRootPart:", residentState.Name)
+		warn("Resident model is missing HumanoidRootPart:", residentState.Save and residentState.Save.Name)
 		return
 	end
 
-	loadedResidentModel:PivotTo(spawnLocation.CFrame)
-	loadedResidentModel.Parent = plotResidentsFolder
+	if not spawnCFrame then
+		warn(
+			"ResidentPlacer: missing spawn reference for plot",
+			plotIndex,
+			"resident",
+			residentState.Save and residentState.Save.Name
+		)
+		loadedResidentModel.Parent = getHiddenFolder()
+		return
+	end
+
+	loadedResidentModel:PivotTo(spawnCFrame)
+	if plotResidentsFolder then
+		loadedResidentModel.Parent = plotResidentsFolder
+	else
+		loadedResidentModel.Parent = getHiddenFolder()
+	end
 
 	humanoidRootPart:SetNetworkOwner(nil)
 end

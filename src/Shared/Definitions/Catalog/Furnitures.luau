@@ -43,7 +43,7 @@ local Furnitures = {
 	Refridgerator = {
 		Name = "Refridgerator",
 		PlacementType = "CellObject",
-		StationType = "CookStation",
+		StationType = "FoodStorage",
 		Station = true,
 		maxOccupancy = 1,
 		WidthCells = 1,
@@ -52,16 +52,10 @@ local Furnitures = {
 		Cost = 250,
 		EnergyConsumptionPerHour = 5,
 		Rules = { RequiresFloorUnderAllCells = false },
-		Tags = { "Comfort", "Appliance" },
+		Tags = { "Comfort", "Appliance", "Storage" },
 		ModelPath = { "Furnitures", "Refridgerator" },
 		StorageConfig = {
 			Capacity = 24,
-		},
-		StationEffects = {
-			DurationSeconds = 16,
-			Effects = {
-				{ Need = "Hunger", RatePerHour = 150 },
-			},
 		},
 	},
 
@@ -81,16 +75,13 @@ local Furnitures = {
 		ModelPath = { "Furnitures", "Stove" },
 		StationEffects = {
 			DurationSeconds = 22,
-			Effects = {
-				{ Need = "Hunger", RatePerHour = 125 },
-			},
 		},
 	},
 
 	BigWoodenTable = {
 		Name = "Big Wooden Table",
 		PlacementType = "CellObject",
-		StationType = "SocialStation",
+		StationType = "MealStation",
 		Station = true,
 		maxOccupancy = 8,
 		WidthCells = 2,
@@ -101,10 +92,12 @@ local Furnitures = {
 		Tags = { "Comfort", "Table" },
 		ModelPath = { "Furnitures", "BigWoodenTable" },
 		StationEffects = {
-			DurationSeconds = 210,
+			DurationSeconds = 180,
 			Effects = {
-				{ Need = "Social", RatePerHour = 28 },
-				{ Need = "Fun", RatePerHour = 10 },
+				{ Need = "Social", RatePerHour = 18 },
+			},
+			Moodlets = {
+				{ Name = "SharedMeal", DurationSeconds = 180, NeedBias = { Social = -0.2, Hunger = -0.1 } },
 			},
 		},
 	},
@@ -142,9 +135,6 @@ local Furnitures = {
 		ModelPath = { "Furnitures", "Campfire" },
 		StationEffects = {
 			DurationSeconds = 60,
-			Effects = {
-				{ Need = "Hunger", RatePerHour = 50 },
-			},
 		},
 	},
 
@@ -179,6 +169,27 @@ local Furnitures = {
 		Tags = { "Basic", "Light" },
 		SurfaceOffsetStuds = 0.1,
 		ModelPath = { "Furnitures", "Lamp" },
+	},
+
+	Bathtub = {
+		Name = "Bathtub",
+		PlacementType = "CellObject",
+		StationType = "HygieneStation",
+		Station = true,
+		maxOccupancy = 1,
+		WidthCells = 1,
+		DepthCells = 2,
+		Facing = { "North", "East", "South", "West" },
+		Cost = 300,
+		Rules = { RequiresFloorUnderAllCells = false },
+		Tags = { "Comfort", "Bath" },
+		ModelPath = { "Furnitures", "Bathtub" },
+		StationEffects = {
+			DurationSeconds = 30,
+			Effects = {
+				{ Need = "Hygiene", RatePerHour = 100 },
+			},
+		},
 	},
 }
 

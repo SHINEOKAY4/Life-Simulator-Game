@@ -19,6 +19,7 @@ local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local MealRecipes = MealRecipesModule.Recipes
 local RecipeEvaluationOrder = MealRecipesModule.DefaultOrder
 local RecipeFallbackId = MealRecipesModule.DefaultFallback
+local HungerRestoreCache: { [string]: number } = {}
 
 export type ContainerEntry = {
 	StationType: string,
@@ -50,6 +51,34 @@ export type CookingSession = {
 	Cancelled: boolean,
 }
 
+export type IngredientGrantEntry = {
+	IngredientId: string,
+	Quantity: number,
+}
+
+export type IngredientGrantOptions = {
+	SourceId: string?,
+	SourceName: string?,
+	NotifyClient: boolean?,
+	Mutator: ((KitchenStateData) -> ())?,
+	TargetContainerId: string?,
+	TargetStationType: string?,
+	TargetItemId: string?,
+	TargetCapacity: number?,
+}
+
+type GrantNoticePayloadEntry = {
+	Id: string,
+	Quantity: number,
+	Image: string,
+}
+
+type GrantNoticePayload = {
+	SourceId: string,
+	SourceName: string,
+	Entries: { GrantNoticePayloadEntry },
+}
+
 type AllowedLookup = { [string]: boolean }
 
 type ResolvedStorageConfig = {
@@ -69,8 +98,30 @@ local DEFAULT_PANTRY: { [string]: number } = {
 	ComfortSeasoning = 1,
 }
 local MAX_PURCHASE_QUANTITY = 12
+local MAX_PANTRY_QUANTITY = 65535
+local GRANT_NOTICE_MAX_QUANTITY = 255
 
 local ActiveSessions: { [number]: { [string]: CookingSession } } = {}
+
+type KitchenAvailabilityEntry = {
+	HasCookable: boolean,
+	HasEdible: boolean,
+	BestContainerId: string?,
+	HasPreparedMeal: boolean,
+	BestMealId: string?,
+	BestMealServings: number,
+	BestMealHungerPerPortion: number,
+	BestMealMoodBonus: number,
+	ComputedAt: number,
+}
+
+export type KitchenAvailabilitySnapshot = KitchenAvailabilityEntry
+
+local KitchenAvailabilityCache: { [number]: KitchenAvailabilityEntry } = {}
+
+local function invalidateKitchenAvailability(userId: number)
+	KitchenAvailabilityCache[userId] = nil
+end
 
 local function sanitizePositiveInteger(value: any): number
 	if typeof(value) ~= "number" or value ~= value then
@@ -260,6 +311,150 @@ local function sumIngredients(inventory: { [string]: number }): number
 	return total
 end
 
+local function resolveRawHungerRestore(ingredientId: string): number
+	local cached = HungerRestoreCache[ingredientId]
+	if cached ~= nil then
+		return cached
+	end
+	local spec = IngredientsCatalog[ingredientId]
+	if not spec then
+		HungerRestoreCache[ingredientId] = 0
+		return 0
+	end
+	local rawValue = spec.RawHungerRestore
+	if typeof(rawValue) ~= "number" then
+		HungerRestoreCache[ingredientId] = 0
+		return 0
+	end
+	local computed = FoodUtils.ComputeHungerEffect(rawValue)
+	HungerRestoreCache[ingredientId] = computed
+	return computed
+end
+
+type EdibleSelection = {
+	Source: "Pantry" | "Container",
+	IngredientId: string,
+	HungerRestore: number,
+	ContainerId: string?,
+	Priority: number,
+}
+
+local function considerEdibleCandidate(
+	bestSelection: EdibleSelection?,
+	source: "Pantry" | "Container",
+	ingredientId: string,
+	hungerRestore: number,
+	containerId: string?,
+	priority: number
+): EdibleSelection?
+	if hungerRestore <= 0 then
+		return bestSelection
+	end
+	local candidate: EdibleSelection = {
+		Source = source,
+		IngredientId = ingredientId,
+		HungerRestore = hungerRestore,
+		ContainerId = containerId,
+		Priority = priority,
+	}
+	if not bestSelection then
+		return candidate
+	end
+	if priority > bestSelection.Priority then
+		return candidate
+	end
+	if priority == bestSelection.Priority and hungerRestore > bestSelection.HungerRestore then
+		return candidate
+	end
+	if priority == bestSelection.Priority and hungerRestore == bestSelection.HungerRestore then
+		if source == "Container" and bestSelection.Source ~= "Container" then
+			return candidate
+		end
+		if
+			source == bestSelection.Source
+			and source == "Container"
+			and (containerId or "") < (bestSelection.ContainerId or "")
+		then
+			return candidate
+		end
+		return candidate
+	end
+	return bestSelection
+end
+
+local function selectBestEdibleIngredient(state: KitchenStateData): EdibleSelection?
+	local bestSelection: EdibleSelection? = nil
+
+	local containers = state.Containers
+	if containers then
+		for containerId, entry in pairs(containers) do
+			local inventory = entry.Ingredients
+			for ingredientId, amount in pairs(inventory) do
+				if typeof(ingredientId) == "string" and typeof(amount) == "number" and amount > 0 then
+					local hungerRestore = resolveRawHungerRestore(ingredientId)
+					bestSelection =
+						considerEdibleCandidate(bestSelection, "Container", ingredientId, hungerRestore, containerId, 2)
+				end
+			end
+		end
+	end
+
+	local pantry = state.Ingredients
+	if pantry then
+		for ingredientId, amount in pairs(pantry) do
+			if typeof(ingredientId) == "string" and typeof(amount) == "number" and amount > 0 then
+				local hungerRestore = resolveRawHungerRestore(ingredientId)
+				bestSelection = considerEdibleCandidate(bestSelection, "Pantry", ingredientId, hungerRestore, nil, 1)
+			end
+		end
+	end
+
+	return bestSelection
+end
+
+local function consumeEdibleSelection(state: KitchenStateData, selection: EdibleSelection): boolean
+	if selection.Source == "Pantry" then
+		local pantry = state.Ingredients
+		if not pantry then
+			return false
+		end
+		local current = pantry[selection.IngredientId] or 0
+		if current <= 0 then
+			return false
+		end
+		if current <= 1 then
+			(pantry :: any)[selection.IngredientId] = nil
+		else
+			pantry[selection.IngredientId] = current - 1
+		end
+		return true
+	end
+
+	local containers = state.Containers
+	if not containers then
+		return false
+	end
+	local containerId = selection.ContainerId
+	if not containerId then
+		return false
+	end
+	local entry = containers[containerId]
+	if not entry then
+		return false
+	end
+	local inventory = entry.Ingredients
+	local current = inventory[selection.IngredientId] or 0
+	if current <= 0 then
+		return false
+	end
+	if current <= 1 then
+		(inventory :: any)[selection.IngredientId] = nil
+	else
+		inventory[selection.IngredientId] = current - 1
+	end
+	return true
+end
+
 local function computeAggregateIngredients(state: KitchenStateData): { [string]: number }
 	local aggregate: { [string]: number } = {}
 	local pantry = state.Ingredients or {}
@@ -279,6 +474,33 @@ local function computeAggregateIngredients(state: KitchenStateData): { [string]:
 		end
 	end
 	return aggregate
+end
+
+local function sanitizeGrantEntries(entries: { IngredientGrantEntry }?): { { IngredientId: string, Quantity: number } }
+	local sanitized: { { IngredientId: string, Quantity: number } } = {}
+	if typeof(entries) ~= "table" then
+		return sanitized
+	end
+	local aggregate: { [string]: number } = {}
+	for _, entry in ipairs(entries :: { any }) do
+		if typeof(entry) == "table" then
+			local ingredientId = entry.IngredientId or entry.Id
+			local quantityValue = entry.Quantity or entry.Amount or entry.Count
+			if typeof(ingredientId) == "string" and ingredientId ~= "" and IngredientsCatalog[ingredientId] then
+				local quantity = sanitizePositiveInteger(quantityValue)
+				if quantity > 0 then
+					aggregate[ingredientId] = math.min((aggregate[ingredientId] or 0) + quantity, MAX_PANTRY_QUANTITY)
+				end
+			end
+		end
+	end
+	for ingredientId, quantity in pairs(aggregate) do
+		sanitized[#sanitized + 1] = { IngredientId = ingredientId, Quantity = math.min(quantity, MAX_PANTRY_QUANTITY) }
+	end
+	table.sort(sanitized, function(a, b)
+		return a.IngredientId < b.IngredientId
+	end)
+	return sanitized
 end
 
 local function collectSortedKeys(dictionary: { [string]: any }): { string }
@@ -423,6 +645,16 @@ local function sanitizeKitchenState(raw: any?): KitchenStateData?
 	local meals = sanitizeInventory(state.Meals)
 	state.Meals = meals
 	local containers = sanitizeContainerMap(state.Containers)
+	local basketEntry = containers and containers.HarvestBasket or nil
+	if basketEntry then
+		for ingredientId, amount in pairs(basketEntry.Ingredients) do
+			if typeof(ingredientId) == "string" and typeof(amount) == "number" then
+				ingredients[ingredientId] =
+					math.clamp((ingredients[ingredientId] or 0) + amount, 0, MAX_PANTRY_QUANTITY)
+			end
+		end
+		containers.HarvestBasket = nil :: any
+	end
 	state.Containers = containers
 	seedKitchenDefaults(state)
 	local lastCooked = state.LastCookedAt
@@ -431,6 +663,7 @@ local function sanitizeKitchenState(raw: any?): KitchenStateData?
 	else
 		state.LastCookedAt = lastCooked
 	end
+
 	return state
 end
 
@@ -551,8 +784,318 @@ local function buildKitchenPayload(state: KitchenStateData)
 	}
 end
 
+local function buildGrantNoticePayload(
+	sanitizedEntries: { { IngredientId: string, Quantity: number } },
+	sourceId: string?,
+	sourceName: string?
+): GrantNoticePayload?
+	if #sanitizedEntries == 0 then
+		return nil
+	end
+	local entriesPayload: { GrantNoticePayloadEntry } = {}
+	for _, entry in ipairs(sanitizedEntries) do
+		local spec = IngredientsCatalog[entry.IngredientId]
+		local imageAssetId = ""
+		if spec and typeof(spec.ImageAssetId) == "string" then
+			imageAssetId = spec.ImageAssetId
+		end
+		entriesPayload[#entriesPayload + 1] = {
+			Id = entry.IngredientId,
+			Quantity = math.clamp(entry.Quantity, 0, GRANT_NOTICE_MAX_QUANTITY),
+			Image = imageAssetId,
+		}
+	end
+	return {
+		SourceId = sourceId or "",
+		SourceName = sourceName or "",
+		Entries = entriesPayload,
+	}
+end
+
 local function dispatchKitchenState(player: Player, state: KitchenStateData)
+	invalidateKitchenAvailability(player.UserId)
 	FoodPackets.KitchenStateUpdate:FireClient(player, buildKitchenPayload(state))
+end
+
+local function selectBestEdibleInContainer(state: KitchenStateData, containerId: string): EdibleSelection?
+	local containers = state.Containers
+	if not containers then
+		return nil
+	end
+	local entry = containers[containerId]
+	if not entry then
+		return nil
+	end
+	local bestSelection: EdibleSelection? = nil
+	for ingredientId, amount in pairs(entry.Ingredients) do
+		if typeof(ingredientId) == "string" and typeof(amount) == "number" and amount > 0 then
+			local hungerRestore = resolveRawHungerRestore(ingredientId)
+			if hungerRestore > 0 then
+				local candidate: EdibleSelection = {
+					Source = "Container",
+					IngredientId = ingredientId,
+					HungerRestore = hungerRestore,
+					ContainerId = containerId,
+					Priority = 2,
+				}
+				if not bestSelection or hungerRestore > bestSelection.HungerRestore then
+					bestSelection = candidate
+				end
+			end
+		end
+	end
+	return bestSelection
+end
+
+local function selectBestPreparedMeal(state: KitchenStateData): (string?, MealRecipesModule.MealRecipe?, number, number)
+	local meals = state.Meals
+	if not meals then
+		return nil, nil, 0, 0
+	end
+	local bestId: string? = nil
+	local bestRecipe: MealRecipesModule.MealRecipe? = nil
+	local bestServings = 0
+	local bestMood = 0
+	local bestScore = -math.huge
+	for mealId, portions in pairs(meals) do
+		if typeof(mealId) == "string" and typeof(portions) == "number" and portions > 0 then
+			local recipe = MealRecipes[mealId]
+			if recipe then
+				local hungerPerPortion = FoodUtils.ComputeHungerEffect(recipe.HungerRestore)
+				local moodBonus = if typeof(recipe.MoodBonus) == "number" then recipe.MoodBonus else 0
+				local score = hungerPerPortion * 100 + moodBonus
+				if score > bestScore then
+					bestScore = score
+					bestId = mealId
+					bestRecipe = recipe
+					bestServings = math.max(0, math.floor(portions + 0.5))
+					bestMood = moodBonus
+				end
+			end
+		end
+	end
+	return bestId, bestRecipe, bestServings, bestMood
+end
+
+local function getKitchenAvailabilityEntry(player: Player, state: KitchenStateData?): KitchenAvailabilityEntry?
+	local userId = player.UserId
+	local cached = KitchenAvailabilityCache[userId]
+	if cached then
+		return cached
+	end
+
+	state = state or KitchenService.TryGetKitchenState(player)
+	if not state then
+		return nil
+	end
+
+	local available = computeAggregateIngredients(state)
+	local canCook = false
+	for _, recipe in pairs(MealRecipes) do
+		if recipe and FoodUtils.CanSatisfyRecipe(available, recipe.Ingredients) then
+			canCook = true
+			break
+		end
+	end
+
+	local selection = selectBestEdibleIngredient(state)
+	local bestContainerId: string? = nil
+	local hasEdible = selection ~= nil
+	if selection and selection.Source == "Container" then
+		bestContainerId = selection.ContainerId
+	end
+
+	local bestMealId, bestMealRecipe, bestMealServings, bestMealMood = selectBestPreparedMeal(state)
+	local bestMealHungerPerPortion = 0
+	if bestMealRecipe then
+		bestMealHungerPerPortion = FoodUtils.ComputeHungerEffect(bestMealRecipe.HungerRestore)
+	end
+	local hasPreparedMeal = bestMealId ~= nil and bestMealServings > 0 and bestMealHungerPerPortion > 0
+
+	local entry: KitchenAvailabilityEntry = {
+		HasCookable = canCook,
+		HasEdible = hasEdible,
+		BestContainerId = bestContainerId,
+		HasPreparedMeal = hasPreparedMeal,
+		BestMealId = if hasPreparedMeal then bestMealId else nil,
+		BestMealServings = if hasPreparedMeal then bestMealServings else 0,
+		BestMealHungerPerPortion = if hasPreparedMeal then bestMealHungerPerPortion else 0,
+		BestMealMoodBonus = if hasPreparedMeal then bestMealMood else 0,
+		ComputedAt = os.clock(),
+	}
+	KitchenAvailabilityCache[userId] = entry
+	return entry
+end
+
+function KitchenService.GetPreparedMealCandidate(
+	player: Player
+): (string?, MealRecipesModule.MealRecipe?, number, number, number)
+	local entry = getKitchenAvailabilityEntry(player, nil)
+	if not entry or not entry.HasPreparedMeal or not entry.BestMealId then
+		return nil, nil, 0, 0, 0
+	end
+	local recipe = MealRecipes[entry.BestMealId]
+	if not recipe then
+		return nil, nil, 0, 0, 0
+	end
+	return entry.BestMealId, recipe, entry.BestMealServings, entry.BestMealHungerPerPortion, entry.BestMealMoodBonus
+end
+
+function KitchenService.PeekBestEdibleContainer(player: Player): string?
+	local state = KitchenService.TryGetKitchenState(player)
+	if not state then
+		return nil
+	end
+	local entry = getKitchenAvailabilityEntry(player, state)
+	if not entry then
+		return nil
+	end
+	return entry.BestContainerId
+end
+
+function KitchenService.TryConsumeEdibleFromContainer(player: Player, containerId: string): (boolean, number?)
+	if typeof(containerId) ~= "string" or containerId == "" then
+		return false, nil
+	end
+	local state = getKitchenStateBlocking(player)
+	if not state then
+		return false, nil
+	end
+	local selection = selectBestEdibleInContainer(state, containerId)
+	if not selection then
+		return false, nil
+	end
+	if not consumeEdibleSelection(state, selection) then
+		return false, nil
+	end
+	dispatchKitchenState(player, state)
+	return true, selection.HungerRestore
+end
+
+function KitchenService.HasEdibleIngredient(player: Player): boolean
+	local state = KitchenService.TryGetKitchenState(player)
+	if not state then
+		return false
+	end
+	local entry = getKitchenAvailabilityEntry(player, state)
+	return entry ~= nil and entry.HasEdible
+end
+
+function KitchenService.TryConsumeBestEdibleIngredient(player: Player): (boolean, number?)
+	local state = KitchenService.TryGetKitchenState(player)
+	if not state then
+		return false, nil
+	end
+	local selection = selectBestEdibleIngredient(state)
+	if not selection then
+		return false, nil
+	end
+	if not consumeEdibleSelection(state, selection) then
+		return false, nil
+	end
+	dispatchKitchenState(player, state)
+	return true, selection.HungerRestore
+end
+
+function KitchenService.ApplyIngredientGrant(
+	player: Player,
+	entries: { IngredientGrantEntry },
+	options: IngredientGrantOptions?
+): (boolean, string?, { { IngredientId: string, Quantity: number } }?)
+	local state = getKitchenStateBlocking(player)
+	if not state then
+		return false, "KitchenStateUnavailable", nil
+	end
+	local sanitizedEntries = sanitizeGrantEntries(entries)
+	if #sanitizedEntries == 0 then
+		return false, "NoValidIngredients", nil
+	end
+	local pantry = state.Ingredients
+	if not pantry then
+		pantry = {}
+		state.Ingredients = pantry
+	end
+
+	local finalEntries = sanitizedEntries
+	local targetContainerId = if options then options.TargetContainerId else nil
+	if targetContainerId and targetContainerId ~= "" then
+		local stationType = "HarvestStorage"
+		if options and typeof(options.TargetStationType) == "string" and options.TargetStationType ~= "" then
+			stationType = options.TargetStationType
+		end
+		local itemId = if options
+				and typeof(options.TargetItemId) == "string"
+				and options.TargetItemId ~= ""
+			then options.TargetItemId
+			else nil
+		local capacityValue: number? = nil
+		if options and typeof(options.TargetCapacity) == "number" then
+			local clamped = clampCapacity(options.TargetCapacity)
+			capacityValue = clamped
+		end
+		local containerEntry = getOrCreateContainerEntry(state, targetContainerId, stationType, itemId, capacityValue)
+		if capacityValue then
+			containerEntry.Capacity = capacityValue
+		end
+		local inventory = containerEntry.Ingredients
+		local appliedEntries: { { IngredientId: string, Quantity: number } } = {}
+		local remainingCapacity: number? = nil
+		if containerEntry.Capacity and containerEntry.Capacity > 0 then
+			remainingCapacity = math.max(0, containerEntry.Capacity - sumIngredients(inventory))
+		end
+		for _, entry in ipairs(sanitizedEntries) do
+			if remainingCapacity and remainingCapacity <= 0 then
+				break
+			end
+			local requested = entry.Quantity
+			if requested <= 0 then
+				continue
+			end
+			local allowed = requested
+			if remainingCapacity then
+				allowed = math.min(allowed, remainingCapacity)
+			end
+			if allowed <= 0 then
+				continue
+			end
+			local current = inventory[entry.IngredientId] or 0
+			local maxAddition = math.max(0, MAX_PANTRY_QUANTITY - current)
+			if maxAddition <= 0 then
+				continue
+			end
+			local applied = math.min(allowed, maxAddition)
+			if applied <= 0 then
+				continue
+			end
+			inventory[entry.IngredientId] = current + applied
+			appliedEntries[#appliedEntries + 1] = {
+				IngredientId = entry.IngredientId,
+				Quantity = applied,
+			}
+			if remainingCapacity then
+				remainingCapacity -= applied
+			end
+		end
+		if #appliedEntries == 0 then
+			return false, "StorageFull", nil
+		end
+		finalEntries = appliedEntries
+	else
+		FoodUtils.AddIngredients(pantry :: { [string]: number }, sanitizedEntries)
+		finalEntries = sanitizedEntries
+	end
+	if options and options.Mutator then
+		options.Mutator(state)
+	end
+	dispatchKitchenState(player, state)
+	if not (options and options.NotifyClient == false) then
+		local payload =
+			buildGrantNoticePayload(finalEntries, options and options.SourceId, options and options.SourceName)
+		if payload then
+			FoodPackets.IngredientGrantNotice:FireClient(player, payload)
+		end
+	end
+	return true, nil, finalEntries
 end
 
 local function selectRecipeId(state: KitchenStateData, requestedId: string?): string?
@@ -592,27 +1135,21 @@ function KitchenService.HasCookableRecipe(player: Player): boolean
 	if not state then
 		return false
 	end
-	local available = computeAggregateIngredients(state)
-	for recipeId, recipe in pairs(MealRecipes) do
-		if recipeId and FoodUtils.CanSatisfyRecipe(available, recipe.Ingredients) then
-			return true
-		end
-	end
-	return false
+	local entry = getKitchenAvailabilityEntry(player, state)
+	return entry ~= nil and entry.HasCookable
 end
 
 function KitchenService.HasPreparedMeal(player: Player): boolean
-	local state = KitchenService.TryGetKitchenState(player)
-	if not state then
-		return false
+	local entry = getKitchenAvailabilityEntry(player, nil)
+	return entry ~= nil and entry.HasPreparedMeal
+end
+
+function KitchenService.GetAvailabilitySnapshot(player: Player): KitchenAvailabilitySnapshot?
+	local entry = getKitchenAvailabilityEntry(player, nil)
+	if not entry then
+		return nil
 	end
-	local meals = state.Meals or {}
-	for _, portions in pairs(meals) do
-		if portions and portions > 0 then
-			return true
-		end
-	end
-	return false
+	return entry
 end
 
 function KitchenService.BeginCooking(
@@ -644,12 +1181,6 @@ function KitchenService.BeginCooking(
 	dispatchKitchenState(player, state)
 
 	behavior.DurationSeconds = recipe.CookTimeSeconds
-	behavior.Effects = {
-		{
-			Need = "Hunger",
-			InstantAmount = FoodUtils.ComputeHungerEffect(recipe.HungerRestore),
-		},
-	}
 	behavior.ChatPhrases = behavior.ChatPhrases or {
 		"Putting together a " .. recipe.Name .. ".",
 	}
@@ -715,15 +1246,15 @@ function KitchenService.CancelCooking(session: CookingSession, _reason: string?)
 	clearSession(session)
 end
 
-function KitchenService.CompleteCooking(session: CookingSession)
+function KitchenService.CompleteCooking(session: CookingSession): (number, MealRecipesModule.MealRecipe?)
 	if session.Completed or session.Cancelled then
-		return
+		return 0, session.Recipe
 	end
 	session.Completed = true
 	local state = getKitchenStateBlocking(session.Player)
 	if not state then
 		clearSession(session)
-		return
+		return 0, session.Recipe
 	end
 
 	local recipe = session.Recipe
@@ -738,6 +1269,8 @@ function KitchenService.CompleteCooking(session: CookingSession)
 	state.LastCookedAt = os.clock()
 	dispatchKitchenState(session.Player, state)
 	clearSession(session)
+
+	return autoConsume, recipe
 end
 
 function KitchenService.ConsumePreparedMeal(player: Player, mealId: string, servings: number?): boolean
@@ -773,17 +1306,20 @@ local function handlePurchaseRequest(player: Player, ingredientId: string, quant
 		return false, "Not enough cash."
 	end
 
-	local state = getKitchenStateBlocking(player)
-	if not state then
-		return false, "Kitchen unavailable."
-	end
-
 	CurrencyService.Remove(player, "Cash", totalCost, currencyState)
 	local batchQuantity = ingredientSpec.PurchaseQuantity * sanitizedQuantity
-	FoodUtils.AddIngredients(state.Ingredients or {}, {
+	local grantEntries = {
 		{ IngredientId = ingredientId, Quantity = batchQuantity },
+	}
+	local success, reason = KitchenService.ApplyIngredientGrant(player, grantEntries, {
+		SourceId = "KitchenPurchase",
+		SourceName = "Pantry Purchase",
+		NotifyClient = false,
 	})
-	dispatchKitchenState(player, state)
+	if not success then
+		CurrencyService.Add(player, "Cash", totalCost, currencyState, { Source = "KitchenRefund" })
+		return false, reason or "Kitchen unavailable."
+	end
 	return true, string.format("Purchased %d %s", batchQuantity, ingredientSpec.Name)
 end
 
@@ -915,6 +1451,7 @@ function KitchenService.TransferContainerToPantry(
 end
 
 function KitchenService.Remove(player: Player)
+	invalidateKitchenAvailability(player.UserId)
 	local sessions = ActiveSessions[player.UserId]
 	if not sessions then
 		return

@@ -12,6 +12,10 @@ local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
 local ResidentChat = require(ServerScriptService.Server.Utilities.ResidentChat)
 local AutonomyState = require(ServerScriptService.Server.Services.ResidentAutonomyService.State)
+local StationManager = require(ServerScriptService.Server.Services.ResidentAutonomyService.StationManager)
+local MealRecipesModule = require(ReplicatedStorage.Shared.Definitions.MealRecipes)
+local FoodUtils = require(ReplicatedStorage.Shared.Utilities.FoodUtils)
+local MealRecipes = MealRecipesModule.Recipes
 
 export type HandlerContext = {
 	Resident: any,
@@ -31,6 +35,11 @@ export type HandlerAssignment = {
 	NeedName: string?,
 	RestModeOverride: string?,
 	ManualOverride: boolean?,
+	ActionMode: string?,
+	TargetContainerId: string?,
+	PreparedMealId: string?,
+	PreparedMealServings: number?,
+	PreparedMealHungerPerPortion: number?,
 }
 
 local ResidentActionHandlers = {}
@@ -74,18 +83,22 @@ local ACTION_CHANNEL = "Action"
 
 local StationActionLabels: { [string]: string } = {
 	RestStation = "rest",
-	CookStation = "cook",
+	CookStation = "cook meal",
+	MealStation = "share meal",
 	SocialStation = "chat",
 	HygieneStation = "wash up",
 	FunStation = "have fun",
+	FoodStorage = "grab food",
 }
 
 local StationKindLabels: { [string]: string } = {
 	RestStation = "bed",
 	CookStation = "kitchen",
+	MealStation = "meal table",
 	SocialStation = "hangout",
 	HygieneStation = "sink",
 	FunStation = "fun spot",
+	FoodStorage = "storage",
 }
 
 local KitchenFailurePhrases: { [string]: string } = {
@@ -206,6 +219,68 @@ local function copyMoodlets(moodlets: { RawMoodlet }?): { Moodlet }?
 	return clone
 end
 
+local function itemHasTag(itemSpec: { [string]: any }?, tag: string): boolean
+	if not itemSpec then
+		return false
+	end
+	local tags = itemSpec.Tags
+	if typeof(tags) ~= "table" then
+		return false
+	end
+	for _, value in ipairs(tags) do
+		if typeof(value) == "string" and value == tag then
+			return true
+		end
+	end
+	return false
+end
+
+local DINING_STATION_PREFERENCES: { { StationType: string, RequiredTag: string? } } = {
+	{ StationType = "MealStation" },
+	{ StationType = "SocialStation", RequiredTag = "Table" },
+	{ StationType = "FunStation", RequiredTag = "Table" },
+	{ StationType = "RestStation", RequiredTag = "Seating" },
+}
+
+local function selectDiningStation(
+	player: Player?,
+	residentName: string
+): (string?, string?, StationManager.StationRecord?, { [string]: any }?, Model?)
+	if not player then
+		return nil, nil, nil, nil, nil
+	end
+	for _, preference in ipairs(DINING_STATION_PREFERENCES) do
+		local stationType = preference.StationType
+		local requiredTag = preference.RequiredTag
+		local filter
+		if requiredTag then
+			filter = function(_id: string, _station: StationManager.StationRecord, itemSpec: { [string]: any }?)
+				return itemHasTag(itemSpec, requiredTag)
+			end
+		end
+		local uniqueId, stationRecord, itemSpec, model =
+			StationManager.findAvailableStation(player, stationType, residentName, nil, filter)
+		if uniqueId and stationRecord and model then
+			return stationType, uniqueId, stationRecord, itemSpec, model
+		end
+	end
+	return nil, nil, nil, nil, nil
+end
+
+local function reserveAuxStation(stationRecord: StationManager.StationRecord, residentName: string)
+	if not table.find(stationRecord.Residents, residentName) then
+		table.insert(stationRecord.Residents, residentName)
+	end
+	stationRecord.Occupied = true
+end
+
+local function releaseAuxStation(stationRecord: StationManager.StationRecord?, residentName: string)
+	if not stationRecord then
+		return
+	end
+	StationManager.releaseStationOccupancy(stationRecord, residentName)
+end
+
 local function copyChatPhrases(phrases: { any }?): { ChatOption }?
 	if not phrases then
 		return nil
@@ -286,24 +361,19 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 		ApproachDistance = 3,
 		MoveTimeoutSeconds = 25,
 		DurationSeconds = 30,
-		Effects = {
-			{ Need = "Hunger", RatePerHour = 90 },
-		},
-		Moodlets = {
-			{ Name = "Satisfied", DurationSeconds = 120, NeedBias = { Hunger = -0.2 } },
-		},
 		ChatPhrases = {
 			"I could use a bite!",
 			"Cooking something tasty.",
 		},
-		ShouldEnd = function(residentState)
-			local def = Needs.Hunger
-			if not def then
-				return false
-			end
-			local threshold = math.min(def.Max, def.Low + def.Hysteresis)
-			return residentState:GetNeed("Hunger") >= threshold
-		end,
+	},
+	MealStation = {
+		ApproachDistance = 3,
+		MoveTimeoutSeconds = 22,
+		UseSeat = true,
+		ChatPhrases = {
+			"Let's grab a seat and eat.",
+			"Time to enjoy this meal together.",
+		},
 	},
 	SocialStation = {
 		ApproachDistance = 3,
@@ -339,6 +409,9 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 					if needDef then
 						local value = residentState:GetNeed(needName)
 						if value <= needDef.Critical then
+							if AutonomyState.isSurvivalNeedUnavailable(residentState, needName) then
+								continue
+							end
 							return true
 						end
 					end
@@ -393,6 +466,15 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 			local threshold = math.min(def.Max, def.Low + def.Hysteresis)
 			return residentState:GetNeed("Fun") >= threshold
 		end,
+	},
+	FoodStorage = {
+		ApproachDistance = 3,
+		MoveTimeoutSeconds = 18,
+		DurationSeconds = 12,
+		ChatPhrases = {
+			"Let me grab something quick.",
+			"Checking the fridge.",
+		},
 	},
 }
 
@@ -542,12 +624,14 @@ local function createRestShouldEnd(mode: string, targetEnergy: number?): ((any) 
 		if hungerDef then
 			local hunger = residentState:GetNeed("Hunger")
 			if hunger <= hungerDef.Critical then
-				if not energyDefLocal then
-					return "NeedUrgent:Hunger"
-				end
-				local energy = residentState:GetNeed("Energy")
-				if energy > energyDefLocal.Critical then
-					return "NeedUrgent:Hunger"
+				if not AutonomyState.isSurvivalNeedUnavailable(residentState, "Hunger") then
+					if not energyDefLocal then
+						return "NeedUrgent:Hunger"
+					end
+					local energy = residentState:GetNeed("Energy")
+					if energy > energyDefLocal.Critical then
+						return "NeedUrgent:Hunger"
+					end
 				end
 			end
 		end
@@ -658,11 +742,120 @@ local function mergeBehavior(stationType: string, itemSpec: { [string]: any }): 
 	return behavior
 end
 
+local function computeMealEatDuration(hungerRestore: number): number
+	if hungerRestore <= 0 then
+		return 12
+	end
+	local scaled = math.floor(hungerRestore / 8 + 0.5)
+	return math.clamp(scaled, 10, 24)
+end
+
+local function buildMealEatingBehavior(hungerRestore: number, recipe: any): Behavior
+	local duration = computeMealEatDuration(hungerRestore)
+	local recipeName = if recipe
+			and typeof(recipe.Name) == "string"
+			and recipe.Name ~= ""
+		then recipe.Name
+		else "this meal"
+	local totalRestore = math.max(hungerRestore, 0)
+	local ratePerHour = 0
+	if duration > 0 and totalRestore > 0 then
+		local gameHours = math.max(TimeScale.GameHoursFromRealDelta(duration), 1e-3)
+		ratePerHour = totalRestore / gameHours
+	end
+	local effects: { Effect }? = nil
+	if ratePerHour > 0 then
+		effects = {
+			{ Need = "Hunger", RatePerHour = ratePerHour },
+		}
+	elseif totalRestore > 0 then
+		effects = {
+			{ Need = "Hunger", InstantAmount = totalRestore },
+		}
+	end
+	local behavior: Behavior = {
+		DurationSeconds = duration,
+		Effects = effects,
+		ChatPhrases = {
+			{ Text = string.format("Enjoying %s.", recipeName) },
+			{ Text = "Taking a moment to eat." },
+			{ Text = "Digging in." },
+		},
+	}
+	local moodlets: { Moodlet } = {}
+	local moodBonus = recipe and recipe.MoodBonus
+	if typeof(moodBonus) == "number" and moodBonus > 0 then
+		moodlets[#moodlets + 1] = {
+			Name = "WellFed",
+			DurationSeconds = 180,
+			NeedBias = { Hunger = -0.25 },
+		}
+	else
+		moodlets[#moodlets + 1] = {
+			Name = "Satisfied",
+			DurationSeconds = 120,
+			NeedBias = { Hunger = -0.2 },
+		}
+	end
+	behavior.Moodlets = moodlets
+	return behavior
+end
+
+local function applyMealStationBonus(behavior: Behavior?, seatType: string?, recipe: any?)
+	if not behavior or seatType ~= "MealStation" then
+		return
+	end
+	local effects = behavior.Effects
+	if not effects then
+		effects = {}
+		behavior.Effects = effects
+	end
+	local effectList = effects :: { Effect }
+	effectList[#effectList + 1] = { Need = "Social", InstantAmount = 8 }
+	effectList[#effectList + 1] = { Need = "Fun", InstantAmount = 4 }
+	local moodlets = behavior.Moodlets
+	if not moodlets then
+		moodlets = {}
+		behavior.Moodlets = moodlets
+	end
+	local moodletList = moodlets :: { Moodlet }
+	moodletList[#moodletList + 1] = {
+		Name = "SharedMeal",
+		DurationSeconds = 150,
+		NeedBias = { Social = -0.25, Hunger = -0.1 },
+	}
+	local recipeName = recipe and recipe.Name
+	if typeof(recipeName) == "string" and recipeName ~= "" then
+		local chatList = behavior.ChatPhrases
+		if not chatList then
+			chatList = {}
+			behavior.ChatPhrases = chatList
+		end
+		local chatOptions = chatList :: { ChatOption }
+		chatOptions[#chatOptions + 1] = { Text = string.format("Sharing %s together.", recipeName) }
+	end
+end
+
 local function executeStationAction(stationType: string, context: HandlerContext, assignment: HandlerAssignment)
 	if context.CancelToken.Cancelled then
 		return
 	end
-	local actionLabel = StationActionLabels[stationType]
+	local actionMode = assignment.ActionMode
+	local isSnack = actionMode == "Snack"
+	local isPreparedMeal = actionMode == "PreparedMeal"
+	local actionLabel = StationActionLabels[stationType] or "use station"
+	if stationType == "CookStation" then
+		if isSnack then
+			actionLabel = "grab snack"
+		elseif isPreparedMeal then
+			actionLabel = "eat meal"
+		else
+			actionLabel = "cook meal"
+		end
+	end
+	if isPreparedMeal and stationType ~= "CookStation" then
+		actionLabel = "eat meal"
+	end
 	local stationName = resolveStationDisplayName(assignment, stationType)
 	ResidentDebug.Trace(
 		ACTION_CHANNEL,
@@ -673,7 +866,87 @@ local function executeStationAction(stationType: string, context: HandlerContext
 			StationId = assignment.StationId,
 		}
 	)
+	local diningReservationRecord: StationManager.StationRecord? = nil
+	local diningReservationType: string? = nil
+	local diningReservationModel: Model? = nil
+	local diningReservationItemSpec: { [string]: any }? = nil
+	local diningReservationUniqueId: string? = nil
+	local followUpStationTypeOverride: string? = nil
+	local followUpStationIdOverride: string? = nil
+	local followUpStationNameOverride: string? = nil
+	local diningArrivalInfo: any = nil
+	local function releaseDiningReservation()
+		releaseAuxStation(diningReservationRecord, assignment.ResidentName)
+		diningReservationRecord = nil
+		diningReservationType = nil
+		diningReservationModel = nil
+		diningReservationItemSpec = nil
+		diningReservationUniqueId = nil
+		followUpStationTypeOverride = nil
+		followUpStationIdOverride = nil
+		followUpStationNameOverride = nil
+		diningArrivalInfo = nil
+	end
+	local function ensureDiningReservation()
+		if diningReservationRecord then
+			return
+		end
+		local seatStationType, seatUniqueId, seatRecord, seatItemSpec, seatModel =
+			selectDiningStation(assignment.Player, assignment.ResidentName)
+		if seatStationType and seatRecord and seatModel then
+			reserveAuxStation(seatRecord, assignment.ResidentName)
+			diningReservationRecord = seatRecord
+			diningReservationType = seatStationType
+			diningReservationModel = seatModel
+			diningReservationItemSpec = seatItemSpec
+			diningReservationUniqueId = seatUniqueId
+		end
+	end
+
+	local primaryReleased = false
+	local function releasePrimaryReservation()
+		if primaryReleased then
+			return
+		end
+		primaryReleased = true
+		local stationRecord = assignment.StationRecord
+		if stationRecord then
+			StationManager.releaseStationOccupancy(stationRecord, assignment.ResidentName)
+		end
+	end
+	local preparedMealId: string? = nil
+	local preparedMealServings = 0
+	local preparedMealHungerPerPortion = 0
+	local preparedMealRecipe: MealRecipesModule.MealRecipe? = nil
+	if isPreparedMeal then
+		preparedMealId = assignment.PreparedMealId
+		preparedMealServings = math.max(1, assignment.PreparedMealServings or 1)
+		preparedMealHungerPerPortion = assignment.PreparedMealHungerPerPortion or 0
+		if preparedMealId then
+			preparedMealRecipe = MealRecipes[preparedMealId]
+		end
+	end
+	local followUpBehavior: Behavior? = nil
+	local followUpRecipe: MealRecipesModule.MealRecipe? = nil
 	local behavior = mergeBehavior(stationType, assignment.ItemSpec)
+	if isSnack then
+		behavior.DurationSeconds = behavior.DurationSeconds or 16
+		if not behavior.ChatPhrases then
+			behavior.ChatPhrases = {
+				{ Text = "Grabbing a quick snack." },
+				{ Text = "Let me eat something fast." },
+			}
+		end
+	elseif isPreparedMeal then
+		behavior.DurationSeconds = math.min(behavior.DurationSeconds or 10, 6)
+		behavior.Effects = nil
+		if not behavior.ChatPhrases then
+			behavior.ChatPhrases = {
+				{ Text = "Let me plate some leftovers." },
+				{ Text = "Warming up a meal." },
+			}
+		end
+	end
 	if stationType == "RestStation" then
 		local restOverride = assignment.RestModeOverride
 		if restOverride and restOverride ~= behavior.RestProfileKey then
@@ -756,7 +1029,7 @@ local function executeStationAction(stationType: string, context: HandlerContext
 	end
 
 	local cookingSession: CookingSession? = nil
-	if stationType == "CookStation" and assignment.Player then
+	if stationType == "CookStation" and assignment.Player and not isSnack and not isPreparedMeal then
 		local beginOk, beginResult = KitchenService.BeginCooking(assignment.Player, assignment, behavior, nil)
 		if not beginOk then
 			local reason = tostring(beginResult)
@@ -807,6 +1080,7 @@ local function executeStationAction(stationType: string, context: HandlerContext
 			Resident = assignment.ResidentName,
 			StationType = stationType,
 		})
+		releaseDiningReservation()
 		return
 	end
 	local restPoseApplied = false
@@ -824,6 +1098,71 @@ local function executeStationAction(stationType: string, context: HandlerContext
 			ResidentMovement.SeatResident(assignment.ResidentState, arrival.Seat, context.CancelToken)
 		end
 	end
+	if isSnack then
+		local player = assignment.Player
+		local containerId = assignment.TargetContainerId or assignment.StationId
+		if not player or not containerId or containerId == "" then
+			ResidentChat.ShowInterrupt(assignment.ResidentState, "NoFoodAvailable", {
+				StationType = stationType :: string,
+				StationId = assignment.StationId,
+				StationName = stationName,
+				NeedName = assignment.NeedName,
+				ActionName = actionLabel,
+			})
+			releaseDiningReservation()
+			return
+		end
+		local consumeOk, hungerRestore = KitchenService.TryConsumeEdibleFromContainer(player, containerId)
+		if not consumeOk or not hungerRestore or hungerRestore <= 0 then
+			ResidentChat.ShowInterrupt(assignment.ResidentState, "NoFoodAvailable", {
+				StationType = stationType :: string,
+				StationId = assignment.StationId,
+				StationName = stationName,
+				NeedName = assignment.NeedName,
+				ActionName = actionLabel,
+			})
+			releaseDiningReservation()
+			return
+		end
+		followUpBehavior = buildMealEatingBehavior(hungerRestore, nil)
+		behavior.Effects = nil
+		ensureDiningReservation()
+	elseif isPreparedMeal then
+		local player = assignment.Player
+		if not player or not preparedMealId or preparedMealHungerPerPortion <= 0 then
+			ResidentChat.ShowInterrupt(assignment.ResidentState, "NoFoodAvailable", {
+				StationType = stationType :: string,
+				StationId = assignment.StationId,
+				StationName = stationName,
+				NeedName = assignment.NeedName,
+				ActionName = actionLabel,
+			})
+			releaseDiningReservation()
+			return
+		end
+		local consumed = KitchenService.ConsumePreparedMeal(player, preparedMealId, preparedMealServings)
+		if not consumed then
+			ResidentChat.ShowInterrupt(assignment.ResidentState, "NoFoodAvailable", {
+				StationType = stationType :: string,
+				StationId = assignment.StationId,
+				StationName = stationName,
+				NeedName = assignment.NeedName,
+				ActionName = actionLabel,
+			})
+			releaseDiningReservation()
+			return
+		end
+		local totalRestore = preparedMealHungerPerPortion * preparedMealServings
+		if totalRestore <= 0 and preparedMealRecipe then
+			totalRestore = FoodUtils.ComputeHungerEffect(preparedMealRecipe.HungerRestore)
+		end
+		if totalRestore <= 0 then
+			totalRestore = 12
+		end
+		followUpBehavior = buildMealEatingBehavior(totalRestore, preparedMealRecipe)
+		followUpRecipe = preparedMealRecipe
+		ensureDiningReservation()
+	end
 	if not behavior.ChatIntervalSeconds then
 		local initialLine = ResidentChat.SelectChatText(assignment.ResidentState, behavior.ChatPhrases, nil)
 		if initialLine then
@@ -836,7 +1175,12 @@ local function executeStationAction(stationType: string, context: HandlerContext
 		Behavior = behavior,
 	})
 
-	local runOk, runResult = pcall(function()
+	local abortReason: string? = nil
+	local stageSuccess = false
+	local stageError: any = nil
+	local stageAbortReason: string? = nil
+
+	local runOk, runResult, runReason = pcall(function()
 		return NeedEffects.Run(assignment.ResidentState, context.CancelToken, behavior, {
 			StationType = stationType,
 			StationId = assignment.StationId,
@@ -846,26 +1190,204 @@ local function executeStationAction(stationType: string, context: HandlerContext
 			Player = assignment.Player,
 		})
 	end)
+
+	if runOk then
+		if runResult == true then
+			stageSuccess = true
+		else
+			stageAbortReason = runReason
+			if not stageAbortReason or stageAbortReason == "" then
+				if context.CancelToken.Cancelled then
+					stageAbortReason = context.CancelToken.Reason or "Cancelled"
+				else
+					stageAbortReason = "Interrupted"
+				end
+			end
+		end
+	else
+		stageError = runResult
+	end
+
+	if cookingSession then
+		if stageSuccess then
+			if context.CancelToken.Cancelled then
+				KitchenService.CancelCooking(cookingSession, context.CancelToken.Reason or "Cancelled")
+			else
+				local consumedPortions, recipe = KitchenService.CompleteCooking(cookingSession)
+				if consumedPortions and consumedPortions > 0 and recipe then
+					local perPortion = FoodUtils.ComputeHungerEffect(recipe.HungerRestore)
+					local totalRestore = perPortion * consumedPortions
+					if totalRestore > 0 then
+						followUpBehavior = buildMealEatingBehavior(totalRestore, recipe)
+						followUpRecipe = recipe
+						ensureDiningReservation()
+					end
+				end
+			end
+		else
+			local cancelReason = stageAbortReason
+			if not cancelReason or cancelReason == "" then
+				if context.CancelToken.Cancelled then
+					cancelReason = context.CancelToken.Reason or "Cancelled"
+				else
+					cancelReason = "ActionError"
+				end
+			end
+			KitchenService.CancelCooking(cookingSession, cancelReason)
+		end
+		cookingSession = nil
+	end
+
+	abortReason = stageAbortReason
+
+	local followUpSuccess = true
+	local followUpError: any = nil
+	local followUpAbortReason: string? = nil
+	local eatActionLabel = if isSnack then "eat snack" else "eat meal"
+	local activeFollowUp = followUpBehavior
+
+	if stageSuccess and activeFollowUp and not context.CancelToken.Cancelled then
+		if not diningReservationRecord then
+			ensureDiningReservation()
+		end
+		if diningReservationType == "MealStation" then
+			applyMealStationBonus(activeFollowUp, diningReservationType, followUpRecipe)
+		end
+		if restPoseApplied then
+			ResidentMovement.ClearRestPose(assignment.ResidentState)
+			restPoseApplied = false
+		end
+		if arrival and behavior.UseSeat then
+			ResidentMovement.LeaveSeat(assignment.ResidentState, arrival.Seat)
+		end
+		if diningReservationModel then
+			if assignment.StationType == "FoodStorage" then
+				releasePrimaryReservation()
+			end
+			local diningBehavior = mergeBehavior(diningReservationType or stationType, diningReservationItemSpec or {})
+			local seatOccupantIndex: number? = nil
+			local seatOccupantCount: number? = nil
+			if diningReservationRecord then
+				local residents = diningReservationRecord.Residents
+				if typeof(residents) == "table" then
+					seatOccupantCount = #residents
+					local foundSeatIndex = table.find(residents, assignment.ResidentName)
+					if foundSeatIndex then
+						seatOccupantIndex = foundSeatIndex
+					end
+				end
+			end
+			if diningReservationItemSpec then
+				local maxSeat = diningReservationItemSpec.maxOccupancy
+				if typeof(maxSeat) == "number" and maxSeat > 0 then
+					if not seatOccupantCount or seatOccupantCount < maxSeat then
+						seatOccupantCount = maxSeat
+					end
+				end
+			end
+			local seatArrived, seatArrival =
+				ResidentMovement.GoToStation(assignment.ResidentState, diningReservationModel, {
+					CancelToken = context.CancelToken,
+					ApproachDistance = diningBehavior.ApproachDistance,
+					TimeoutSeconds = diningBehavior.MoveTimeoutSeconds,
+					EnsureSeat = diningBehavior.UseSeat,
+					OccupantIndex = seatOccupantIndex,
+					OccupantCount = seatOccupantCount,
+				})
+			if seatArrived and seatArrival then
+				ResidentMovement.FaceStation(assignment.ResidentState, seatArrival.EntryCFrame)
+				if diningBehavior.UseSeat and seatArrival.Seat then
+					ResidentMovement.SeatResident(assignment.ResidentState, seatArrival.Seat, context.CancelToken)
+				end
+				diningArrivalInfo = seatArrival
+				followUpStationTypeOverride = diningReservationType
+				followUpStationIdOverride = diningReservationUniqueId or assignment.StationId
+				if diningReservationItemSpec then
+					local display = diningReservationItemSpec.DisplayName
+					if typeof(display) == "string" and display ~= "" then
+						followUpStationNameOverride = display
+					else
+						local itemName = diningReservationItemSpec.Name
+						if typeof(itemName) == "string" and itemName ~= "" then
+							followUpStationNameOverride = itemName
+						end
+					end
+				end
+			else
+				releaseDiningReservation()
+			end
+		else
+			releaseDiningReservation()
+		end
+
+		if not activeFollowUp.ChatIntervalSeconds then
+			local followUpLine = ResidentChat.SelectChatText(assignment.ResidentState, activeFollowUp.ChatPhrases, nil)
+			if followUpLine then
+				ResidentChat.ShowAction(assignment.ResidentState, followUpLine)
+			end
+		end
+		ResidentDebug.Trace(ACTION_CHANNEL, string.format("Running meal consumption: %s", assignment.ResidentName), {
+			Resident = assignment.ResidentName,
+			StationType = stationType,
+			Behavior = activeFollowUp,
+		})
+		local followUpRunOk, followUpRunResult, followUpRunReason = pcall(function()
+			return NeedEffects.Run(assignment.ResidentState, context.CancelToken, activeFollowUp, {
+				StationType = followUpStationTypeOverride or stationType,
+				StationId = followUpStationIdOverride or assignment.StationId,
+				StationName = followUpStationNameOverride or stationName,
+				NeedName = assignment.NeedName,
+				ActionName = eatActionLabel,
+				Player = assignment.Player,
+			})
+		end)
+		if followUpRunOk then
+			if followUpRunResult ~= true then
+				followUpSuccess = false
+				followUpAbortReason = followUpRunReason
+				if not followUpAbortReason or followUpAbortReason == "" then
+					if context.CancelToken.Cancelled then
+						followUpAbortReason = context.CancelToken.Reason or "Cancelled"
+					else
+						followUpAbortReason = "Interrupted"
+					end
+				end
+			end
+		else
+			followUpSuccess = false
+			followUpError = followUpRunResult
+		end
+	end
+
+	if followUpAbortReason then
+		abortReason = followUpAbortReason
+	end
+
 	if restPoseApplied then
 		ResidentMovement.ClearRestPose(assignment.ResidentState)
-	end
-	if not runOk then
-		if cookingSession then
-			KitchenService.CancelCooking(cookingSession, "ActionError")
-			cookingSession = nil
-		end
-		error(runResult)
 	end
 	if arrival and behavior.UseSeat then
 		ResidentMovement.LeaveSeat(assignment.ResidentState, arrival.Seat)
 	end
-	if cookingSession then
-		if context.CancelToken.Cancelled then
-			KitchenService.CancelCooking(cookingSession, context.CancelToken.Reason or "Cancelled")
-		else
-			KitchenService.CompleteCooking(cookingSession)
-		end
-		cookingSession = nil
+	if diningArrivalInfo and diningArrivalInfo.Seat then
+		ResidentMovement.LeaveSeat(assignment.ResidentState, diningArrivalInfo.Seat)
+	end
+	releaseDiningReservation()
+
+	if stageError then
+		error(stageError)
+	end
+	if followUpError then
+		error(followUpError)
+	end
+	if abortReason then
+		error(NeedEffects.FormatAbortError(abortReason), 0)
+	end
+	if not stageSuccess then
+		error("NeedEffectsFailed")
+	end
+	if not followUpSuccess then
+		error("NeedEffectsFailed")
 	end
 	ResidentDebug.Trace(
 		ACTION_CHANNEL,
@@ -889,6 +1411,10 @@ local function handleCookStation(context: HandlerContext, assignment: HandlerAss
 	executeStationAction("CookStation", context, assignment)
 end
 
+local function handleMealStation(context: HandlerContext, assignment: HandlerAssignment)
+	executeStationAction("MealStation", context, assignment)
+end
+
 local function handleSocialStation(context: HandlerContext, assignment: HandlerAssignment)
 	executeStationAction("SocialStation", context, assignment)
 end
@@ -901,11 +1427,17 @@ local function handleFunStation(context: HandlerContext, assignment: HandlerAssi
 	executeStationAction("FunStation", context, assignment)
 end
 
+local function handleFoodStorage(context: HandlerContext, assignment: HandlerAssignment)
+	executeStationAction("FoodStorage", context, assignment)
+end
+
 register("RestStation", handleRestStation)
 register("CookStation", handleCookStation)
+register("MealStation", handleMealStation)
 register("SocialStation", handleSocialStation)
 register("HygieneStation", handleHygieneStation)
 register("FunStation", handleFunStation)
+register("FoodStorage", handleFoodStorage)
 
 function ResidentActionHandlers.GetDefaultBehavior(stationType: string): BehaviorSpec?
 	local base = StationDefaults[stationType]

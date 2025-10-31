@@ -49,6 +49,7 @@ type Signal = typeof(GoodSignal.new())
 export type ActionItem = {
 	Name: string,
 	Execute: (context: any?) -> (), -- may yield
+	Cleanup: (() -> ())?,
 }
 
 export type ActionQueue = {
@@ -103,11 +104,28 @@ end
 ---------------------------------------------------------------------
 
 -- Enqueue a single action. The runner will start automatically if needed.
-function ActionQueue:Enqueue(actionName: string, actionFunction: (context: any?) -> ())
+local function validateCleanup(cleanup: (() -> ())?)
+	if cleanup ~= nil and typeof(cleanup) ~= "function" then
+		error("[ActionQueue] cleanupFunction must be a function when provided", 3)
+	end
+end
+
+local function executeCleanup(callback: (() -> ())?)
+	if not callback then
+		return
+	end
+	local success = pcall(callback)
+	if not success then
+		warn("[ActionQueue] Cleanup callback failed")
+	end
+end
+
+function ActionQueue:Enqueue(actionName: string, actionFunction: (context: any?) -> (), cleanupFunction: (() -> ())?)
 	self:_EnsureNotDestroyed("Enqueue")
 	self:_ValidateAction(actionName, actionFunction)
+	validateCleanup(cleanupFunction)
 
-	local item: ActionItem = { Name = actionName, Execute = actionFunction }
+	local item: ActionItem = { Name = actionName, Execute = actionFunction, Cleanup = cleanupFunction }
 	self._queue:Push(item)
 	self:_StartRunnerIfNeeded()
 end
@@ -124,6 +142,7 @@ function ActionQueue:EnqueueMany(items: { ActionItem }): number
 	for index = 1, count do
 		local item = items[index]
 		self:_ValidateAction(item.Name, item.Execute)
+		validateCleanup(item.Cleanup)
 	end
 
 	self._queue:PushMany(items)
@@ -133,10 +152,15 @@ end
 
 -- Remove all queued (not currently running) actions.
 function ActionQueue:Clear()
-	if self._destroyed then
+	if self._destroyed or self._queue == nil then
 		return
 	end
-	self._queue:Clear()
+	local drained = self._queue:Drain(nil)
+	if drained then
+		for _, item in ipairs(drained :: { ActionItem }) do
+			executeCleanup(item.Cleanup)
+		end
+	end
 end
 
 function ActionQueue:IsEmpty(): boolean
@@ -215,9 +239,7 @@ function ActionQueue:Destroy()
 
 	self._destroyed = true
 
-	if self._queue ~= nil then
-		self._queue:Clear()
-	end
+	self:Clear()
 	self._queue = nil :: any
 
 	if not self._runnerIsAlive then

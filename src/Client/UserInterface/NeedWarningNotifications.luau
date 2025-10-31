@@ -3,6 +3,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
@@ -72,6 +73,19 @@ local residentConnections: { [string]: { RBXScriptConnection } } = {}
 local folderConnections: { RBXScriptConnection } = {}
 local currentResidentsFolder: Folder? = nil
 local activeToastHandles: { [NotificationHandle]: boolean } = {}
+local toastQueue: {
+	{
+		ResidentName: string,
+		NeedName: string,
+		Severity: NeedSeverity,
+		Key: string,
+	}
+} = {}
+local toastQueueKeys: { [string]: boolean } = {}
+local lastToastTimestamp = 0
+
+local MIN_TOAST_INTERVAL_SECONDS = 0.65
+local MAX_PENDING_TOASTS = 24
 
 local function trackToastHandle(handle: NotificationHandle)
 	activeToastHandles[handle] = true
@@ -87,9 +101,13 @@ local function clearTrackedHandles()
 		handle.Dismiss()
 	end
 	table.clear(activeToastHandles)
+	for _, pending in ipairs(toastQueue) do
+		toastQueueKeys[pending.Key] = nil
+	end
+	table.clear(toastQueue)
 end
 
-local function showNeedToast(residentName: string, needName: string, severity: NeedSeverity)
+local function showNeedToastImmediate(residentName: string, needName: string, severity: NeedSeverity)
 	local feelingText: string
 	if severity == "Satisfied" then
 		feelingText = NEED_SATISFIED_TEXT[needName] or "satisfied"
@@ -116,6 +134,54 @@ local function showNeedToast(residentName: string, needName: string, severity: N
 	})
 
 	trackToastHandle(handle)
+end
+
+local function processToastQueue()
+	if #toastQueue == 0 then
+		return
+	end
+	local now = os.clock()
+	if now - lastToastTimestamp < MIN_TOAST_INTERVAL_SECONDS then
+		return
+	end
+	local nextToast = table.remove(toastQueue, 1)
+	if not nextToast then
+		return
+	end
+	toastQueueKeys[nextToast.Key] = nil
+	showNeedToastImmediate(nextToast.ResidentName, nextToast.NeedName, nextToast.Severity)
+	lastToastTimestamp = os.clock()
+end
+
+local function enqueueNeedToast(residentName: string, needName: string, severity: NeedSeverity)
+	local now = os.clock()
+	if #toastQueue == 0 and now - lastToastTimestamp >= MIN_TOAST_INTERVAL_SECONDS then
+		showNeedToastImmediate(residentName, needName, severity)
+		lastToastTimestamp = os.clock()
+		return
+	end
+	local key = string.format("%s:%s:%s", residentName, needName, severity)
+	if toastQueueKeys[key] then
+		return
+	end
+	if #toastQueue >= MAX_PENDING_TOASTS then
+		local removed = table.remove(toastQueue, 1)
+		if removed then
+			toastQueueKeys[removed.Key] = nil
+		end
+	end
+	toastQueueKeys[key] = true
+	toastQueue[#toastQueue + 1] = {
+		ResidentName = residentName,
+		NeedName = needName,
+		Severity = severity,
+		Key = key,
+	}
+	processToastQueue()
+end
+
+local function showNeedToast(residentName: string, needName: string, severity: NeedSeverity)
+	enqueueNeedToast(residentName, needName, severity)
 end
 
 local function ensureNeedEntry(residentName: string, needName: string): NeedEntry
@@ -376,6 +442,10 @@ function NeedWarningNotifications.Init()
 	local function checkPendingWarnings()
 		processPendingWarnings()
 	end
+
+	RunService.Heartbeat:Connect(function()
+		processToastQueue()
+	end)
 
 	ResidentSelectionFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 		if not ResidentSelectionFrame.Visible then

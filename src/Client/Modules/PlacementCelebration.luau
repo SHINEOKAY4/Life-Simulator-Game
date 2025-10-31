@@ -344,4 +344,12 @@ function PlacementCelebration.ShowFailure(position: Vector3?, itemId: OptionalSt
 	showText(position, resolvedText, FAILURE_COLOR)
 end
 
+function PlacementCelebration.ShowMessage(position: Vector3?, message: string, color: Color3?)
+	if typeof(message) ~= "string" or message == "" then
+		return
+	end
+	local resolvedColor = color or SUCCESS_COLOR
+	showText(position, message, resolvedColor)
+end
+
 return PlacementCelebration

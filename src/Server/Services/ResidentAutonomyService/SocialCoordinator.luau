@@ -129,6 +129,13 @@ local function enqueueDirectSocialPair(
 		},
 	}
 
+	local function shouldThrottleSocial(reason: string?): boolean
+		if reason == nil or reason == "" then
+			return false
+		end
+		return string.sub(reason, 1, 11) == "NeedUrgent:"
+	end
+
 	local function applySuccessBoost()
 		if session.SuccessBoostApplied or session.CompletedCount <= 0 then
 			return
@@ -243,6 +250,10 @@ local function enqueueDirectSocialPair(
 					token.Reason = token.Reason or session.CancelReason
 				end
 			end
+			if shouldThrottleSocial(session.CancelReason) then
+				State.setNeedCooldown(entry.Resident, "Social")
+				State.setNextEvaluation(entry.Resident, os.clock() + 8)
+			end
 		end
 		if session.CompletedCount > 0 then
 			applySuccessBoost()
@@ -319,7 +330,7 @@ local function enqueueDirectSocialPair(
 				faceWorldPosition(entry.Resident, partnerPosition)
 			end
 
-			local succeeded = NeedEffects.Run(entry.Resident, cancelToken, entry.Behavior, {
+			local succeeded, failureReason = NeedEffects.Run(entry.Resident, cancelToken, entry.Behavior, {
 				StationType = "SocialStation",
 				ActionName = "chat",
 				NeedName = "Social",
@@ -338,7 +349,7 @@ local function enqueueDirectSocialPair(
 				return
 			end
 
-			local reason = cancelToken.Reason
+			local reason = failureReason or cancelToken.Reason
 			if not reason or reason == "" then
 				reason = Utils.detectCriticalNeed(entry.Resident)
 			end

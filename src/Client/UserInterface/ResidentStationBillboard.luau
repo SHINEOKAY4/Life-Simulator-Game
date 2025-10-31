@@ -14,6 +14,7 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local NeedByStation: { [string]: string } = {
 	RestStation = "Energy",
 	CookStation = "Hunger",
+	MealStation = "Hunger",
 	SocialStation = "Social",
 	HygieneStation = "Hygiene",
 	FunStation = "Fun",

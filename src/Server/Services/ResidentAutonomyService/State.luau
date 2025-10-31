@@ -7,21 +7,32 @@ local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local Constants = require(script.Parent.Constants)
 
 export type ResidentState = any
+type StationReservation = { Station: any, ResidentName: string }
 
 local State = {}
 
-State.NeedToStationType = {
-	Hunger = "CookStation",
-	Energy = "RestStation",
-	Hygiene = "HygieneStation",
-	Social = "SocialStation",
-	Fun = "FunStation",
+State.NeedStationTypes = {
+	Hunger = { "CookStation", "FoodStorage" },
+	Energy = { "RestStation" },
+	Hygiene = { "HygieneStation" },
+	Social = { "SocialStation" },
+	Fun = { "FunStation" },
 }
 
-State.SurvivalNeeds = {
+State.NeedToStationType = {}
+for needName, stationList in pairs(State.NeedStationTypes) do
+	local primary = stationList[1]
+	if primary then
+		State.NeedToStationType[needName] = primary
+	end
+end
+
+local SURVIVAL_NEEDS = table.freeze({
 	Hunger = true,
 	Energy = true,
-}
+})
+
+State.SurvivalNeeds = SURVIVAL_NEEDS
 
 State.NeedPrioritySeed = { "Hunger", "Energy", "Hygiene", "Social", "Fun" }
 State.NeedEvaluationOrder = {} :: { string }
@@ -52,6 +63,16 @@ State.MissingStationPhrases = {
 	},
 }
 
+State.PowerOutagePhrases = {
+	Hunger = {
+		"No power means no dinner... this outage is rough.",
+		"Can't cook anything while the lights are out.",
+	},
+	_default = {
+		"Can't do that while the power's out...",
+	},
+}
+
 State.ResidentCooldowns = setmetatable({} :: { [ResidentState]: { [string]: number } }, { __mode = "k" })
 State.ResidentPending = setmetatable({} :: { [ResidentState]: string? }, { __mode = "k" })
 State.ResidentNextEvaluation = setmetatable({} :: { [ResidentState]: number }, { __mode = "k" })
@@ -59,9 +80,14 @@ State.ResidentLastRoam = setmetatable({} :: { [ResidentState]: number }, { __mod
 State.ResidentLastJog = setmetatable({} :: { [ResidentState]: number }, { __mode = "k" })
 State.NonSurvivalSuppressed = setmetatable({} :: { [ResidentState]: { [string]: number } }, { __mode = "k" })
 State.MissingStationComplaints = setmetatable({} :: { [ResidentState]: { [string]: boolean } }, { __mode = "k" })
+State.PowerOutageComplaints = setmetatable({} :: { [ResidentState]: { [string]: boolean } }, { __mode = "k" })
 State.StationIteratorState = {} :: { [number]: { [string]: { version: number, order: { string }, index: number } } }
 State.ItemSpecCache = {} :: { [string]: { [string]: any }? }
 State.SurvivalUnavailable = setmetatable({} :: { [ResidentState]: { [string]: boolean } }, { __mode = "k" })
+State.PendingStationReservations = setmetatable({} :: { [ResidentState]: { StationReservation } }, { __mode = "k" })
+State.InterruptedNeedDelays = setmetatable({} :: { [ResidentState]: { [string]: number } }, { __mode = "k" })
+State.ForcedNeedPriorities =
+	setmetatable({} :: { [ResidentState]: { Need: string, ExpiresAt: number } }, { __mode = "k" })
 
 State.SecondsPerFullDayCached = TimeScale.GetSecondsPerFullDay()
 State.NeedCooldownSeconds = {} :: { [string]: number }
@@ -79,6 +105,18 @@ end
 
 function State.getCircadian()
 	return NeedConfig.Circadian
+end
+
+function State.getStationTypesForNeed(needName: string): { string }
+	local configured = State.NeedStationTypes[needName]
+	if configured then
+		return configured
+	end
+	local single = State.NeedToStationType[needName]
+	if single then
+		return { single }
+	end
+	return {}
 end
 
 function State.rebuildNeedEvaluationOrder()
@@ -139,6 +177,8 @@ end
 function State.setNeedCooldown(resident: ResidentState, needName: string)
 	local entry = getOrCreateCooldowns(resident)
 	entry[needName] = os.clock()
+	State.clearInterruptedNeed(resident, needName)
+	State.clearForcedNeed(resident, needName)
 end
 
 function State.isNeedOnCooldown(resident: ResidentState, needName: string, cooldownSeconds: number, nowClock: number)
@@ -203,6 +243,15 @@ local function getOrCreateMissingComplaints(resident: ResidentState)
 	return entry
 end
 
+local function getOrCreatePowerOutageComplaints(resident: ResidentState)
+	local entry = State.PowerOutageComplaints[resident]
+	if not entry then
+		entry = {}
+		State.PowerOutageComplaints[resident] = entry
+	end
+	return entry
+end
+
 local function getOrCreateSurvivalUnavailable(resident: ResidentState)
 	local entry = State.SurvivalUnavailable[resident]
 	if not entry then
@@ -224,6 +273,30 @@ end
 
 function State.getMissingStationPhrases(needName: string)
 	return State.MissingStationPhrases[needName] or State.MissingStationPhrases._default
+end
+
+function State.getPowerOutagePhrases(needName: string)
+	return State.PowerOutagePhrases[needName] or State.PowerOutagePhrases._default
+end
+
+function State.didComplainPowerOutage(resident: ResidentState, needName: string): boolean
+	local entry = State.PowerOutageComplaints[resident]
+	return entry ~= nil and entry[needName] == true
+end
+
+function State.markPowerOutageComplaint(resident: ResidentState, needName: string)
+	local entry = getOrCreatePowerOutageComplaints(resident)
+	entry[needName] = true
+end
+
+function State.clearPowerOutageComplaint(resident: ResidentState, needName: string)
+	local entry = State.PowerOutageComplaints[resident]
+	if entry then
+		entry[needName] = nil
+		if next(entry) == nil then
+			State.PowerOutageComplaints[resident] = nil
+		end
+	end
 end
 
 function State.markSurvivalNeedUnavailable(resident: ResidentState, needName: string)
@@ -256,6 +329,60 @@ end
 
 function State.getPending(resident: ResidentState): string?
 	return State.ResidentPending[resident]
+end
+
+local function getOrCreateReservationList(resident: ResidentState): { StationReservation }
+	local list = State.PendingStationReservations[resident]
+	if not list then
+		list = {}
+		State.PendingStationReservations[resident] = list
+	end
+	return list
+end
+
+function State.addPendingStationReservation(resident: ResidentState, stationRecord: any, residentName: string)
+	if not stationRecord or residentName == "" then
+		return
+	end
+	local list = getOrCreateReservationList(resident)
+	list[#list + 1] = {
+		Station = stationRecord,
+		ResidentName = residentName,
+	}
+end
+
+function State.consumePendingStationReservation(
+	resident: ResidentState,
+	stationRecord: any,
+	residentName: string
+): StationReservation?
+	local list = State.PendingStationReservations[resident]
+	if not list then
+		return nil
+	end
+	for index = #list, 1, -1 do
+		local entry = list[index]
+		if entry.Station == stationRecord and entry.ResidentName == residentName then
+			table.remove(list, index)
+			if #list == 0 then
+				State.PendingStationReservations[resident] = nil
+			end
+			return entry
+		end
+	end
+	return nil
+end
+
+function State.releasePendingStationReservations(resident: ResidentState, releaseFn: (any, string) -> ())
+	local list = State.PendingStationReservations[resident]
+	if not list then
+		return
+	end
+	State.PendingStationReservations[resident] = nil
+	for index = #list, 1, -1 do
+		local entry = list[index]
+		releaseFn(entry.Station, entry.ResidentName)
+	end
 end
 
 function State.setNextEvaluation(resident: ResidentState, when: number)
@@ -329,6 +456,96 @@ function State.computeNextEvaluationDelay(resident: ResidentState): number
 		end
 	end
 	return clamped
+end
+
+local function getOrCreateInterrupted(resident: ResidentState)
+	local entry = State.InterruptedNeedDelays[resident]
+	if not entry then
+		entry = {}
+		State.InterruptedNeedDelays[resident] = entry
+	end
+	return entry
+end
+
+function State.registerInterruptedNeed(resident: ResidentState, needName: string, nowClock: number?)
+	local duration = Constants.INTERRUPTED_NEED_RETRY_SECONDS
+	if duration <= 0 then
+		return
+	end
+	local now = nowClock or os.clock()
+	local entry = getOrCreateInterrupted(resident)
+	entry[needName] = now + duration
+end
+
+local function cleanupInterruptedEntry(resident: ResidentState, entry: { [string]: number })
+	if next(entry) == nil then
+		State.InterruptedNeedDelays[resident] = nil
+	end
+end
+
+function State.clearInterruptedNeed(resident: ResidentState, needName: string)
+	local entry = State.InterruptedNeedDelays[resident]
+	if not entry then
+		return
+	end
+	entry[needName] = nil
+	cleanupInterruptedEntry(resident, entry)
+end
+
+function State.shouldBlockInterruptedNeed(resident: ResidentState, needName: string, nowClock: number): boolean
+	local entry = State.InterruptedNeedDelays[resident]
+	if not entry then
+		return false
+	end
+	local expire = entry[needName]
+	if not expire then
+		return false
+	end
+	if nowClock >= expire then
+		entry[needName] = nil
+		cleanupInterruptedEntry(resident, entry)
+		return false
+	end
+	return true
+end
+
+local function setForcedNeedEntry(resident: ResidentState, needName: string, nowClock: number)
+	local timeout = math.max(Constants.FORCED_NEED_TIMEOUT_SECONDS, 0)
+	local expiresAt = if timeout > 0 then nowClock + timeout else math.huge
+	State.ForcedNeedPriorities[resident] = {
+		Need = needName,
+		ExpiresAt = expiresAt,
+	}
+end
+
+function State.setForcedNeed(resident: ResidentState, needName: string, nowClock: number?)
+	if needName == "" then
+		return
+	end
+	local now = nowClock or os.clock()
+	setForcedNeedEntry(resident, needName, now)
+end
+
+function State.getForcedNeed(resident: ResidentState, nowClock: number): string?
+	local entry = State.ForcedNeedPriorities[resident]
+	if not entry then
+		return nil
+	end
+	if nowClock >= entry.ExpiresAt then
+		State.ForcedNeedPriorities[resident] = nil
+		return nil
+	end
+	return entry.Need
+end
+
+function State.clearForcedNeed(resident: ResidentState, needName: string?)
+	local entry = State.ForcedNeedPriorities[resident]
+	if not entry then
+		return
+	end
+	if needName == nil or entry.Need == needName then
+		State.ForcedNeedPriorities[resident] = nil
+	end
 end
 
 State.refreshNeedCooldowns()

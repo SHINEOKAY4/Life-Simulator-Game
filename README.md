@@ -65,13 +65,13 @@ Players can also **intervene directly** using the **Direct Action System** — s
 - Residents qualify for higher-paying careers as stats grow:  
   - Intelligence and Discipline unlock Office Assistant → Junior Programmer  
   - Fitness and Social unlock Fitness Trainer  
-- Furniture diversity: Standard Bed ($500), Stove ($200), Refridgerator ($250), Big Wooden Table ($300), Lamp ($75)  
+- Furniture diversity: Standard Bed ($500), Stove ($200), Refridgerator ($250 storage), Big Wooden Table ($300), Lamp ($75)  
 - Billing costs increase with plot expansion and powered appliances  
 
 ### Gameplay Depth
 
 - Players balance multiple Residents' needs across stations  
-- Station efficiency matters: Refridgerator (16s cook) vs Campfire (60s cook)  
+- Kitchen planning matters: pair Stoves for cooking throughput, Refridgerator storage to stage ingredients, and Campfire as the slow fallback  
 - **Direct Action System** shifts role:  
   - Less emergency intervention, more strategic optimization  
   - Queue actions to prevent need decay before it becomes critical  

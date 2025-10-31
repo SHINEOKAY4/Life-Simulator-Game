@@ -4,15 +4,13 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ProximityPromptService = game:GetService("ProximityPromptService")
 
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local PromptWidgetBinder = require(script.Parent.PromptWidgetBinder)
 local StorageBillboardUI = require(script.Parent.Parent.UserInterface.StorageBillboardUI)
 
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-
 local StorageInteractionController = {}
 
 export type TrackedModel = {
@@ -33,167 +31,6 @@ local plotChildAwaiter: RBXScriptConnection? = nil
 local currentContainerFolder: Instance? = nil
 local currentPlotIndex: number? = nil
 
-local promptWidgets: { [ProximityPrompt]: BillboardGui } = {}
-local promptWidgetSuppressed: { [ProximityPrompt]: boolean } = {}
-local promptEventsBound = false
-
-local function applyCircleStyling(frame: Frame)
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(1, 0)
-	corner.Parent = frame
-
-	local stroke = Instance.new("UIStroke")
-	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
-	stroke.Thickness = 2
-	stroke.Color = Color3.fromRGB(255, 255, 255)
-	stroke.Transparency = 0.15
-	stroke.Parent = frame
-end
-
-local function createPromptWidget(prompt: ProximityPrompt): BillboardGui?
-	local adornee = prompt.Parent
-	if not adornee or not adornee:IsA("BasePart") then
-		return nil
-	end
-
-	local existing = promptWidgets[prompt]
-	if existing then
-		existing.Adornee = adornee
-		return existing
-	end
-
-	local gui = Instance.new("BillboardGui")
-	gui.Name = "StoragePromptRing"
-	gui.AlwaysOnTop = true
-	gui.LightInfluence = 0
-	gui.MaxDistance = math.max(prompt.MaxActivationDistance + 20, 25)
-	gui.Size = UDim2.fromOffset(120, 120)
-	gui.StudsOffsetWorldSpace = Vector3.new(0, 3.25, 0)
-	gui.Enabled = false
-	gui.Adornee = adornee
-	gui.Parent = PlayerGui
-
-	local root = Instance.new("Frame")
-	root.Name = "Root"
-	root.BackgroundTransparency = 1
-	root.Size = UDim2.fromScale(1, 1)
-	root.Parent = gui
-
-	local keyRing = Instance.new("Frame")
-	keyRing.Name = "KeyRing"
-	keyRing.AnchorPoint = Vector2.new(0.5, 0)
-	keyRing.Position = UDim2.fromScale(0.5, 0)
-	keyRing.Size = UDim2.fromOffset(40, 40)
-	keyRing.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	keyRing.BackgroundTransparency = 0.1
-	keyRing.Parent = root
-	applyCircleStyling(keyRing)
-
-	local keyText = Instance.new("TextLabel")
-	keyText.Name = "KeyText"
-	keyText.AnchorPoint = Vector2.new(0.5, 0.5)
-	keyText.Position = UDim2.fromScale(0.5, 0.5)
-	keyText.BackgroundTransparency = 1
-	keyText.Font = Enum.Font.GothamBold
-	keyText.TextSize = 18
-	keyText.TextColor3 = Color3.fromRGB(28, 32, 44)
-	keyText.Text = ""
-	keyText.Parent = keyRing
-
-	local actionLabel = Instance.new("TextLabel")
-	actionLabel.Name = "ActionLabel"
-	actionLabel.AnchorPoint = Vector2.new(0.5, 0)
-	actionLabel.Position = UDim2.new(0.5, 0, 0, 48)
-	actionLabel.Size = UDim2.fromOffset(0, 0)
-	actionLabel.AutomaticSize = Enum.AutomaticSize.XY
-	actionLabel.BackgroundTransparency = 1
-	actionLabel.Font = Enum.Font.GothamBold
-	actionLabel.TextSize = 16
-	actionLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	actionLabel.Text = prompt.ActionText ~= "" and prompt.ActionText or "Open"
-	actionLabel.TextXAlignment = Enum.TextXAlignment.Center
-	actionLabel.TextYAlignment = Enum.TextYAlignment.Top
-	actionLabel.Parent = root
-
-	promptWidgets[prompt] = gui
-	return gui
-end
-
-local function updatePromptWidget(prompt: ProximityPrompt, inputType: Enum.ProximityPromptInputType?)
-	local widget = promptWidgets[prompt]
-	if not widget then
-		return
-	end
-	local root = widget:FindFirstChild("Root")
-	if not root or not root:IsA("Frame") then
-		return
-	end
-
-	local keyRing = root:FindFirstChild("KeyRing")
-	local keyText = keyRing and keyRing:FindFirstChild("KeyText")
-	local actionLabel = root:FindFirstChild("ActionLabel")
-
-	if keyRing and keyRing:IsA("Frame") and keyText and keyText:IsA("TextLabel") then
-		local displayText = ""
-		if inputType == Enum.ProximityPromptInputType.Touch then
-			displayText = "Tap"
-		elseif inputType == Enum.ProximityPromptInputType.Gamepad then
-			displayText = prompt.GamepadKeyCode.Name
-		else
-			displayText = prompt.KeyboardKeyCode.Name
-		end
-		displayText = displayText ~= "" and displayText or ""
-		keyText.Text = displayText
-	end
-
-	if actionLabel and actionLabel:IsA("TextLabel") then
-		actionLabel.Text = prompt.ActionText ~= "" and prompt.ActionText or "Open"
-	end
-
-	local adornee = prompt.Parent
-	if adornee and adornee:IsA("BasePart") then
-		widget.Adornee = adornee
-	end
-end
-
-local function setPromptWidgetVisible(prompt: ProximityPrompt, shouldShow: boolean)
-	local widget = promptWidgets[prompt]
-	if not widget then
-		return
-	end
-	if promptWidgetSuppressed[prompt] then
-		widget.Enabled = false
-		return
-	end
-	widget.Enabled = shouldShow
-end
-
-local function bindPromptServiceEvents()
-	if promptEventsBound then
-		return
-	end
-	promptEventsBound = true
-
-	ProximityPromptService.PromptShown:Connect(
-		function(prompt: ProximityPrompt, inputType: Enum.ProximityPromptInputType)
-			local tracked = trackedByPrompt[prompt]
-			if not tracked then
-				return
-			end
-			createPromptWidget(prompt)
-			updatePromptWidget(prompt, inputType)
-			setPromptWidgetVisible(prompt, true)
-		end
-	)
-
-	ProximityPromptService.PromptHidden:Connect(function(prompt: ProximityPrompt)
-		setPromptWidgetVisible(prompt, false)
-	end)
-
-	ProximityPromptService.PromptTriggered:Connect(function(prompt: ProximityPrompt)
-		setPromptWidgetVisible(prompt, false)
-	end)
-end
 local function findInteractPart(model: Model): BasePart?
 	if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
 		return model.PrimaryPart
@@ -228,12 +65,7 @@ local function cleanupModel(model: Model)
 		connection:Disconnect()
 	end
 	tracked.Prompt.Style = tracked.DefaultStyle
-	local widget = promptWidgets[tracked.Prompt]
-	if widget then
-		widget:Destroy()
-		promptWidgets[tracked.Prompt] = nil
-	end
-	promptWidgetSuppressed[tracked.Prompt] = nil
+	PromptWidgetBinder.Detach(tracked.Prompt)
 	if tracked.CreatedPrompt then
 		tracked.Prompt:Destroy()
 	else
@@ -347,8 +179,8 @@ local function registerModel(model: Model)
 	trackedByContainerId[containerId] = record
 	trackedByPrompt[prompt] = record
 	promptByContainerId[containerId] = prompt
-	createPromptWidget(prompt)
-	updatePromptWidget(prompt, nil)
+	PromptWidgetBinder.Attach(prompt)
+	PromptWidgetBinder.Refresh(prompt)
 end
 
 local function unbindContainerFolder()
@@ -439,7 +271,6 @@ local function rebindPlot(plotIndex: number?)
 end
 
 function StorageInteractionController.Init()
-	bindPromptServiceEvents()
 	StorageBillboardUI.VisibilityChanged:Connect(function(containerId: string, isVisible: boolean)
 		local prompt = promptByContainerId[containerId]
 		local tracked = trackedByContainerId[containerId]
@@ -447,11 +278,9 @@ function StorageInteractionController.Init()
 			return
 		end
 		if isVisible then
-			promptWidgetSuppressed[prompt] = true
-			setPromptWidgetVisible(prompt, false)
+			PromptWidgetBinder.SetSuppressed(prompt, true)
 		else
-			promptWidgetSuppressed[prompt] = nil
-			setPromptWidgetVisible(prompt, false)
+			PromptWidgetBinder.SetSuppressed(prompt, false)
 		end
 	end)
 	rebindPlot(LocalPlayer:GetAttribute("OwnedPlotIndex") :: number?)

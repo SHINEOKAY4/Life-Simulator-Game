@@ -66,11 +66,26 @@ local Recipes: { [string]: MealRecipe } = {
 		},
 		Tags = { "MoodBoost", "Comfort" },
 	},
+	BlueberryBreakfastBake = {
+		Id = "BlueberryBreakfastBake",
+		Name = "Blueberry Breakfast Bake",
+		Description = "Warm berry bake that turns pantry grains into a sweet boost.",
+		CookTimeSeconds = 28,
+		Servings = 2,
+		AutoConsumePortions = 1,
+		HungerRestore = 44,
+		MoodBonus = 5,
+		Ingredients = {
+			{ IngredientId = "Blueberries", Quantity = 2 },
+			{ IngredientId = "WholeGrains", Quantity = 2 },
+		},
+		Tags = { "Breakfast", "Sweet" },
+	},
 }
 
 local MealRecipes = {
 	Recipes = Recipes,
-	DefaultOrder = { "ComfortSkillet", "HeartyStew", "QuickSalad" },
+	DefaultOrder = { "ComfortSkillet", "BlueberryBreakfastBake", "HeartyStew", "QuickSalad" },
 	DefaultFallback = "QuickSalad",
 }
 
