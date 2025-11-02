@@ -128,7 +128,15 @@ local function isWithinTemplateWindow(
 	return false
 end
 
-local function shouldAttemptShift(player: Player, residentName: string, assignedShiftId: string): boolean
+local function shouldAttemptShift(
+	player: Player,
+	residentName: string,
+	resident: ResidentState,
+	assignedShiftId: string
+): boolean
+	if CareerService.IsManualShiftHoldActive(resident) then
+		return false
+	end
 	local snapshot = ShiftSchedulerService.GetShiftRuntimeSnapshot(player, residentName)
 	if snapshot then
 		if snapshot.Active then
@@ -744,7 +752,7 @@ function FallbackActions.evaluateResidentJob(
 			return false
 		end
 		local assignedShiftId = if save and typeof(save.AssignedShiftId) == "string" then save.AssignedShiftId else ""
-		if assignedShiftId ~= "" and shouldAttemptShift(player, residentName, assignedShiftId) then
+		if assignedShiftId ~= "" and shouldAttemptShift(player, residentName, resident, assignedShiftId) then
 			local success, message = CareerService.StartResidentShift(player, residentName)
 			if success then
 				return true

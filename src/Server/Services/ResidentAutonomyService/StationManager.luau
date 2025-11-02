@@ -23,6 +23,90 @@ local POWER_OUTAGE_OVERRIDE = BillingConstants.PowerOutageOverrideKey or "Billin
 
 local StationManager = {}
 
+local function resolveItemSpec(station: StationRecord)
+	local cached = State.ItemSpecCache[station.Id]
+	if cached ~= nil then
+		return cached
+	end
+	local itemSpec = ItemFinder.FindItemById(station.Id)
+	if itemSpec ~= nil then
+		State.ItemSpecCache[station.Id] = itemSpec
+	end
+	return itemSpec
+end
+
+local function computeStationCapacity(itemSpec: { [string]: any }?): number
+	local capacity = 1
+	if typeof(itemSpec) == "table" then
+		local maxOccupancy = itemSpec.maxOccupancy
+		if typeof(maxOccupancy) == "number" and maxOccupancy > 0 then
+			capacity = math.max(1, math.floor(maxOccupancy))
+		end
+	end
+	return capacity
+end
+
+local function stationHasSeatAvailable(
+	station: StationRecord,
+	residentName: string?,
+	itemSpec: { [string]: any }?
+): boolean
+	local occupants = station.Residents
+	if typeof(occupants) ~= "table" then
+		return true
+	end
+	if residentName and table.find(occupants, residentName) then
+		return true
+	end
+	local capacity = computeStationCapacity(itemSpec)
+	return #occupants < capacity
+end
+
+local function updatePowerOverride(player: Player, station: StationRecord, itemSpec: { [string]: any }?)
+	local outageActive = player:GetAttribute("BillingPowerOutageActive") == true
+	local energyPerHour = itemSpec and itemSpec.EnergyConsumptionPerHour
+	local requiresPower = typeof(energyPerHour) == "number" and energyPerHour > 0
+	if outageActive then
+		if requiresPower then
+			station.ActiveOverride = POWER_OUTAGE_OVERRIDE
+		end
+	elseif station.ActiveOverride == POWER_OUTAGE_OVERRIDE then
+		station.ActiveOverride = nil
+	end
+end
+
+function StationManager.hasVacantStation(
+	player: Player,
+	stationType: string,
+	residentName: string?,
+	stationCacheOverride: { [string]: any }?
+): boolean
+	if not player then
+		return false
+	end
+	local stationCache = stationCacheOverride or PlotService.GetStationsForPlayer(player)
+	local stationMap = stationCache[stationType] :: { [string]: StationRecord }?
+	if not stationMap then
+		return false
+	end
+	if next(stationMap) == nil then
+		return false
+	end
+	for _, station in pairs(stationMap) do
+		if station then
+			local itemSpec = resolveItemSpec(station)
+			updatePowerOverride(player, station, itemSpec)
+			local activeOverride = station.ActiveOverride
+			if activeOverride == nil or (residentName and activeOverride == residentName) then
+				if stationHasSeatAvailable(station, residentName, itemSpec) then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
 local function resolveStationModelForPlayer(player: Player, uniqueId: string): Model?
 	local plotIndex = player:GetAttribute("OwnedPlotIndex")
 	if typeof(plotIndex) ~= "number" then
@@ -116,7 +200,6 @@ function StationManager.findAvailableStation(
 	if total == 0 then
 		return nil, nil, nil, nil
 	end
-	local outageActive = player:GetAttribute("BillingPowerOutageActive") == true
 	for _ = 1, total do
 		local uniqueId = order[iterator.index]
 		iterator.index += 1
@@ -126,41 +209,25 @@ function StationManager.findAvailableStation(
 		if uniqueId and stationMap then
 			local station = stationMap[uniqueId] :: StationRecord?
 			if station and not table.find(station.Residents, residentName) then
-				local itemSpec = State.ItemSpecCache[station.Id]
-				if itemSpec == nil then
-					itemSpec = ItemFinder.FindItemById(station.Id)
-					if itemSpec then
-						State.ItemSpecCache[station.Id] = itemSpec
-					end
-				end
+				local itemSpec = resolveItemSpec(station)
 				if itemSpec then
-					if outageActive then
-						local energyPerHour = itemSpec.EnergyConsumptionPerHour
-						if typeof(energyPerHour) == "number" and energyPerHour > 0 then
-							station.ActiveOverride = POWER_OUTAGE_OVERRIDE
-						end
-					elseif station.ActiveOverride == POWER_OUTAGE_OVERRIDE then
-						station.ActiveOverride = nil
-					end
+					updatePowerOverride(player, station, itemSpec)
+				else
+					updatePowerOverride(player, station, nil)
+				end
 
-					local activeOverride = station.ActiveOverride
-					if activeOverride == nil or activeOverride == residentName then
-						local capacity = 1
-						local maxOccupancy = itemSpec.maxOccupancy
-						if typeof(maxOccupancy) == "number" and maxOccupancy > 0 then
-							capacity = math.max(1, math.floor(maxOccupancy))
+				local activeOverride = station.ActiveOverride
+				if activeOverride == nil or activeOverride == residentName then
+					if stationHasSeatAvailable(station, residentName, itemSpec) then
+						if not station.Model then
+							station.Model = resolveStationModelForPlayer(player, uniqueId)
 						end
-						if #station.Residents < capacity then
-							if not station.Model then
-								station.Model = resolveStationModelForPlayer(player, uniqueId)
+						local model = station.Model
+						if model then
+							if filter and not filter(uniqueId, station, itemSpec, model) then
+								continue
 							end
-							local model = station.Model
-							if model then
-								if filter and not filter(uniqueId, station, itemSpec, model) then
-									continue
-								end
-								return uniqueId, station, itemSpec, model
-							end
+							return uniqueId, station, itemSpec, model
 						end
 					end
 				end

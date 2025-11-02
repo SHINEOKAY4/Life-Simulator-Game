@@ -65,6 +65,7 @@ export type Behavior = {
 	RestProfileKey: string?,
 	EndReasonProvider: ((residentState: any) -> string?)?,
 	EmergencyGuards: { [string]: (residentState: any, value: number, def: any) -> boolean }?,
+	AllowNonSurvivalInterrupts: boolean?,
 }
 
 export type BehaviorSpec = {
@@ -80,6 +81,7 @@ export type BehaviorSpec = {
 	RestProfileKey: string?,
 	EndReasonProvider: ((residentState: any) -> string?)?,
 	EmergencyGuards: { [string]: (residentState: any, value: number, def: any) -> boolean }?,
+	AllowNonSurvivalInterrupts: boolean?,
 }
 
 return nil

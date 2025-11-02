@@ -186,6 +186,31 @@ local function ensureCareerFields(save: any)
 	end
 end
 
+local function getManualShiftHold(residentState: any): number?
+	local holdUntil = residentState._CareerManualHoldUntil
+	if typeof(holdUntil) ~= "number" then
+		return nil
+	end
+	local now = Workspace:GetServerTimeNow()
+	if holdUntil <= now then
+		residentState._CareerManualHoldUntil = nil
+		return nil
+	end
+	return holdUntil
+end
+
+local function setManualShiftHold(residentState: any, holdUntil: number?)
+	if typeof(holdUntil) == "number" and holdUntil > Workspace:GetServerTimeNow() then
+		residentState._CareerManualHoldUntil = holdUntil
+	else
+		residentState._CareerManualHoldUntil = nil
+	end
+end
+
+local function clearManualShiftHold(residentState: any)
+	residentState._CareerManualHoldUntil = nil
+end
+
 local function clockBaselineHours(): number
 	return (tonumber(Lighting:GetAttribute("StartClockTime")) or 16.5) % 24
 end
@@ -489,6 +514,21 @@ function CareerService.Init()
 		end
 		if residentState.IsOnShift then
 			payload.Confirm({ Outcome = "Skipped", Reason = "AlreadyOnShift" })
+			return
+		end
+		if CareerService.IsManualShiftHoldActive(residentState) then
+			local holdUntil = CareerService.GetManualShiftHoldUntil(residentState)
+			payload.Confirm({ Outcome = "Skipped", Reason = "ManualHold" })
+			local message = string.format("%s is taking personal time right now.", residentName)
+			if holdUntil then
+				local readable = formatClockFromServerSeconds(holdUntil)
+				if readable then
+					message = string.format("%s is off-duty until %s.", residentName, readable)
+				else
+					message = string.format("%s is off-duty for the rest of this shift window.", residentName)
+				end
+			end
+			sendShiftNotice(player, residentName, shift, "ManualHold", payload.StartServerTime, message)
 			return
 		end
 		local success, message = CareerService.StartResidentShift(player, residentName, { Source = "Scheduler" })
@@ -955,6 +995,7 @@ function CareerService.StartResidentShift(
 		ForcedReason = nil,
 	}
 	shiftMap[residentName] = shiftRecord
+	clearManualShiftHold(residentState)
 	shiftRecord.EnergyConnection = residentState.NeedsChanged:Connect(function(needName: string, newValue: number)
 		if needName ~= "Energy" then
 			return
@@ -1085,6 +1126,24 @@ function CareerService.StopResidentShift(
 		end
 	end
 
+	if isSchedulerSource(options) then
+		clearManualShiftHold(residentState)
+	else
+		local holdUntil: number? = nil
+		local snapshot = ShiftSchedulerService.GetShiftRuntimeSnapshot(player, residentName)
+		if snapshot then
+			if snapshot.ActiveEndTime and snapshot.ActiveEndTime > nowServer then
+				holdUntil = snapshot.ActiveEndTime
+			elseif snapshot.WindowEndTime and snapshot.WindowEndTime > nowServer then
+				holdUntil = snapshot.WindowEndTime
+			end
+		end
+		if holdUntil == nil then
+			holdUntil = nowServer + secondsPerInGameMinute() * 5
+		end
+		setManualShiftHold(residentState, holdUntil)
+	end
+
 	print(
 		string.format(
 			"[CareerService] Shift complete for %s (%s): minutes=%.2f estimated=$%d reason=%s",
@@ -1099,6 +1158,14 @@ function CareerService.StopResidentShift(
 		ShiftSchedulerService.NotifyClockOut(player, residentName)
 	end
 	return true, message, estimatedPayout
+end
+
+function CareerService.GetManualShiftHoldUntil(residentState: any): number?
+	return getManualShiftHold(residentState)
+end
+
+function CareerService.IsManualShiftHoldActive(residentState: any): boolean
+	return getManualShiftHold(residentState) ~= nil
 end
 
 return CareerService

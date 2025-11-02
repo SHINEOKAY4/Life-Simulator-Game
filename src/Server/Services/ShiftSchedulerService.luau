@@ -552,11 +552,17 @@ function ShiftSchedulerService.NotifyClockIn(player: Player, residentName: strin
 	runtime.Player = player
 	runtime.Active = true
 	runtime.AutoManaged = false
-	runtime.ActiveStartTime = Workspace:GetServerTimeNow()
+	local startTime = Workspace:GetServerTimeNow()
+	runtime.ActiveStartTime = startTime
 	cancelEvent(runtime.NextReminderEvent)
 	cancelEvent(runtime.NextStartEvent)
 	runtime.NextReminderEvent = nil
 	runtime.NextStartEvent = nil
+	if runtime.Template then
+		scheduleEnd(runtime, startTime, nil)
+	else
+		runtime.ActiveEndEvent = nil
+	end
 end
 
 function ShiftSchedulerService.NotifyClockOut(player: Player, residentName: string)

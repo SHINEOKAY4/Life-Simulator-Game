@@ -11,6 +11,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
 local ResidentChat = require(ServerScriptService.Server.Utilities.ResidentChat)
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
+local StationManager = require(ServerScriptService.Server.Services.ResidentAutonomyService.StationManager)
 local AutonomyState = require(ServerScriptService.Server.Services.ResidentAutonomyService.State)
 local AutonomyUtils = require(ServerScriptService.Server.Services.ResidentAutonomyService.Utils)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
@@ -67,6 +68,7 @@ type Behavior = {
 	ChatPhrases: { ResidentChat.ChatOption }?,
 	EndReasonProvider: ((residentState: any) -> string?)?,
 	EmergencyGuards: { [string]: EmergencyGuard }?,
+	AllowNonSurvivalInterrupts: boolean?,
 }
 
 local NeedEffects = {}
@@ -231,11 +233,12 @@ end
 
 local function evaluateEmergencyNeeds(
 	residentState: any,
-	_targetedNeeds: { [string]: boolean },
+	targetedNeeds: { [string]: boolean },
 	positiveTargets: { [string]: boolean },
 	contextPlayer: Player?,
 	guardOverrides: { [string]: EmergencyGuard }?,
-	residentName: string?
+	residentName: string?,
+	allowNonSurvivalInterrupts: boolean
 ): (boolean, string?, string?)
 	local needsDef = NeedConfig.Needs
 	local worstNeed: string? = nil
@@ -271,7 +274,10 @@ local function evaluateEmergencyNeeds(
 			return true
 		end
 		local scope = cache[stationType]
-		return scope ~= nil and next(scope) ~= nil
+		if scope == nil or next(scope) == nil then
+			return false
+		end
+		return StationManager.hasVacantStation(contextPlayer, stationType, residentName, cache)
 	end
 
 	for needName, def in pairs(needsDef) do
@@ -281,7 +287,13 @@ local function evaluateEmergencyNeeds(
 			continue
 		end
 		local isPositiveTarget = positiveTargets[needName] == true
+		if not isPositiveTarget and targetedNeeds[needName] == true then
+			isPositiveTarget = true
+		end
 		local isSurvival = isSurvivalNeed(needName)
+		if not isSurvival and not allowNonSurvivalInterrupts then
+			continue
+		end
 		if prioritizingSurvival and not isSurvival then
 			continue
 		end
@@ -374,6 +386,7 @@ function NeedEffects.Run(
 	local releaseEffectContext: (() -> ())? = nil
 	local emergencyGuards = behavior.EmergencyGuards
 	local contextPlayer = if interruptContext then interruptContext.Player else nil
+	local allowNonSurvivalInterrupts = behavior.AllowNonSurvivalInterrupts == true
 	if effects and #effects > 0 then
 		targetedNeeds, positiveNeeds, releaseEffectContext = gatherEffectContext(effects)
 	else
@@ -587,7 +600,8 @@ function NeedEffects.Run(
 			positiveNeeds,
 			contextPlayer,
 			emergencyGuards,
-			residentName
+			residentName,
+			allowNonSurvivalInterrupts
 		)
 		if emergency and emergencyReason then
 			emitEmergency(emergencyReason, emergencyNeed)

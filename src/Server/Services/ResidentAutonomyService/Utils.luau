@@ -13,12 +13,23 @@ export type ResidentState = any
 
 local Utils = {}
 
-local function hasStationsForNeed(cache: { [string]: any }?, stationType: string): boolean
+local function hasStationsForNeed(
+	player: Player?,
+	cache: { [string]: any }?,
+	stationType: string,
+	residentName: string?
+): boolean
 	if not cache then
 		return false
 	end
 	local scope = cache[stationType]
-	return scope ~= nil and next(scope) ~= nil
+	if scope == nil or next(scope) == nil then
+		return false
+	end
+	if player == nil then
+		return true
+	end
+	return StationManager.hasVacantStation(player, stationType, residentName, cache)
 end
 
 local function hungerHasActionablePath(player: Player?, cache: { [string]: any }?, residentName: string?): boolean
@@ -49,7 +60,7 @@ local function hungerHasActionablePath(player: Player?, cache: { [string]: any }
 		if not stationType then
 			return false
 		end
-		if not hasStationsForNeed(cache, stationType) then
+		if not hasStationsForNeed(player, cache, stationType, residentName) then
 			return false
 		end
 		local uniqueId = StationManager.findAvailableStation(player, stationType, residentId, cache, filter)
@@ -165,7 +176,7 @@ function Utils.hasBlockingCriticalNeed(
 								end
 								actionable = hungerActionable == true
 							else
-								actionable = hasStationsForNeed(cache, stationType)
+								actionable = hasStationsForNeed(player, cache, stationType, residentName)
 							end
 							if actionable or forcedNeedName == needName then
 								return true
@@ -177,7 +188,7 @@ function Utils.hasBlockingCriticalNeed(
 						if not DirectActionService.HasHandler(stationType) then
 							return true
 						end
-						if cache and hasStationsForNeed(cache, stationType) then
+						if cache and hasStationsForNeed(player, cache, stationType, residentName) then
 							return true
 						end
 					else
@@ -220,7 +231,7 @@ function Utils.shouldBlockRoam(player: Player, resident: ResidentState, stationC
 							end
 							actionable = hungerActionable == true
 						else
-							actionable = hasStationsForNeed(cache, stationType)
+							actionable = hasStationsForNeed(player, cache, stationType, residentName)
 						end
 						if actionable or forcedNeedName == needName then
 							return true
@@ -229,7 +240,10 @@ function Utils.shouldBlockRoam(player: Player, resident: ResidentState, stationC
 				end
 			else
 				if stationType then
-					if DirectActionService.HasHandler(stationType) and hasStationsForNeed(cache, stationType) then
+					if
+						DirectActionService.HasHandler(stationType)
+						and hasStationsForNeed(player, cache, stationType, residentName)
+					then
 						return true
 					elseif not DirectActionService.HasHandler(stationType) then
 						return true
