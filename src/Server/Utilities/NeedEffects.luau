@@ -74,6 +74,7 @@ local EFFECT_CHANNEL = "Effects"
 local SURVIVAL_NEEDS: { [string]: boolean } = {
 	Energy = true,
 	Hunger = true,
+	Bladder = true,
 }
 
 local ABORT_ERROR_PREFIX = "NeedEffectsAborted|"
@@ -101,6 +102,7 @@ end
 
 local NEED_TO_STATION: { [string]: string } = {
 	Hunger = "CookStation",
+	Bladder = "ComfortStation",
 	Energy = "RestStation",
 	Hygiene = "HygieneStation",
 	Social = "SocialStation",

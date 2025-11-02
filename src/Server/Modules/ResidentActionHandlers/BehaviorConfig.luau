@@ -414,6 +414,7 @@ local StationActionLabels: { [string]: string } = {
 	MealStation = "share meal",
 	SocialStation = "chat",
 	HygieneStation = "wash up",
+	ComfortStation = "use restroom",
 	FunStation = "have fun",
 	FoodStorage = "grab food",
 }
@@ -426,6 +427,7 @@ local StationKindLabels: { [string]: string } = {
 	MealStation = "meal table",
 	SocialStation = "hangout",
 	HygieneStation = "sink",
+	ComfortStation = "bathroom",
 	FunStation = "fun spot",
 	FoodStorage = "storage",
 }
@@ -552,6 +554,26 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 			end
 			local threshold = math.min(def.Max, def.Low + def.Hysteresis)
 			return residentState:GetNeed("Hygiene") >= threshold
+		end,
+	},
+	ComfortStation = {
+		ApproachDistance = 3,
+		MoveTimeoutSeconds = 18,
+		DurationSeconds = 18,
+		Effects = {
+			{ Need = "Bladder", RatePerHour = 280 },
+		},
+		ChatPhrases = {
+			"I really have to go...",
+			"Excuse me for a moment!",
+		},
+		ShouldEnd = function(residentState)
+			local def = Needs.Bladder
+			if not def then
+				return false
+			end
+			local threshold = math.min(def.Max, def.Low + def.Hysteresis)
+			return residentState:GetNeed("Bladder") >= threshold
 		end,
 	},
 	FunStation = {

@@ -249,6 +249,7 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 		},
 		Needs = {
 			Hunger = 100,
+			Bladder = 100,
 			Energy = 100,
 			Hygiene = 100,
 			Fun = 100,

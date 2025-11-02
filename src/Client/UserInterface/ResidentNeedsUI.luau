@@ -19,6 +19,7 @@ local EnergyInfoBar = ResidentNeedsFrame:WaitForChild("EnergyInfoBar") :: Frame
 local FunInfoBar = ResidentNeedsFrame:WaitForChild("FunInfoBar") :: Frame
 local SocialInfoBar = ResidentNeedsFrame:WaitForChild("SocialInfoBar") :: Frame
 local HygieneInfoBar = ResidentNeedsFrame:WaitForChild("HygieneInfoBar") :: Frame
+local BladderInfoBar = ResidentNeedsFrame:WaitForChild("BladderInfoBar") :: Frame
 
 local ResidentSelectionChangedSignal = GoodSignal.new()
 
@@ -49,6 +50,7 @@ function ResidentUI.Show(residentModel: Model)
 	local fun = residentModel:GetAttribute("Fun") :: number
 	local social = residentModel:GetAttribute("Social") :: number
 	local hygiene = residentModel:GetAttribute("Hygiene") :: number
+	local bladder = residentModel:GetAttribute("Bladder") :: number
 
 	local function updateBar(infoBar: Frame, value: number)
 		local foreground = infoBar:FindFirstChild("Foreground") :: Frame
@@ -65,6 +67,7 @@ function ResidentUI.Show(residentModel: Model)
 	updateBar(FunInfoBar, fun)
 	updateBar(SocialInfoBar, social)
 	updateBar(HygieneInfoBar, hygiene)
+	updateBar(BladderInfoBar, bladder)
 	-- Connect signals to update bars when attributes change
 	workingResidents[residentModel.Name] = residentModel:GetAttribute("IsOnShift") == true
 
@@ -102,6 +105,13 @@ function ResidentUI.Show(residentModel: Model)
 		residentModel:GetAttributeChangedSignal("Hygiene"):Connect(function()
 			local newHygiene = residentModel:GetAttribute("Hygiene") :: number
 			updateBar(HygieneInfoBar, newHygiene)
+		end)
+	)
+	table.insert(
+		Connections,
+		residentModel:GetAttributeChangedSignal("Bladder"):Connect(function()
+			local newBladder = residentModel:GetAttribute("Bladder") :: number
+			updateBar(BladderInfoBar, newBladder)
 		end)
 	)
 	table.insert(

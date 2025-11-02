@@ -34,6 +34,15 @@ local FallbackActions = {}
 local roamRandom = RandomProvider.get()
 local begRandom = RandomProvider.get()
 
+local EMERGENCY_RELIEF_ACTION_NAME = "Auto:EmergencyRelief"
+local EMERGENCY_RELIEF_DURATION_SECONDS = 6
+local EMERGENCY_RELIEF_HYGIENE_PENALTY = 32
+local EMERGENCY_RELIEF_TARGET_RATIO = 0.7
+local EMERGENCY_RELIEF_CHAT_LINES = {
+	"I... couldn't hold it...",
+	"That was embarrassing...",
+}
+
 local JOG_ACTION_NAME = Constants.JOG_ACTION_NAME or "Auto:Jog"
 local JOG_MIN_INTERVAL_SECONDS = math.max(Constants.JOG_MIN_INTERVAL_SECONDS or 0, 0)
 local JOG_DURATION_SECONDS = math.max(Constants.JOG_DURATION_SECONDS or 30, 10)
@@ -41,7 +50,6 @@ local JOG_TICK_INTERVAL = math.max(Constants.JOG_TICK_INTERVAL or 3, 1)
 local JOG_FUN_PER_TICK = math.max(Constants.JOG_FUN_PER_TICK or 6, 1)
 local JOG_MOVE_SPEED_MULTIPLIER = math.max(Constants.JOG_MOVE_SPEED_MULTIPLIER or 1.5, 1.0)
 local JOG_MOVE_TIMEOUT_SECONDS = math.max(Constants.JOG_MOVE_TIMEOUT_SECONDS or 1, 1)
-local JOG_WAYPOINT_COUNT = math.max(Constants.JOG_WAYPOINT_COUNT or 8, 2)
 local JOG_CHAT_LINES = Constants.JOG_CHAT_LINES
 
 local BEG_ACTION_NAME = Constants.BEG_ACTION_NAME
@@ -280,7 +288,7 @@ local function chooseRoamPosition(player: Player): Vector3?
 	return nil
 end
 
-local function enqueueJogAction(player: Player, resident: ResidentState, stationCache: StationCache?): boolean
+local function enqueueJogAction(player: Player, resident: ResidentState, _stationCache: StationCache?): boolean
 	local needs = State.getNeeds()
 	local funDef = needs.Fun
 	if funDef == nil then
@@ -327,7 +335,7 @@ local function enqueueJogAction(player: Player, resident: ResidentState, station
 		local finalized = false
 		local funPausePushed = false
 
-		local function finalize(cancelled: boolean, elapsedTime: number)
+		local function finalize(_cancelled: boolean, elapsedTime: number)
 			if finalized then
 				return
 			end
@@ -457,6 +465,88 @@ local function evaluateBeggingInterrupt(
 		end
 	end
 	return nil, nil
+end
+
+local function enqueueEmergencyReliefAction(
+	player: Player,
+	resident: ResidentState,
+	stationCache: StationCache?
+): boolean
+	local needs = State.getNeeds()
+	local bladderDef = needs.Bladder
+	if bladderDef == nil then
+		return false
+	end
+
+	if not State.isSurvivalNeedUnavailable(resident, "Bladder") then
+		return false
+	end
+
+	local bladderValue = resident:GetNeed("Bladder")
+	if bladderValue > bladderDef.Critical then
+		return false
+	end
+
+	local stationType = State.NeedToStationType.Bladder
+	if stationType and hasStationForNeed(player, stationType, stationCache) then
+		return false
+	end
+
+	State.setPending(resident, EMERGENCY_RELIEF_ACTION_NAME)
+	State.clearNextEvaluation(resident)
+
+	resident:EnqueueAction(EMERGENCY_RELIEF_ACTION_NAME, function(context)
+		local cancelToken = context.CancelToken
+
+		local function cleanup()
+			State.setPending(resident, nil)
+		end
+
+		if cancelToken.Cancelled then
+			cleanup()
+			return
+		end
+
+		ResidentChat.ShowAction(resident, EMERGENCY_RELIEF_CHAT_LINES)
+
+		local deadline = os.clock() + EMERGENCY_RELIEF_DURATION_SECONDS
+		while os.clock() < deadline do
+			if cancelToken.Cancelled then
+				cleanup()
+				return
+			end
+			local remaining = deadline - os.clock()
+			if remaining <= 0 then
+				break
+			end
+			task.wait(math.min(0.5, remaining))
+		end
+
+		if cancelToken.Cancelled then
+			cleanup()
+			return
+		end
+
+		local targetValue = math.floor(bladderDef.Max * EMERGENCY_RELIEF_TARGET_RATIO + 0.5)
+		targetValue = math.clamp(targetValue, bladderDef.Min, bladderDef.Max)
+		resident:SetNeed("Bladder", targetValue)
+
+		local hygieneDef = needs.Hygiene
+		if hygieneDef then
+			local hygieneValue = resident:GetNeed("Hygiene")
+			local newHygiene =
+				math.clamp(hygieneValue - EMERGENCY_RELIEF_HYGIENE_PENALTY, hygieneDef.Min, hygieneDef.Max)
+			if newHygiene ~= hygieneValue then
+				resident:SetNeed("Hygiene", newHygiene)
+			end
+		end
+
+		State.setNeedCooldown(resident, "Bladder")
+		State.clearNextEvaluation(resident)
+		cleanup()
+	end)
+
+	return true
 end
 
 function FallbackActions.enqueueRoamAction(player: Player, residentName: string, resident: ResidentState): boolean
@@ -628,6 +718,9 @@ function FallbackActions.evaluateResidentJob(
 	resident: ResidentState,
 	stationCache: StationCache?
 ): boolean
+	if enqueueEmergencyReliefAction(player, resident, stationCache) then
+		return true
+	end
 	if not resident.AutoJobEnabled then
 		return FallbackActions.enqueueRoamAction(player, residentName, resident)
 	end

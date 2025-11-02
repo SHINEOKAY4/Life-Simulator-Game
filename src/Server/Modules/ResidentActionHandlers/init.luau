@@ -419,6 +419,7 @@ registerHandler("CookStation")
 registerHandler("MealStation")
 registerHandler("SocialStation")
 registerHandler("HygieneStation")
+registerHandler("ComfortStation")
 registerHandler("FunStation")
 registerHandler("FoodStorage")
 
