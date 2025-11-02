@@ -23,6 +23,7 @@ type MoveOptions = {
 	EnsureSeat: boolean?,
 	OccupantIndex: number?,
 	OccupantCount: number?,
+	ResidentName: string?,
 	DebugName: string?,
 }
 
@@ -375,6 +376,12 @@ type EntryAttachmentInfo = {
 	Order: number,
 }
 
+type SeatInfo = {
+	Seat: Seat,
+	Index: number?,
+	Order: number,
+}
+
 local function parseAttachmentIndex(attachment: Attachment): number?
 	local attr = attachment:GetAttribute("ResidentEntryIndex")
 	if typeof(attr) == "number" then
@@ -445,12 +452,93 @@ local function collectResidentEntryAttachments(model: Model): { EntryAttachmentI
 	return list
 end
 
-local function selectEntryAttachment(
-	attachments: { EntryAttachmentInfo },
+local SEAT_INDEX_PATTERNS = {
+	"^Seat(%d+)$",
+	"^Seat_(%d+)$",
+	"^ResidentSeat(%d+)$",
+	"^Chair(%d+)$",
+}
+
+local function parseSeatIndex(seat: Seat): number?
+	local attr = seat:GetAttribute("ResidentSeatIndex")
+	if typeof(attr) == "number" then
+		local rounded = math.floor(attr + 0.5)
+		if rounded >= 1 then
+			return rounded
+		end
+	end
+	local sharedAttr = seat:GetAttribute("ResidentEntryIndex")
+	if typeof(sharedAttr) == "number" then
+		local rounded = math.floor(sharedAttr + 0.5)
+		if rounded >= 1 then
+			return rounded
+		end
+	end
+	for _, pattern in ipairs(SEAT_INDEX_PATTERNS) do
+		local digits = string.match(seat.Name, pattern)
+		if digits ~= nil and #digits > 0 then
+			local indexValue = tonumber(digits)
+			if indexValue and indexValue >= 1 then
+				return indexValue
+			end
+		end
+	end
+	return nil
+end
+
+local function collectStationSeats(model: Model): { SeatInfo }
+	local list: { SeatInfo } = {}
+	local order = 0
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("Seat") then
+			order += 1
+			list[#list + 1] = {
+				Seat = descendant,
+				Index = parseSeatIndex(descendant),
+				Order = order,
+			}
+		end
+	end
+	table.sort(list, function(a, b)
+		local aIndex = a.Index
+		local bIndex = b.Index
+		if aIndex and bIndex then
+			if aIndex == bIndex then
+				return a.Order < b.Order
+			end
+			return aIndex < bIndex
+		elseif aIndex then
+			return true
+		elseif bIndex then
+			return false
+		end
+		return a.Order < b.Order
+	end)
+	return list
+end
+
+local function isSeatAvailableToResident(seat: Seat, residentName: string?): boolean
+	local occupant = seat.Occupant
+	if not occupant then
+		return true
+	end
+	local model = occupant.Parent
+	if model == nil then
+		return true
+	end
+	if residentName and model:IsA("Model") and model.Name == residentName then
+		return true
+	end
+	return false
+end
+
+local function selectSeatForOccupant(
+	seats: { SeatInfo },
 	occupantIndex: number?,
-	occupantCount: number?
-): Attachment?
-	if #attachments == 0 then
+	occupantCount: number?,
+	residentName: string?
+): SeatInfo?
+	if #seats == 0 then
 		return nil
 	end
 	local slotIndex = nil
@@ -461,27 +549,37 @@ local function selectEntryAttachment(
 		then math.floor(occupantCount)
 		else nil
 	if slotIndex then
-		for _, info in ipairs(attachments) do
+		local fallback: SeatInfo? = nil
+		for _, info in ipairs(seats) do
 			if info.Index == slotIndex then
-				return info.Attachment
+				if isSeatAvailableToResident(info.Seat, residentName) then
+					return info
+				end
+				fallback = fallback or info
 			end
 		end
-		if totalSlots and totalSlots <= #attachments then
+		if totalSlots and totalSlots <= #seats then
 			local wrapIndex = ((slotIndex - 1) % totalSlots) + 1
-			local candidate = attachments[wrapIndex]
+			local candidate = seats[wrapIndex]
 			if candidate then
-				return candidate.Attachment
+				if isSeatAvailableToResident(candidate.Seat, residentName) then
+					return candidate
+				end
+				fallback = fallback or candidate
 			end
 		end
-		local wrapped = ((slotIndex - 1) % #attachments) + 1
-		return attachments[wrapped].Attachment
+		if fallback then
+			return fallback
+		end
+		local wrapped = ((slotIndex - 1) % #seats) + 1
+		return seats[wrapped]
 	end
-	for _, info in ipairs(attachments) do
-		if info.Index == 1 then
-			return info.Attachment
+	for _, info in ipairs(seats) do
+		if isSeatAvailableToResident(info.Seat, residentName) then
+			return info
 		end
 	end
-	return attachments[1].Attachment
+	return seats[1]
 end
 
 local AXIS_SPECIFIER_CACHE = {} :: { [string]: string? }
@@ -537,17 +635,104 @@ local function resolveFrontVector(stationModel: Model, bboxCFrame: CFrame): (Vec
 	return localFront, worldFront
 end
 
+local function pickAttachmentForSlot(
+	attachments: { EntryAttachmentInfo },
+	preferredIndex: number?,
+	fallbackIndex: number?
+): Attachment?
+	if #attachments == 0 then
+		return nil
+	end
+	local function findByIndex(searched: number?): Attachment?
+		if not searched then
+			return nil
+		end
+		for _, info in ipairs(attachments) do
+			if info.Index == searched then
+				return info.Attachment
+			end
+		end
+		return nil
+	end
+	local attachment = findByIndex(preferredIndex)
+	if attachment then
+		return attachment
+	end
+	attachment = findByIndex(fallbackIndex)
+	if attachment then
+		return attachment
+	end
+	for _, info in ipairs(attachments) do
+		if info.Index == 1 then
+			return info.Attachment
+		end
+	end
+	return attachments[1].Attachment
+end
+
 local function computeEntryInfo(
 	stationModel: Model,
 	approachDistance: number?,
 	moveOpts: MoveOptions?
-): (CFrame, Attachment?)
-	local attachments = collectResidentEntryAttachments(stationModel)
+): (CFrame, Attachment?, Seat?)
 	local occupantIndex = moveOpts and moveOpts.OccupantIndex or nil
 	local occupantCount = moveOpts and moveOpts.OccupantCount or nil
-	local attachment = selectEntryAttachment(attachments, occupantIndex, occupantCount)
-	if attachment then
-		local attachmentOffsetAttr = attachment:GetAttribute("ResidentEntryOffset")
+	local residentName = moveOpts and moveOpts.ResidentName or nil
+
+	local attachments = collectResidentEntryAttachments(stationModel)
+	local seats = collectStationSeats(stationModel)
+	local seatInfo = if #seats > 0
+		then selectSeatForOccupant(seats, occupantIndex, occupantCount, residentName)
+		else nil
+
+	local desiredAttachment = nil :: Attachment?
+	if #attachments > 0 then
+		local preferredIndex = if seatInfo and seatInfo.Index then seatInfo.Index else occupantIndex
+		desiredAttachment = pickAttachmentForSlot(attachments, preferredIndex, occupantIndex)
+	end
+
+	if seatInfo then
+		local seat = seatInfo.Seat
+		local seatAttachment = desiredAttachment
+		if seatAttachment then
+			local attachmentOffsetAttr = seatAttachment:GetAttribute("ResidentEntryOffset")
+			local stationOffsetAttr = stationModel:GetAttribute("ResidentEntryOffset")
+			local offsetMagnitude = nil
+			if typeof(attachmentOffsetAttr) == "number" then
+				offsetMagnitude = attachmentOffsetAttr
+			elseif typeof(stationOffsetAttr) == "number" then
+				offsetMagnitude = stationOffsetAttr
+			end
+			if offsetMagnitude and offsetMagnitude ~= 0 then
+				return seatAttachment.WorldCFrame * CFrame.new(0, 0, -offsetMagnitude), seatAttachment, seat
+			end
+			return seatAttachment.WorldCFrame, seatAttachment, seat
+		end
+		local approach = if approachDistance then math.max(approachDistance, 0) else 3
+		local seatCFrame = seat.CFrame
+		local seatLook = seatCFrame.LookVector
+		if seatLook.Magnitude == 0 then
+			seatLook = Vector3.new(0, 0, -1)
+		else
+			seatLook = seatLook.Unit
+		end
+		local seatUp = seatCFrame.UpVector
+		if seatUp.Magnitude == 0 then
+			seatUp = Vector3.new(0, 1, 0)
+		else
+			seatUp = seatUp.Unit
+		end
+		local seatDepth = seat.Size.Z
+		local offsetDistance = approach + seatDepth * 0.5
+		local entryPosition = seatCFrame.Position - seatLook * offsetDistance
+		local seatBottom = seatCFrame.Position - seatUp * (seat.Size.Y * 0.5)
+		entryPosition = Vector3.new(entryPosition.X, seatBottom.Y, entryPosition.Z)
+		local entryCFrame = CFrame.new(entryPosition, seatCFrame.Position)
+		return entryCFrame, nil, seat
+	end
+
+	if desiredAttachment then
+		local attachmentOffsetAttr = desiredAttachment:GetAttribute("ResidentEntryOffset")
 		local stationOffsetAttr = stationModel:GetAttribute("ResidentEntryOffset")
 		local offsetMagnitude = nil
 		if typeof(attachmentOffsetAttr) == "number" then
@@ -556,10 +741,11 @@ local function computeEntryInfo(
 			offsetMagnitude = stationOffsetAttr
 		end
 		if offsetMagnitude and offsetMagnitude ~= 0 then
-			return attachment.WorldCFrame * CFrame.new(0, 0, -offsetMagnitude), attachment
+			return desiredAttachment.WorldCFrame * CFrame.new(0, 0, -offsetMagnitude), desiredAttachment, nil
 		end
-		return attachment.WorldCFrame, attachment
+		return desiredAttachment.WorldCFrame, desiredAttachment, nil
 	end
+
 	local bboxCFrame, bboxSize = stationModel:GetBoundingBox()
 	local localFront, worldFront = resolveFrontVector(stationModel, bboxCFrame)
 	local approach = if approachDistance then math.max(approachDistance, 0) else 3
@@ -573,7 +759,7 @@ local function computeEntryInfo(
 	if typeof(heightAttr) == "number" and heightAttr ~= 0 then
 		entryPosition += Vector3.new(0, heightAttr, 0)
 	end
-	return CFrame.new(entryPosition, bboxCFrame.Position), nil
+	return CFrame.new(entryPosition, bboxCFrame.Position), nil, nil
 end
 
 local function findSeat(model: Model): Seat?
@@ -582,6 +768,13 @@ end
 
 local AUTO_SEAT_NAME = "ResidentAutoSeat"
 local AUTO_SEAT_SIZE = Vector3.new(2, 1, 2)
+
+local function getAutoSeatName(occupantIndex: number?): string
+	if typeof(occupantIndex) == "number" and occupantIndex >= 1 then
+		return string.format("%s%d", AUTO_SEAT_NAME, math.floor(occupantIndex))
+	end
+	return AUTO_SEAT_NAME
+end
 
 local function computeSeatCFrame(entryCFrame: CFrame, entryAttachment: Attachment?): CFrame
 	if entryAttachment then
@@ -594,19 +787,20 @@ local function computeSeatCFrame(entryCFrame: CFrame, entryAttachment: Attachmen
 	return entryCFrame * CFrame.new(0, AUTO_SEAT_SIZE.Y * 0.5, 0)
 end
 
-local function ensureSeat(stationModel: Model, entryCFrame: CFrame, entryAttachment: Attachment?): Seat?
-	local existing = findSeat(stationModel)
-	if existing then
-		existing.Disabled = false
-		return existing
-	end
-	local seatInstance = stationModel:FindFirstChild(AUTO_SEAT_NAME)
+local function ensureAutoSeat(
+	stationModel: Model,
+	entryCFrame: CFrame,
+	entryAttachment: Attachment?,
+	occupantIndex: number?
+): Seat
+	local autoSeatName = getAutoSeatName(occupantIndex)
+	local seatInstance = stationModel:FindFirstChild(autoSeatName)
 	local autoSeat: Seat
 	if seatInstance and seatInstance:IsA("Seat") then
 		autoSeat = seatInstance
 	else
 		autoSeat = Instance.new("Seat")
-		autoSeat.Name = AUTO_SEAT_NAME
+		autoSeat.Name = autoSeatName
 		autoSeat.Size = AUTO_SEAT_SIZE
 		autoSeat.Transparency = 1
 		autoSeat.Anchored = true
@@ -618,11 +812,26 @@ local function ensureSeat(stationModel: Model, entryCFrame: CFrame, entryAttachm
 		autoSeat.Parent = stationModel
 		ResidentDebug.Trace(MOVEMENT_CHANNEL, "Created auto seat", {
 			StationModel = stationModel:GetFullName(),
+			SeatName = autoSeatName,
 		})
 	end
 	autoSeat.Disabled = false
 	autoSeat.CFrame = computeSeatCFrame(entryCFrame, entryAttachment)
 	return autoSeat
+end
+
+local function ensureSeatForOccupant(
+	seat: Seat?,
+	stationModel: Model,
+	entryCFrame: CFrame,
+	entryAttachment: Attachment?,
+	occupantIndex: number?
+): Seat?
+	if seat then
+		seat.Disabled = false
+		return seat
+	end
+	return ensureAutoSeat(stationModel, entryCFrame, entryAttachment, occupantIndex)
 end
 
 function ResidentMovement.ApplyRestPose(residentState: any, options: RestPoseOptions): boolean
@@ -833,12 +1042,13 @@ function ResidentMovement.GoToStation(
 	end
 	local residentName = getResidentName(residentState)
 	local approachDistance = if opts and opts.ApproachDistance then math.max(opts.ApproachDistance, 0.5) else 3
-	local entryCFrame, entryAttachment = computeEntryInfo(stationModel, approachDistance, opts)
+	local entryCFrame, entryAttachment, selectedSeat = computeEntryInfo(stationModel, approachDistance, opts)
 	local goalPosition = entryCFrame.Position
 	local ensureSeatFlag = opts and opts.EnsureSeat == true
-	local ensureSeatResult: Seat? = nil
+	local seatForArrival = selectedSeat
+	local occupantIndex = opts and opts.OccupantIndex or nil
 	if ensureSeatFlag then
-		ensureSeatResult = ensureSeat(stationModel, entryCFrame, entryAttachment)
+		seatForArrival = ensureSeatForOccupant(selectedSeat, stationModel, entryCFrame, entryAttachment, occupantIndex)
 	end
 	local timeout = if opts and opts.TimeoutSeconds then math.max(opts.TimeoutSeconds, 1) else DEFAULT_TIMEOUT
 	ResidentDebug.Trace(
@@ -864,12 +1074,14 @@ function ResidentMovement.GoToStation(
 	metadata.StationModel = stationModel:GetFullName()
 	metadata.ApproachDistance = approachDistance
 	metadata.EnsureSeat = ensureSeatFlag
-	if ensureSeatFlag and ensureSeatResult then
-		metadata.EnsuredSeat = ensureSeatResult.Name
+	metadata.OccupantIndex = occupantIndex
+	metadata.SelectedSeat = seatForArrival and seatForArrival.Name or nil
+	if ensureSeatFlag and seatForArrival then
+		metadata.EnsuredSeat = seatForArrival.Name
 	end
 	if reached then
 		ResidentDebug.Trace(MOVEMENT_CHANNEL, string.format("Arrived at station: %s", residentName), metadata)
-		local seat = ensureSeatResult or findSeat(stationModel)
+		local seat = seatForArrival or findSeat(stationModel)
 		return true, { EntryCFrame = entryCFrame, Seat = seat, EntryAttachment = entryAttachment }
 	end
 	ResidentDebug.Trace(MOVEMENT_CHANNEL, string.format("Failed to reach station: %s", residentName), metadata)
@@ -924,27 +1136,75 @@ function ResidentMovement.SeatResident(residentState: any, seat: Seat, token: Ca
 	ResidentDebug.Trace(MOVEMENT_CHANNEL, string.format("Seat attempt for %s", getResidentName(residentState)), {
 		SeatName = seat.Name,
 	})
-	seat:Sit(humanoid)
-	local start = os.clock()
-	while humanoid.SeatPart ~= seat do
-		if token and token.Cancelled then
+	local function waitForSeatAvailability(timeout: number)
+		local deadline = os.clock() + timeout
+		while true do
+			local occupant = seat.Occupant
+			if not occupant or occupant == humanoid then
+				return
+			end
+			if occupant.Parent == nil then
+				local weld = seat:FindFirstChild("SeatWeld")
+				if weld then
+					weld:Destroy()
+				end
+				return
+			end
+			if os.clock() >= deadline then
+				return
+			end
+			RunService.Heartbeat:Wait()
+		end
+	end
+	local function attemptSeat(timeout: number): boolean
+		seat:Sit(humanoid)
+		local start = os.clock()
+		while humanoid.SeatPart ~= seat do
+			if token and token.Cancelled then
+				ResidentDebug.Trace(
+					MOVEMENT_CHANNEL,
+					string.format("Seat cancelled for %s", getResidentName(residentState))
+				)
+				return false
+			end
+			if os.clock() - start > timeout then
+				break
+			end
+			RunService.Heartbeat:Wait()
+		end
+		return humanoid.SeatPart == seat
+	end
+
+	waitForSeatAvailability(1.5)
+	local occupantAfterWait = seat.Occupant
+	if occupantAfterWait and occupantAfterWait ~= humanoid then
+		ResidentDebug.Trace(
+			MOVEMENT_CHANNEL,
+			string.format("Seat occupied for %s", getResidentName(residentState)),
+			{ SeatName = seat.Name }
+		)
+		return false
+	end
+	local success = attemptSeat(3)
+	if not success and (not token or not token.Cancelled) then
+		local currentOccupant = seat.Occupant
+		if currentOccupant and currentOccupant ~= humanoid then
 			ResidentDebug.Trace(
 				MOVEMENT_CHANNEL,
-				string.format("Seat cancelled for %s", getResidentName(residentState))
+				string.format("Seat claimed during attempt for %s", getResidentName(residentState)),
+				{ SeatName = seat.Name }
 			)
 			return false
 		end
-		if os.clock() - start > 3 then
-			break
-		end
-		RunService.Heartbeat:Wait()
+		waitForSeatAvailability(0.5)
+		success = attemptSeat(1.5)
 	end
-	local success = humanoid.SeatPart == seat
+
 	ResidentDebug.Trace(
 		MOVEMENT_CHANNEL,
 		string.format("Seat result for %s: %s", getResidentName(residentState), success and "success" or "failed")
 	)
-	return humanoid.SeatPart == seat
+	return success
 end
 
 function ResidentMovement.LeaveSeat(residentState: any, seat: Seat?)

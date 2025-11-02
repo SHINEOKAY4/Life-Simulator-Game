@@ -19,6 +19,27 @@ local Furnitures = {
 			RestMode = "Nap",
 		},
 	},
+
+	Computer = {
+		Name = "Computer",
+		PlacementType = "CellObject",
+		StationType = "FunStation",
+		Station = true,
+		maxOccupancy = 1,
+		WidthCells = 1,
+		DepthCells = 1,
+		Facing = { "North", "East", "South", "West" },
+		Cost = 150,
+		Rules = { RequiresFloorUnderAllCells = false },
+		Tags = { "Comfort", "Electronics" },
+		ModelPath = { "Furnitures", "Computer" },
+		StationEffects = {
+			DurationSeconds = 120,
+			Effects = {
+				{ Need = "Fun", RatePerHour = 15 },
+			},
+		},
+	},
 	WoodenTable = {
 		Name = "Wooden Table",
 		PlacementType = "CellObject",
@@ -186,6 +207,57 @@ local Furnitures = {
 		ModelPath = { "Furnitures", "Bathtub" },
 		StationEffects = {
 			DurationSeconds = 30,
+			Effects = {
+				{ Need = "Hygiene", RatePerHour = 100 },
+			},
+		},
+	},
+
+	Sofa = {
+		Name = "Sofa",
+		PlacementType = "CellObject",
+		StationType = "RestStation",
+		Station = true,
+		maxOccupancy = 2,
+		WidthCells = 3,
+		DepthCells = 1,
+		Facing = { "North", "East", "South", "West" },
+		Cost = 400,
+		Rules = { RequiresFloorUnderAllCells = false },
+		Tags = { "Comfort", "Seating" },
+		ModelPath = { "Furnitures", "Sofa" },
+		StationEffects = {
+			RestMode = "Relax",
+		},
+	},
+
+	TrashBin = {
+		Name = "Trash Bin",
+		PlacementType = "CellObject",
+		WidthCells = 1,
+		DepthCells = 1,
+		Facing = { "North", "East", "South", "West" },
+		Cost = 100,
+		Rules = { RequiresFloorUnderAllCells = false },
+		Tags = { "Basic", "Utility" },
+		ModelPath = { "Furnitures", "TrashBin" },
+	},
+
+	KitchenCounter = {
+		Name = "Kitchen Counter",
+		PlacementType = "CellObject",
+		StationType = "HygieneStation",
+		Station = true,
+		maxOccupancy = 1,
+		WidthCells = 2,
+		DepthCells = 4,
+		Facing = { "North", "East", "South", "West" },
+		Cost = 350,
+		Rules = { RequiresFloorUnderAllCells = false },
+		Tags = { "Comfort", "Appliance" },
+		ModelPath = { "Furnitures", "KitchenCounter" },
+		StationEffects = {
+			DurationSeconds = 45,
 			Effects = {
 				{ Need = "Hygiene", RatePerHour = 100 },
 			},
