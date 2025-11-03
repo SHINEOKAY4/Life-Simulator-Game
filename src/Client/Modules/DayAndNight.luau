@@ -12,7 +12,7 @@ local DefaultStartClockTime = 16.5 -- hours (0..24). 16.5 ~ 4:30 PM
 
 local Connection = nil :: RBXScriptConnection?
 local lastUpdateTime = 0
-local UPDATE_INTERVAL = 1/30 -- Update lighting at 30 FPS instead of render FPS
+local UPDATE_INTERVAL = 1 / 30 -- Update lighting at 30 FPS instead of render FPS
 
 -- ================= Helpers =================
 local function ensureEffect(className: string, parent: Instance)
@@ -171,25 +171,25 @@ local Keyframes: { Keyframe } = {
 	-- Night
 	{
 		time = 20.0,
-		brightness = 1.8,
-		exposure = 0.10,
-		ambient = Color3.fromRGB(25, 35, 50),
-		outdoorAmbient = Color3.fromRGB(45, 55, 75),
-		colorShiftTop = Color3.fromRGB(200, 220, 255),
-		colorShiftBottom = Color3.fromRGB(160, 180, 220),
-		ccBrightness = -0.02,
-		ccContrast = 0.10,
-		ccSaturation = -0.06,
-		ccTint = Color3.fromRGB(220, 235, 255),
-		bloomIntensity = 0.80,
+		brightness = 2.4,
+		exposure = 0.25,
+		ambient = Color3.fromRGB(45, 60, 85),
+		outdoorAmbient = Color3.fromRGB(70, 85, 115),
+		colorShiftTop = Color3.fromRGB(210, 230, 255),
+		colorShiftBottom = Color3.fromRGB(175, 195, 235),
+		ccBrightness = 0.04,
+		ccContrast = 0.08,
+		ccSaturation = -0.02,
+		ccTint = Color3.fromRGB(215, 230, 255),
+		bloomIntensity = 0.65,
 		sunRaysIntensity = 0.00,
-		atmoDensity = 0.42,
-		atmoColor = Color3.fromRGB(190, 210, 240),
-		atmoDecay = Color3.fromRGB(30, 40, 70),
-		atmoHaze = 1.0,
-		cloudCover = 0.45,
-		cloudDensity = 0.55,
-		cloudColor = Color3.fromRGB(210, 220, 255),
+		atmoDensity = 0.36,
+		atmoColor = Color3.fromRGB(200, 220, 255),
+		atmoDecay = Color3.fromRGB(40, 55, 85),
+		atmoHaze = 0.8,
+		cloudCover = 0.40,
+		cloudDensity = 0.45,
+		cloudColor = Color3.fromRGB(220, 230, 255),
 	},
 }
 table.sort(Keyframes, function(a, b)
@@ -278,7 +278,7 @@ function DayAndNight.Enable()
 			return
 		end
 		lastUpdateTime = currentTime
-		
+
 		local clockTime = computeClockTimeFromServerNow()
 		setIfChanged(Lighting, "ClockTime", clockTime)
 

@@ -5,6 +5,7 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
@@ -46,6 +47,33 @@ local PreviewHighlight = AssetsFolder.VisualTools:WaitForChild("PreviewHighlight
 
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local objectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled") :: BoolValue
+
+local storedPromptServiceEnabled: boolean? = nil
+local proximityPromptsSuppressed = false
+
+-- Temporarily disable proximity prompts so preview input keys do not trigger world interactions.
+
+local function suppressProximityPrompts()
+	if proximityPromptsSuppressed then
+		return
+	end
+	proximityPromptsSuppressed = true
+	storedPromptServiceEnabled = ProximityPromptService.Enabled
+	ProximityPromptService.Enabled = false
+end
+
+local function restoreProximityPrompts()
+	if not proximityPromptsSuppressed then
+		return
+	end
+	proximityPromptsSuppressed = false
+	local desiredState = storedPromptServiceEnabled
+	if desiredState == nil then
+		desiredState = true
+	end
+	ProximityPromptService.Enabled = desiredState
+	storedPromptServiceEnabled = nil
+end
 
 local Camera = workspace.CurrentCamera
 
@@ -160,6 +188,18 @@ end
 
 function ObjectPreview.Init()
 	local order, indexOf = rotationOrder()
+
+	objectPreviewEnabled.Changed:Connect(function()
+		if objectPreviewEnabled.Value then
+			suppressProximityPrompts()
+			return
+		end
+		restoreProximityPrompts()
+	end)
+
+	if objectPreviewEnabled.Value then
+		suppressProximityPrompts()
+	end
 
 	PreviewContext.RotateLeft.Pressed:Connect(function()
 		local i = indexOf[CurrentFacing] or 1
@@ -448,6 +488,7 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 	SelectedItem = itemModel
 
 	objectPreviewEnabled.Value = true
+	suppressProximityPrompts()
 	PreviewContext.CancelPreview.Enabled = true
 
 	applyModelPhysicsOverrides(itemModel)
@@ -834,6 +875,7 @@ function ObjectPreview.ClearPreview()
 	PreviewContext.RotateRight.Enabled = false
 	PreviewContext.CancelPreview.Enabled = false
 	objectPreviewEnabled.Value = false
+	restoreProximityPrompts()
 	MarkerPool.Clear()
 	resetFloorState(true)
 	resetRoofState(true)

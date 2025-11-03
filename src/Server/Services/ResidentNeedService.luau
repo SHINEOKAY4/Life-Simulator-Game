@@ -6,6 +6,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ResidentAutonomyService = require(ServerScriptService.Server.Services.ResidentAutonomyService)
+local FallbackActions = require(ServerScriptService.Server.Services.ResidentAutonomyService.FallbackActions)
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local TraitUtils = require(ReplicatedStorage.Shared.Utilities.TraitUtils)
@@ -47,7 +48,7 @@ end
 local function pruneResidents(): boolean
 	local writeIndex = 1
 	local removed = false
-	
+
 	for readIndex = 1, #Residents do
 		local entry = Residents[readIndex]
 		local player = entry.Player
@@ -61,11 +62,11 @@ local function pruneResidents(): boolean
 			removed = true
 		end
 	end
-	
+
 	for i = #Residents, writeIndex, -1 do
 		Residents[i] = nil
 	end
-	
+
 	return removed
 end
 
@@ -104,14 +105,18 @@ function ResidentNeedService.Start()
 		local clockTime = TimeScale.GetClockTime()
 
 		for _, entry in ipairs(Residents) do
-			ResidentNeedService.Decay(entry.State, gameHours)
-			ResidentAutonomyService.TrySatisfyNeedsForResident(
-				entry.Player,
-				entry.ResidentName,
-				entry.State,
-				nowClock,
-				clockTime
-			)
+			local residentState = entry.State
+			if residentState ~= nil then
+				ResidentNeedService.Decay(residentState, gameHours)
+				FallbackActions.TriggerImmediateBladderEmergency(residentState)
+				ResidentAutonomyService.TrySatisfyNeedsForResident(
+					entry.Player,
+					entry.ResidentName,
+					residentState,
+					nowClock,
+					clockTime
+				)
+			end
 		end
 	end)
 end

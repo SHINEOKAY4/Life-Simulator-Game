@@ -28,6 +28,7 @@ type StationCache = { [string]: any }
 type Module = {
 	enqueueRoamAction: (Player, string, ResidentState) -> boolean,
 	evaluateResidentJob: (Player, string, ResidentState, StationCache?) -> boolean,
+	TriggerImmediateBladderEmergency: (ResidentState) -> boolean,
 }
 
 local FallbackActions = {}
@@ -42,6 +43,117 @@ local EMERGENCY_RELIEF_CHAT_LINES = {
 	"I... couldn't hold it...",
 	"That was embarrassing...",
 }
+local WATER_SPILL_LIFETIME_SECONDS = 20
+local WATER_SPILL_RAYCAST_DISTANCE = 16
+
+local lastEmergencyByResident = setmetatable({} :: { [ResidentState]: number }, { __mode = "k" })
+
+local function spawnWaterSpillEffect(resident: ResidentState)
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	if not assets then
+		return
+	end
+	local template = assets:FindFirstChild("WaterSpill")
+	if not template or not template:IsA("Model") then
+		return
+	end
+	local residentModel = resident and resident.Model
+	if not residentModel or not residentModel:IsA("Model") then
+		return
+	end
+
+	local rootPart: BasePart? = nil
+	if residentModel.PrimaryPart and residentModel.PrimaryPart:IsA("BasePart") then
+		rootPart = residentModel.PrimaryPart
+	else
+		rootPart = residentModel:FindFirstChild("HumanoidRootPart") :: BasePart?
+	end
+	if not rootPart then
+		return
+	end
+
+	local origin = rootPart.Position
+	local targetPosition = origin
+	local rayParams = RaycastParams.new()
+	rayParams.FilterDescendantsInstances = { residentModel }
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.IgnoreWater = true
+	local rayDirection = Vector3.new(0, -WATER_SPILL_RAYCAST_DISTANCE, 0)
+	local result = Workspace:Raycast(origin, rayDirection, rayParams)
+	if result then
+		targetPosition = result.Position
+	else
+		targetPosition = origin - Vector3.new(0, rootPart.Size.Y * 0.5, 0)
+	end
+
+	local waterSpill = template:Clone()
+	waterSpill:PivotTo(CFrame.new(targetPosition))
+	waterSpill.Parent = Workspace
+
+	task.delay(WATER_SPILL_LIFETIME_SECONDS, function()
+		if waterSpill.Parent then
+			waterSpill:Destroy()
+		end
+	end)
+end
+
+local function applyEmergencyReliefEffect(
+	resident: ResidentState,
+	needs: { [string]: any },
+	bladderDef: { [string]: any }
+)
+	local maxValue = if typeof(bladderDef.Max) == "number" then bladderDef.Max else 100
+	local minValue = if typeof(bladderDef.Min) == "number" then bladderDef.Min else 0
+	local targetValue = math.floor(maxValue * EMERGENCY_RELIEF_TARGET_RATIO + 0.5)
+	targetValue = math.clamp(targetValue, minValue, maxValue)
+	resident:SetNeed("Bladder", targetValue)
+
+	local hygieneDef = needs.Hygiene
+	if hygieneDef then
+		local hygieneValue = resident:GetNeed("Hygiene")
+		local hygieneMin = if typeof(hygieneDef.Min) == "number" then hygieneDef.Min else 0
+		local hygieneMax = if typeof(hygieneDef.Max) == "number" then hygieneDef.Max else 100
+		local newHygiene = math.clamp(hygieneValue - EMERGENCY_RELIEF_HYGIENE_PENALTY, hygieneMin, hygieneMax)
+		if newHygiene ~= hygieneValue then
+			resident:SetNeed("Hygiene", newHygiene)
+		end
+	end
+
+	State.setNeedCooldown(resident, "Bladder")
+	State.clearNextEvaluation(resident)
+	lastEmergencyByResident[resident] = os.clock()
+	spawnWaterSpillEffect(resident)
+end
+
+function FallbackActions.TriggerImmediateBladderEmergency(resident: ResidentState): boolean
+	local needs = State.getNeeds()
+	local bladderDef = needs.Bladder
+	if bladderDef == nil then
+		return false
+	end
+
+	local bladderValue = resident:GetNeed("Bladder")
+	if typeof(bladderValue) ~= "number" then
+		return false
+	end
+
+	local minValue = if typeof(bladderDef.Min) == "number" then bladderDef.Min else 0
+	if bladderValue > minValue then
+		return false
+	end
+
+	local lastTrigger = lastEmergencyByResident[resident]
+	if lastTrigger ~= nil then
+		local elapsed = os.clock() - lastTrigger
+		if elapsed >= 0 and elapsed < 1 then
+			return false
+		end
+	end
+
+	ResidentChat.ShowAction(resident, EMERGENCY_RELIEF_CHAT_LINES)
+	applyEmergencyReliefEffect(resident, needs, bladderDef)
+	return true
+end
 
 local JOG_ACTION_NAME = Constants.JOG_ACTION_NAME or "Auto:Jog"
 local JOG_MIN_INTERVAL_SECONDS = math.max(Constants.JOG_MIN_INTERVAL_SECONDS or 0, 0)
@@ -486,17 +598,25 @@ local function enqueueEmergencyReliefAction(
 		return false
 	end
 
-	if not State.isSurvivalNeedUnavailable(resident, "Bladder") then
+	local bladderValue = resident:GetNeed("Bladder")
+	if typeof(bladderValue) ~= "number" then
 		return false
 	end
 
-	local bladderValue = resident:GetNeed("Bladder")
-	if bladderValue > bladderDef.Critical then
+	local minValue = if typeof(bladderDef.Min) == "number" then bladderDef.Min else 0
+	local reachedMin = bladderValue <= minValue -- Force emergency relief when bladder is fully drained
+
+	if not reachedMin and not State.isSurvivalNeedUnavailable(resident, "Bladder") then
+		return false
+	end
+
+	local criticalValue = if typeof(bladderDef.Critical) == "number" then bladderDef.Critical else minValue
+	if not reachedMin and bladderValue > criticalValue then
 		return false
 	end
 
 	local stationType = State.NeedToStationType.Bladder
-	if stationType and hasStationForNeed(player, stationType, stationCache) then
+	if not reachedMin and stationType and hasStationForNeed(player, stationType, stationCache) then
 		return false
 	end
 
@@ -535,22 +655,7 @@ local function enqueueEmergencyReliefAction(
 			return
 		end
 
-		local targetValue = math.floor(bladderDef.Max * EMERGENCY_RELIEF_TARGET_RATIO + 0.5)
-		targetValue = math.clamp(targetValue, bladderDef.Min, bladderDef.Max)
-		resident:SetNeed("Bladder", targetValue)
-
-		local hygieneDef = needs.Hygiene
-		if hygieneDef then
-			local hygieneValue = resident:GetNeed("Hygiene")
-			local newHygiene =
-				math.clamp(hygieneValue - EMERGENCY_RELIEF_HYGIENE_PENALTY, hygieneDef.Min, hygieneDef.Max)
-			if newHygiene ~= hygieneValue then
-				resident:SetNeed("Hygiene", newHygiene)
-			end
-		end
-
-		State.setNeedCooldown(resident, "Bladder")
-		State.clearNextEvaluation(resident)
+		applyEmergencyReliefEffect(resident, needs, bladderDef)
 		cleanup()
 	end)
 
