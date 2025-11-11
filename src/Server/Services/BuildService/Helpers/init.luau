@@ -22,6 +22,19 @@ type Metadata = { [string]: any }
 
 local Helpers = {}
 
+local function cloneMetadata(value: any): any
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local result = {}
+	for key, entry in pairs(value) do
+		result[key] = cloneMetadata(entry)
+	end
+
+	return result
+end
+
 function Helpers.resolveFootprintDimensions(itemId: string, metadata: Metadata?): (number, number)
 	local spec = ItemFinder.FindItemById(itemId)
 	local widthOverride = metadata and (metadata.WidthCells or metadata.widthCells or metadata.Width or metadata.width)
@@ -47,6 +60,7 @@ function Helpers.sendPlacementDelta(
 	metadata: Metadata?
 )
 	local width, depth = Helpers.resolveFootprintDimensions(itemId, metadata)
+	local metadataPayload = if metadata ~= nil then cloneMetadata(metadata) else nil
 	Packets.PlacementDelta:FireClient(player, {
 		Action = action,
 		Item = {
@@ -56,12 +70,26 @@ function Helpers.sendPlacementDelta(
 			Facing = facing,
 			WidthCells = width,
 			DepthCells = depth,
+			Metadata = metadataPayload,
 		},
 	})
 end
 
 function Helpers.coerceFacing(value: string?): Facing?
-	if value == "North" or value == "East" or value == "South" or value == "West" then
+	if value == nil then
+		return nil
+	end
+
+	if
+		value == "North"
+		or value == "East"
+		or value == "South"
+		or value == "West"
+		or value == "NorthEast"
+		or value == "NorthWest"
+		or value == "SouthEast"
+		or value == "SouthWest"
+	then
 		return value :: Facing
 	end
 

@@ -1,0 +1,85 @@
+--!strict
+
+type Facing = "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest"
+
+local Attachments = {}
+
+local function cloneMetadata(value: any): any
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local copy = {}
+	for key, entry in pairs(value) do
+		copy[key] = cloneMetadata(entry)
+	end
+
+	return copy
+end
+
+local function validateChunkUnlocked(self, cellX: number, cellZ: number): boolean
+	if not self.Grid:IsCellInBounds(cellX, cellZ) then
+		return false
+	end
+
+	local chunkX, chunkZ = self.Grid:CellToChunk(cellX, cellZ, self.ChunkSizeInCells)
+	if not self:IsChunkUnlocked(chunkX, chunkZ) then
+		return false
+	end
+
+	return true
+end
+
+function Attachments.attach(PlotState)
+	function PlotState:CanPlaceWallMounted(cellX: number, cellZ: number, facing: Facing): (boolean, string?)
+		if not validateChunkUnlocked(self, cellX, cellZ) then
+			return false, "Chunk locked"
+		end
+
+		local wallKey = self:PlacementKeyForType(cellX, cellZ, facing, "Wall")
+		if not self.Save.PlacedObjects[wallKey] then
+			return false, "No supporting wall"
+		end
+
+		return true, nil
+	end
+
+	function PlotState:PlaceWallMounted(
+		objectId: string,
+		cellX: number,
+		cellZ: number,
+		facing: Facing,
+		metadata: { [string]: any }?
+	): (boolean, string?)
+		local canPlace, failureReason = self:CanPlaceWallMounted(cellX, cellZ, facing)
+		if not canPlace then
+			return false, failureReason
+		end
+
+		local key = self:PlacementKeyForType(cellX, cellZ, facing, "WallMounted")
+		if self.Save.PlacedObjects[key] ~= nil then
+			return false, "Wall already has attachment"
+		end
+
+		local clonedMetadata = if metadata then cloneMetadata(metadata) else nil
+
+		self.Save.PlacedObjects[key] = {
+			id = objectId,
+			cellX = cellX,
+			cellZ = cellZ,
+			facing = facing,
+			Metadata = clonedMetadata,
+		}
+
+		return true, nil
+	end
+
+	function PlotState:RemoveWallMounted(cellX: number, cellZ: number, facing: Facing)
+		local key = self:PlacementKeyForType(cellX, cellZ, facing, "WallMounted")
+		local saved = self.Save.PlacedObjects[key]
+		self.Save.PlacedObjects[key] = nil
+		return saved
+	end
+end
+
+return Attachments

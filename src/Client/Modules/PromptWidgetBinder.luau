@@ -13,7 +13,24 @@ local PromptWidgetBinder = {}
 local promptWidgets: { [ProximityPrompt]: BillboardGui } = {}
 local promptSuppressed: { [ProximityPrompt]: boolean } = {}
 local trackedPrompts: { [ProximityPrompt]: boolean } = {}
+local promptCleanup: { [ProximityPrompt]: { RBXScriptConnection } } = {}
 local promptEventsBound = false
+
+local DEFAULT_WIDGET_OFFSET = Vector3.new(0, 3.25, 0)
+
+local function resolvePromptAdornee(prompt: ProximityPrompt): Instance?
+	local parent = prompt.Parent
+	if not parent then
+		return nil
+	end
+	if parent:IsA("Attachment") then
+		return parent
+	end
+	if parent:IsA("BasePart") then
+		return parent
+	end
+	return nil
+end
 
 local function applyCircleStyling(frame: Frame)
 	local corner = Instance.new("UICorner")
@@ -28,9 +45,21 @@ local function applyCircleStyling(frame: Frame)
 	stroke.Parent = frame
 end
 
+local function resolveWidgetOffset(prompt: ProximityPrompt): Vector3
+	local offsetAttr = prompt:GetAttribute("WidgetOffset")
+	if typeof(offsetAttr) == "Vector3" then
+		return offsetAttr
+	end
+	local offsetY = prompt:GetAttribute("WidgetOffsetY")
+	if typeof(offsetY) == "number" then
+		return Vector3.new(0, offsetY, 0)
+	end
+	return DEFAULT_WIDGET_OFFSET
+end
+
 local function ensureWidget(prompt: ProximityPrompt): BillboardGui?
-	local adornee = prompt.Parent
-	if not adornee or not adornee:IsA("BasePart") then
+	local adornee = resolvePromptAdornee(prompt)
+	if not adornee then
 		return nil
 	end
 
@@ -38,6 +67,7 @@ local function ensureWidget(prompt: ProximityPrompt): BillboardGui?
 	if existing then
 		existing.Adornee = adornee
 		existing.MaxDistance = math.max(prompt.MaxActivationDistance + 20, 25)
+		existing.StudsOffsetWorldSpace = resolveWidgetOffset(prompt)
 		return existing
 	end
 
@@ -47,7 +77,7 @@ local function ensureWidget(prompt: ProximityPrompt): BillboardGui?
 	gui.LightInfluence = 0
 	gui.MaxDistance = math.max(prompt.MaxActivationDistance + 20, 25)
 	gui.Size = UDim2.fromOffset(100, 100)
-	gui.StudsOffsetWorldSpace = Vector3.new(0, 3.25, 0)
+	gui.StudsOffsetWorldSpace = resolveWidgetOffset(prompt)
 	gui.Enabled = false
 	gui.Adornee = adornee
 	gui.Parent = PlayerGui
@@ -129,10 +159,11 @@ local function updateWidget(prompt: ProximityPrompt, inputType: Enum.ProximityPr
 		actionLabel.Text = prompt.ActionText ~= "" and prompt.ActionText or "Interact"
 	end
 
-	local adornee = prompt.Parent
-	if adornee and adornee:IsA("BasePart") then
+	local adornee = resolvePromptAdornee(prompt)
+	if adornee then
 		widget.Adornee = adornee
 	end
+	widget.StudsOffsetWorldSpace = resolveWidgetOffset(prompt)
 end
 
 local function setWidgetVisible(prompt: ProximityPrompt, isVisible: boolean)
@@ -181,12 +212,42 @@ function PromptWidgetBinder.Attach(prompt: ProximityPrompt)
 	ensurePromptSignals()
 	ensureWidget(prompt)
 	updateWidget(prompt, nil)
+
+	local bucket = promptCleanup[prompt]
+	if bucket then
+		for _, connection in ipairs(bucket) do
+			connection:Disconnect()
+		end
+	else
+		bucket = {}
+		promptCleanup[prompt] = bucket
+	end
+	bucket[#bucket + 1] = prompt.Destroying:Connect(function()
+		PromptWidgetBinder.Detach(prompt)
+	end)
+	bucket[#bucket + 1] = prompt.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			PromptWidgetBinder.Detach(prompt)
+		end
+	end)
 end
 
 function PromptWidgetBinder.Detach(prompt: ProximityPrompt)
+	local existingWidget = promptWidgets[prompt] :: BillboardGui?
+	local cleanupBucket = promptCleanup[prompt] :: { RBXScriptConnection }?
+	if trackedPrompts[prompt] == nil and existingWidget == nil and cleanupBucket == nil then
+		return
+	end
 	trackedPrompts[prompt] = nil
 	promptSuppressed[prompt] = nil
-	local widget = promptWidgets[prompt]
+	local bucket = cleanupBucket
+	if bucket then
+		for _, connection in ipairs(bucket) do
+			connection:Disconnect()
+		end
+		promptCleanup[prompt] = nil
+	end
+	local widget = existingWidget
 	if widget then
 		widget:Destroy()
 		promptWidgets[prompt] = nil

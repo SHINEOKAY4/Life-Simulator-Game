@@ -6,9 +6,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local Helpers = require(ServerScriptService.Server.Services.BuildService.Helpers)
 
-type Facing = "North" | "East" | "South" | "West"
+type Facing = "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest"
 
 type Payload = {
 	ItemId: string,
@@ -50,26 +51,20 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 	end
 
 	local facingString = payload.Facing
-	if facingString ~= "North" and facingString ~= "South" and facingString ~= "East" and facingString ~= "West" then
+	if typeof(facingString) ~= "string" or facingString == "" then
 		return false, "Invalid facing"
 	end
-	local facing: Facing = facingString :: Facing
+	local resolvedFacing = PlacementKey.NormalizeFacing(facingString :: any)
+	local facing: Facing = resolvedFacing :: Facing
 
 	local orientation = payload.Orientation
-	if orientation ~= "Horizontal" and orientation ~= "Vertical" then
+	local isDiagonalForward = orientation == "DiagonalForward"
+	local isDiagonalBackward = orientation == "DiagonalBackward"
+	local isDiagonal = isDiagonalForward or isDiagonalBackward
+
+	if orientation ~= "Horizontal" and orientation ~= "Vertical" and not isDiagonal then
 		return false, "Invalid wall strip orientation"
 	end
-
-	if orientation == "Horizontal" then
-		if facing ~= "North" and facing ~= "South" then
-			return false, "Horizontal strips require North or South facing"
-		end
-	else
-		if facing ~= "East" and facing ~= "West" then
-			return false, "Vertical strips require East or West facing"
-		end
-	end
-
 	local startCellXValue = tonumber(payload.StartCellX)
 	local startCellZValue = tonumber(payload.StartCellZ)
 	local endCellXValue = tonumber(payload.EndCellX)
@@ -91,6 +86,10 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 	end
 
 	local requiresFloorOnBothSides = spec.RequiresFloorOnBothSides == true
+	if requiresFloorOnBothSides and isDiagonal then
+		return false, "Diagonal walls cannot require floor support"
+	end
+
 	local plannedSegments: { PlannedSegment } = {}
 
 	if orientation == "Horizontal" then
@@ -120,7 +119,7 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 
 			plannedSegments[#plannedSegments + 1] = { cellX = cellX, cellZ = cellZ }
 		end
-	else
+	elseif orientation == "Vertical" then
 		if startCellX ~= endCellX then
 			return false, "Vertical strips must stay on a single column"
 		end
@@ -138,6 +137,43 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 
 		for cellZ = minZ, maxZ do
 			if not state:CanPlaceWall(cellX, cellZ, facing, requiresFloorOnBothSides) then
+				return false, ("Wall blocked at (%d, %d)"):format(cellX, cellZ)
+			end
+
+			local key = state:PlacementKeyForType(cellX, cellZ, facing, "Wall")
+			if state.Save.PlacedObjects[key] then
+				return false, "A wall already occupies part of that strip"
+			end
+
+			plannedSegments[#plannedSegments + 1] = { cellX = cellX, cellZ = cellZ }
+		end
+	else
+		local deltaX = endCellX - startCellX
+		local deltaZ = endCellZ - startCellZ
+		if math.abs(deltaX) ~= math.abs(deltaZ) then
+			return false, "Diagonal strips must move equally in X and Z"
+		end
+		local stepX = if deltaX >= 0 then 1 else -1
+		local stepZ = if isDiagonalForward then stepX else -stepX
+		if deltaX ~= 0 or deltaZ ~= 0 then
+			local product = deltaX * deltaZ
+			if isDiagonalForward and product < 0 then
+				return false, "Diagonal forward strips must move in the same direction"
+			end
+			if isDiagonalBackward and product > 0 then
+				return false, "Diagonal backward strips must move in opposite directions"
+			end
+		end
+
+		local span = math.abs(deltaX)
+		plannedSegments = table.create(span + 1) :: { PlannedSegment }
+		for i = 0, span do
+			local cellX = startCellX + stepX * i
+			local cellZ = startCellZ + stepZ * i
+			if cellX < 1 or cellX > grid.Columns or cellZ < 1 or cellZ > grid.Rows then
+				return false, "Strip outside plot bounds"
+			end
+			if not state:CanPlaceWall(cellX, cellZ, facing, false) then
 				return false, ("Wall blocked at (%d, %d)"):format(cellX, cellZ)
 			end
 

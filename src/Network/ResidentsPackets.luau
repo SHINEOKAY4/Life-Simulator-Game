@@ -6,21 +6,6 @@ local Packet = require(ReplicatedStorage.Packages.Packet)
 
 local ResidentsPackets = {}
 
-ResidentsPackets.PromptResidentCreation = Packet("PromptResidentCreation")
-
-ResidentsPackets.AddResidentRequest = Packet("CreateResidentRequest", {
-	Name = Packet.String,
-	Gender = Packet.String,
-	Age = Packet.NumberU8,
-	Appearance = {
-		SkinToneId = Packet.String,
-		HairId = Packet.String,
-		FaceId = Packet.String,
-		TopId = Packet.String,
-		PantsId = Packet.String,
-	},
-}):Response(Packet.Boolean8, Packet.StringLong)
-
 ResidentsPackets.DeleteResidentRequest =
 	Packet("DeleteResidentRequest", Packet.String):Response(Packet.Boolean8, Packet.StringLong)
 
@@ -33,10 +18,6 @@ ResidentsPackets.PlayerResidentDelta = Packet("PlayerResidentDelta", {
 			Age = Packet.NumberU8,
 			Gender = Packet.String,
 			Traits = { Packet.String },
-			Occupation = Packet.String,
-			CurrentCareerId = Packet.String,
-			CareerStreak = Packet.NumberU16,
-			AssignedShiftId = Packet.String,
 			Statistics = {
 				Intelligence = Packet.NumberU8,
 				Discipline = Packet.NumberU8,
@@ -51,13 +32,6 @@ ResidentsPackets.PlayerResidentDelta = Packet("PlayerResidentDelta", {
 				Fun = Packet.NumberU8,
 				Social = Packet.NumberU8,
 			},
-			Appearance = {
-				SkinToneId = Packet.String,
-				HairId = Packet.String,
-				FaceId = Packet.String,
-				TopId = Packet.String,
-				PantsId = Packet.String,
-			},
 		},
 	},
 })
@@ -69,10 +43,6 @@ ResidentsPackets.PlayersResidentsSync = Packet("ResidentStateSync", {
 			Age = Packet.NumberU8,
 			Gender = Packet.String,
 			Traits = { Packet.String },
-			Occupation = Packet.String,
-			CurrentCareerId = Packet.String,
-			CareerStreak = Packet.NumberU16,
-			AssignedShiftId = Packet.String,
 			Needs = {
 				Hunger = Packet.NumberU8,
 				Bladder = Packet.NumberU8,
@@ -80,13 +50,6 @@ ResidentsPackets.PlayersResidentsSync = Packet("ResidentStateSync", {
 				Hygiene = Packet.NumberU8,
 				Fun = Packet.NumberU8,
 				Social = Packet.NumberU8,
-			},
-			Appearance = {
-				SkinToneId = Packet.String,
-				HairId = Packet.String,
-				FaceId = Packet.String,
-				TopId = Packet.String,
-				PantsId = Packet.String,
 			},
 		},
 	},

@@ -7,7 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ResidentNeedsUI = require(script.Parent.ResidentNeedsUI)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local CameraUtils = require(ReplicatedStorage.Shared.Utilities.CameraUtils)
-local ResidentsStore = require(script.Parent.Parent.ClientStores.ResidentsStore)
+local ResidentsStore = require(script.Parent.Parent.ClientStores.ResidentsStore) :: any
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local VisualFX = require(ReplicatedStorage.Shared.Utilities.VisualFX)
 
@@ -19,9 +19,9 @@ local Profile = ResidentGui:WaitForChild("Profile")
 local ResidentSelectionFrame = ResidentGui:WaitForChild("ResidentSelectionFrame")
 local ResidentNeedsFrame = ResidentGui:WaitForChild("ResidentNeedsFrame")
 local ResidentButtons = ResidentGui:WaitForChild("ResidentButtons")
-local CustomizeButton = ResidentButtons:WaitForChild("CustomizeButton") :: TextButton
+local CustomizeButton = ResidentButtons:FindFirstChild("CustomizeButton") :: TextButton?
 local ProfileButton = ResidentButtons:WaitForChild("ProfileButton") :: TextButton
-local CareerButton = ResidentButtons:WaitForChild("CareerButton") :: TextButton
+local CareerButton = ResidentButtons:FindFirstChild("CareerButton") :: TextButton?
 
 local StationRadial = PlayerGui:WaitForChild("StationRadial") :: BillboardGui
 
@@ -30,11 +30,11 @@ local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEn
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled") :: BoolValue
 local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled") :: BoolValue
 local RadialBillboardButtonEnabled = ActiveQueryFolder:WaitForChild("RadialBillboardButtonEnabled") :: BoolValue
-local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
 local _ResidentRadialEnabled = ActiveQueryFolder:FindFirstChild("ResidentRadialEnabled") :: BoolValue
 local ResidentRosterEnabled = ActiveQueryFolder:FindFirstChild("ResidentRosterEnabled") :: BoolValue
 
 local Roster = ResidentSelectionFrame.Background.Roster
+local AddResidentButton = Roster:FindFirstChild("AddResidentButton")
 
 local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
 local InterfacesTemplates = AssetsFolder:WaitForChild("InterfacesTemplates")
@@ -62,9 +62,6 @@ local function isRosterBlocked(): boolean
 		return true
 	end
 	if RadialBillboardButtonEnabled and RadialBillboardButtonEnabled.Value then
-		return true
-	end
-	if JobSelectionUIEnabled and JobSelectionUIEnabled.Value then
 		return true
 	end
 	return false
@@ -325,12 +322,7 @@ local function refreshRosterVisibility()
 	end
 
 	if isRosterVisible then
-		-- Only hide UI elements if job selection is open; otherwise fully deselect
-		if JobSelectionUIEnabled and JobSelectionUIEnabled.Value then
-			ResidentNeedsUI.Hide(true)
-		else
-			deselectResident()
-		end
+		deselectResident()
 	end
 
 	setRosterVisible(false)
@@ -520,9 +512,20 @@ end
 function ResidentRoster.Init(): ()
 	-- Placeholder for future Resident Roster UI initialization.
 
-	registerButtonHover(CustomizeButton, "Buttons/Customize")
+	if CustomizeButton and CustomizeButton:IsA("TextButton") then
+		CustomizeButton.Visible = false
+		CustomizeButton.Active = false
+		registerButtonHover(CustomizeButton, "Buttons/Customize")
+	end
+	if AddResidentButton and AddResidentButton:IsA("GuiButton") then
+		AddResidentButton.Visible = false
+		AddResidentButton.Active = false
+	end
+	if CareerButton and CareerButton:IsA("TextButton") then
+		CareerButton.Visible = false
+		CareerButton.Active = false
+	end
 	registerButtonHover(ProfileButton, "Buttons/Profile")
-	registerButtonHover(CareerButton, "Buttons/Career")
 
 	if ResidentRosterEnabled then
 		ResidentRosterEnabled.Changed:Connect(refreshRosterVisibility)
@@ -538,9 +541,6 @@ function ResidentRoster.Init(): ()
 	end
 	if RadialBillboardButtonEnabled then
 		RadialBillboardButtonEnabled.Changed:Connect(refreshRosterVisibility)
-	end
-	if JobSelectionUIEnabled then
-		JobSelectionUIEnabled.Changed:Connect(refreshRosterVisibility)
 	end
 
 	refreshRosterVisibility()

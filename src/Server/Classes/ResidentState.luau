@@ -7,18 +7,7 @@ export type ResidentData = {
 	Gender: string,
 	Needs: { [string]: number },
 	Traits: { string },
-	Occupation: string,
 	Statistics: { [string]: number }?,
-	CurrentCareerId: string?,
-	CareerStreak: number?,
-	AssignedShiftId: string?,
-	Appearance: {
-		SkinToneId: string,
-		HairId: string,
-		FaceId: string,
-		TopId: string,
-		PantsId: string,
-	},
 }
 
 type MoodletRuntime = {
@@ -88,26 +77,10 @@ type MoveOptions = {
 	DebugName: string?,
 }
 
-local function ensureCareerFields(save: ResidentData)
-	if typeof(save.Occupation) ~= "string" then
-		save.Occupation = "Unemployed"
-	end
-	if typeof(save.CurrentCareerId) ~= "string" then
-		save.CurrentCareerId = if save.Occupation ~= "Unemployed" then save.Occupation else ""
-	end
-	if typeof(save.CareerStreak) ~= "number" then
-		save.CareerStreak = 0
-	end
-	if typeof(save.AssignedShiftId) ~= "string" then
-		save.AssignedShiftId = ""
-	end
-end
-
 function ResidentState.new(save: ResidentData)
 	local self = setmetatable({}, ResidentState)
 
 	self.Save = save
-	ensureCareerFields(self.Save)
 	self.ActionContext = {
 		Resident = self,
 		CancelToken = {
@@ -124,7 +97,6 @@ function ResidentState.new(save: ResidentData)
 	self.AutoJobEnabled = true -- Whether the resident can perform auto job actions
 	self.CurrentOverride = nil
 	self.IsOnShift = false
-	self._CareerShiftState = nil
 	self.NeedDecayPauseCount = 0
 	self.NeedDecayPaused = {} :: { [string]: number }
 	self.DestinationChanged = GoodSignal.new()

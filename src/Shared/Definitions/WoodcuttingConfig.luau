@@ -81,6 +81,7 @@ WoodcuttingConfig.InventoryDefinitions = {
 		metadata = {
 			DisplayName = "Pine Log",
 			Description = "Freshly chopped pine lumber.",
+			MaterialId = "Wood",
 		},
 		defaultProps = {
 			quantity = 1,
@@ -94,6 +95,7 @@ WoodcuttingConfig.InventoryDefinitions = {
 		metadata = {
 			DisplayName = "Birch Log",
 			Description = "Birch lumber ready to sell or craft.",
+			MaterialId = "Wood",
 		},
 		defaultProps = {
 			quantity = 1,
@@ -111,7 +113,7 @@ WoodcuttingConfig.SellPrices = {
 }
 
 -- Optional: animation to play on the local player while chopping. Leave blank to skip.
-WoodcuttingConfig.PlayerChopAnimationId = ""
+WoodcuttingConfig.PlayerChopAnimationId = "rbxassetid://71256805180055"
 WoodcuttingConfig.ChopAnimationFadeTime = 0.1
 
 WoodcuttingConfig.HackSoundId = "rbxassetid://9120262423"

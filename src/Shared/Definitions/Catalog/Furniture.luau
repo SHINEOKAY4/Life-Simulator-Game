@@ -1,0 +1,308 @@
+--!strict
+-- ReplicatedStorage/Shared/Definitions/Catalog/Furnitures.luau
+
+local Furnitures = {
+	LivingRoom = {
+		Sofa = {
+			Name = "Sofa",
+			PlacementType = "CellObject",
+			StationType = "RestStation",
+			Station = true,
+			maxOccupancy = 2,
+			WidthCells = 3,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 400,
+			Description = "Plush sofa that anchors the living room with soft cushions and cozy fabric.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Comfort", "Seating" },
+			ModelPath = { "Furnitures", "Sofa" },
+			AssetId = 125161977165072,
+			StationEffects = {
+				RestMode = "Relax",
+			},
+			EffectSummary = {
+				"Invites residents to kick back and unwind together.",
+				"Seats two comfortably for long chats or quick breaks.",
+			},
+		},
+	},
+	Bathroom = {
+		Bathtub = {
+			Name = "Bathtub",
+			PlacementType = "CellObject",
+			StationType = "HygieneStation",
+			Station = true,
+			maxOccupancy = 1,
+			WidthCells = 1,
+			DepthCells = 2,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 300,
+			Description = "Deep clawfoot tub that turns bath time into a spa moment.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Comfort", "Bath" },
+			ModelPath = { "Furnitures", "Bathtub" },
+			AssetId = 129381137044391,
+			StationEffects = {
+				DurationSeconds = 30,
+				Effects = {
+					{ Need = "Hygiene", RatePerHour = 100 },
+				},
+			},
+			EffectSummary = {
+				"Leaves residents sparkling clean in one soak.",
+				"Warm water and bubbles melt away the day.",
+			},
+		},
+
+		Toilet = {
+			Name = "Toilet",
+			PlacementType = "CellObject",
+			StationType = "ComfortStation",
+			Station = true,
+			maxOccupancy = 1,
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 150,
+			Description = "Plain porcelain throne—with a handle that always flushes.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Basic", "Toilet" },
+			ModelPath = { "Furnitures", "Toilet" },
+			AssetId = 99308990486102,
+			StationEffects = {
+				DurationSeconds = 15,
+				Effects = {
+					{ Need = "Hygiene", RatePerHour = 80 },
+				},
+			},
+			EffectSummary = {
+				"Offers quick relief during bathroom emergencies.",
+				"Stays tidy after every flush.",
+			},
+		},
+	},
+	Bedroom = {
+		OldMattress = {
+			Name = "Old Mattress",
+			PlacementType = "CellObject",
+			StationType = "RestStation",
+			Station = true,
+			maxOccupancy = 1,
+			WidthCells = 2,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 200,
+			Description = "Saggy mattress that still beats sleeping on the floor.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Basic", "Bed" },
+			ModelPath = { "Furnitures", "OldMattress" },
+			AssetId = 115333432845118,
+			StationEffects = {
+				RestMode = "Sleep",
+			},
+			EffectSummary = {
+				"Lets a resident doze off when they're desperate for rest.",
+			},
+		},
+
+		StandardBed = {
+			Name = "Standard Bed",
+			PlacementType = "CellObject",
+			StationType = "RestStation",
+			Station = true,
+			maxOccupancy = 1,
+			WidthCells = 3,
+			DepthCells = 2,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 500,
+			Description = "Reliable bed with a firm frame and soft linens for real sleep.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Comfort", "Bed" },
+			ModelPath = { "Furnitures", "StandardBed" },
+			AssetId = 136367494509090,
+			StationEffects = {
+				RestMode = "Sleep",
+			},
+			EffectSummary = {
+				"Helps residents wake up refreshed and ready.",
+				"A sturdy single bed that feels like home.",
+			},
+		},
+	},
+	Kitchen = {
+		KitchenCounter = {
+			Name = "Kitchen Counter",
+			PlacementType = "CellObject",
+			StationType = "HygieneStation",
+			Station = true,
+			maxOccupancy = 1,
+			WidthCells = 2,
+			DepthCells = 4,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 350,
+			Description = "Twin-basin counter stocked with soap, towels, and drying space.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Comfort", "Appliance" },
+			ModelPath = { "Furnitures", "KitchenCounter" },
+			AssetId = 106176633135700,
+			StationEffects = {
+				DurationSeconds = 45,
+				Effects = {
+					{ Need = "Hygiene", RatePerHour = 100 },
+				},
+			},
+			EffectSummary = {
+				"Leaves hands and dishes squeaky clean.",
+				"Running water keeps the kitchen ready for the next meal.",
+			},
+		},
+
+		CafeChair = {
+			Name = "Cafe Chair",
+			PlacementType = "CellObject",
+			StationType = "RestStation",
+			Station = true,
+			maxOccupancy = 1,
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 75,
+			Description = "Lightweight chair perfect for casual dining or a quick coffee break.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Basic", "Seating" },
+			ModelPath = { "Furnitures", "CafeChair" },
+			AssetId = 126918512427703,
+			StationEffects = {
+				RestMode = "Nap",
+			},
+			EffectSummary = {
+				"Great for a brief sit-down while enjoying a snack.",
+				"Seats one resident comfortably.",
+			},
+		},
+		WoodenChair = {
+			Name = "Wooden Chair",
+			PlacementType = "CellObject",
+			StationType = "RestStation",
+			Station = true,
+			maxOccupancy = 1,
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 50,
+			Description = "Hand-built chair with a creaky seat and plenty of charm.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Basic", "Seating" },
+			ModelPath = { "Furnitures", "WoodenChair" },
+			AssetId = 97857212871579,
+			StationEffects = {
+				RestMode = "Nap",
+			},
+			EffectSummary = {
+				"Perfect for a quick sit-down with a mug of tea.",
+				"Seats one resident when every tile counts.",
+			},
+		},
+
+		BigWoodenTable = {
+			Name = "Big Wooden Table",
+			PlacementType = "CellObject",
+			StationType = "MealStation",
+			Station = true,
+			maxOccupancy = 8,
+			WidthCells = 2,
+			DepthCells = 3,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 300,
+			Description = "Sturdy gathering table that handles big dinners and louder conversations.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Comfort", "Table" },
+			ModelPath = { "Furnitures", "BigWoodenTable" },
+			AssetId = 76848440269937,
+			StationEffects = {
+				DurationSeconds = 180,
+				Effects = {
+					{ Need = "Social", RatePerHour = 18 },
+				},
+				Moodlets = {
+					{ Name = "SharedMeal", DurationSeconds = 180, NeedBias = { Social = -0.2, Hunger = -0.1 } },
+				},
+			},
+			EffectSummary = {
+				"Pulls the household together for shared meals and gossip.",
+				"Seats up to eight residents with elbow room to spare.",
+			},
+		},
+
+		CafeTableRound = {
+			Name = "Cafe Table Round",
+			PlacementType = "CellObject",
+			StationType = "MealStation",
+			Station = true,
+			maxOccupancy = 1,
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 100,
+			Description = "Cozy round table perfect for solo meals or intimate chats.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Basic", "Table" },
+			ModelPath = { "Furnitures", "CafeTableRound" },
+			AssetId = 102662772823457,
+			StationEffects = {
+				DurationSeconds = 60,
+				Effects = {
+					{ Need = "Social", RatePerHour = 10 },
+				},
+				Moodlets = {
+					{ Name = "SoloMeal", DurationSeconds = 60, NeedBias = { Social = -0.1, Hunger = -0.1 } },
+				},
+			},
+		},
+	},
+	Office = {},
+	Hall = {
+		RusticWalnutTable = {
+			Name = "Rustic Walnut Table",
+			PlacementType = "CellObject",
+			Station = false,
+			maxOccupancy = 4,
+			WidthCells = 2,
+			DepthCells = 2,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 200,
+			Description = "Cozy dining table with a warm walnut finish for intimate meals.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Comfort", "Table" },
+			ModelPath = { "Furnitures", "RusticWalnutTable" },
+			AssetId = 77497222800349,
+
+			EffectSummary = {
+				"A perfect cozy table for your cozy hallway",
+			},
+		},
+
+		RivetConsoleTable = {
+			Name = "Rivet Console Table",
+			PlacementType = "CellObject",
+			Station = false,
+			maxOccupancy = 0,
+			WidthCells = 2,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 150,
+			Description = "Sleek console table with rivet details, ideal for displaying decor or keys.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Basic", "Table" },
+			ModelPath = { "Furnitures", "RivetConsoleTable" },
+			AssetId = 101943457005230,
+
+			EffectSummary = {
+				"A stylish console table to enhance your hallway's aesthetic.",
+			},
+		},
+	},
+}
+
+return Furnitures

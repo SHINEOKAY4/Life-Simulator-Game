@@ -70,7 +70,7 @@ local function anyCellOverlap(firstCells: { number }, secondCells: { number }): 
 	return false
 end
 
-function PlacementUtils.PreviewKindFromItem(itemId: string): "CellObject" | "Floor" | "Wall" | "Roof"
+function PlacementUtils.PreviewKindFromItem(itemId: string): "CellObject" | "Floor" | "Wall" | "Roof" | "WallMounted"
 	local item = ItemFinder.FindItemById(itemId)
 	local itemType = item and item.PlacementType or "CellObject"
 
@@ -80,6 +80,8 @@ function PlacementUtils.PreviewKindFromItem(itemId: string): "CellObject" | "Flo
 		return "Wall"
 	elseif itemType == "Roof" then
 		return "Roof"
+	elseif itemType == "WallMounted" then
+		return "WallMounted"
 	end
 
 	return "CellObject"
@@ -183,7 +185,7 @@ end
 
 function PlacementUtils.IsCellOccupiedForPreview(
 	grid: any,
-	previewKind: "CellObject" | "Floor" | "Roof",
+	previewKind: "CellObject" | "Floor" | "Roof" | "WallMounted",
 	cellX: number,
 	cellZ: number,
 	baseWidthCells: number,
@@ -215,6 +217,17 @@ function PlacementUtils.IsCellOccupiedForPreview(
 		elseif previewKind == "CellObject" then
 			if
 				placementType == "CellObject"
+				and not shouldSkipEntry(placedEntry, placementType, facingValue, ignorePlacement)
+			then
+				local otherCells =
+					grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, facingValue)
+				if anyCellOverlap(myCells, otherCells) then
+					return true
+				end
+			end
+		elseif previewKind == "WallMounted" then
+			if
+				placementType == "WallMounted"
 				and not shouldSkipEntry(placedEntry, placementType, facingValue, ignorePlacement)
 			then
 				local otherCells =

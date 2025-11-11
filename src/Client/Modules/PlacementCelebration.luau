@@ -127,7 +127,8 @@ local function waitForPlacedModel(itemId: OptionalString, cellX: number, cellZ: 
 
 	local spec = ItemFinder.FindItemById(itemId)
 	local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
-	local normalizedFacing: "North" | "East" | "South" | "West" = PlacementKey.NormalizeFacing(facing :: any)
+	local normalizedFacing: "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest" =
+		PlacementKey.NormalizeFacing(facing :: any)
 
 	local container = getPlotContainer()
 	if not container then
@@ -294,7 +295,11 @@ function PlacementCelebration.CelebrateWallStrip(
 	if typeof(facing) ~= "string" or facing == "" then
 		return
 	end
-	if orientation ~= "Horizontal" and orientation ~= "Vertical" then
+	local isDiagonalForward = orientation == "DiagonalForward"
+	local isDiagonalBackward = orientation == "DiagonalBackward"
+	local isDiagonal = isDiagonalForward or isDiagonalBackward
+
+	if orientation ~= "Horizontal" and orientation ~= "Vertical" and not isDiagonal then
 		return
 	end
 
@@ -321,10 +326,21 @@ function PlacementCelebration.CelebrateWallStrip(
 			for cellX = minCellX, maxCellX do
 				celebrateAt(cellX, row)
 			end
-		else
+		elseif orientation == "Vertical" then
 			local column = minCellX
 			for cellZ = minCellZ, maxCellZ do
 				celebrateAt(column, cellZ)
+			end
+		else
+			local deltaX = endCellX - startCellX
+			local deltaZ = endCellZ - startCellZ
+			local span = math.max(math.abs(deltaX), math.abs(deltaZ))
+			local stepX = if deltaX >= 0 then 1 else -1
+			local stepZ = if isDiagonalForward then stepX else -stepX
+			for i = 0, span do
+				local cellX = startCellX + stepX * i
+				local cellZ = startCellZ + stepZ * i
+				celebrateAt(cellX, cellZ)
 			end
 		end
 	end)

@@ -28,7 +28,6 @@ local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled"
 local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
 local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEnabled")
 local ObjectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled")
-local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
 
 type Facing = ObjectPreview.Facing
 type WallStripSelectionInfo = ObjectPreview.WallStripSelectionInfo
@@ -80,11 +79,7 @@ local function temporarilyHidePreviewForPlacement(pose: PreviewPose)
 			return
 		end
 
-		if
-			JobSelectionUIEnabled.Value == true
-			or PlotExpansionEnabled.Value == true
-			or ObjectSelectorEnabled.Value == true
-		then
+		if PlotExpansionEnabled.Value == true or ObjectSelectorEnabled.Value == true then
 			return
 		end
 
@@ -148,25 +143,20 @@ local function computeWallStripPosition(selection: WallStripSelectionInfo): Vect
 		return nil
 	end
 	local facing = selection.Facing
-	local minCellX = math.min(selection.StartCellX, selection.EndCellX)
-	local minCellZ = math.min(selection.StartCellZ, selection.EndCellZ)
-	local maxCellX = math.max(selection.StartCellX, selection.EndCellX)
-	local maxCellZ = math.max(selection.StartCellZ, selection.EndCellZ)
-
 	local okStart, startCFrame = pcall(function()
-		return grid:CellToWorldEdgeCenterCFrame(minCellX, minCellZ, facing)
+		return grid:CellToWorldEdgeCenterCFrame(selection.StartCellX, selection.StartCellZ, facing)
 	end)
 	if not okStart then
 		return nil
 	end
 	local startPosition = (startCFrame :: CFrame).Position
 
-	if minCellX == maxCellX and minCellZ == maxCellZ then
+	if selection.StartCellX == selection.EndCellX and selection.StartCellZ == selection.EndCellZ then
 		return startPosition
 	end
 
 	local okEnd, endCFrame = pcall(function()
-		return grid:CellToWorldEdgeCenterCFrame(maxCellX, maxCellZ, facing)
+		return grid:CellToWorldEdgeCenterCFrame(selection.EndCellX, selection.EndCellZ, facing)
 	end)
 	if okEnd then
 		local endPosition = (endCFrame :: CFrame).Position
@@ -182,11 +172,6 @@ local function runDebounced(actionName: string, callback: () -> ()): ()
 end
 
 function PlotBuilder.Init()
-	JobSelectionUIEnabled.Changed:Connect(function()
-		if JobSelectionUIEnabled.Value and PlotBuilderEnabled.Value then
-			PlotBuilder.Hide()
-		end
-	end)
 	PlotExpansionEnabled.Changed:Connect(function()
 		if PlotExpansionEnabled.Value and PlotBuilderEnabled.Value then
 			PlotBuilder.Hide()
@@ -322,16 +307,30 @@ function PlotBuilder.PlaceSelectedPreview()
 		end
 	end
 
+	local wallPose = pose.WallMount
 	local success, message = Packets.PlaceRequest:Fire({
 		ItemId = pose.ItemId,
 		CellX = pose.CellX,
 		CellZ = pose.CellZ,
 		Facing = pose.Facing,
+		WallMountEnabled = pose.Kind == "WallMounted" and wallPose ~= nil,
+		WallMountCellX = wallPose and wallPose.ReferenceCellX or pose.CellX,
+		WallMountCellZ = wallPose and wallPose.ReferenceCellZ or pose.CellZ,
+		WallMountFacing = wallPose and wallPose.AttachedFacing or pose.Facing,
+		WallMountHeightOffset = wallPose and wallPose.HeightOffset or 0,
+		WallMountPosX = wallPose and wallPose.WorldPosition.X or 0,
+		WallMountPosY = wallPose and wallPose.WorldPosition.Y or 0,
+		WallMountPosZ = wallPose and wallPose.WorldPosition.Z or 0,
+		WallMountNormalX = wallPose and wallPose.WallNormal.X or 0,
+		WallMountNormalY = wallPose and wallPose.WallNormal.Y or 0,
+		WallMountNormalZ = wallPose and wallPose.WallNormal.Z or -1,
 	})
 
 	if not success then
 		warn("Placement failed: " .. (message or "unknown reason"))
-		local failurePosition = computeCellObjectPosition(pose.ItemId, pose.CellX, pose.CellZ, pose.Facing)
+		local failurePosition = if pose.Kind == "WallMounted" and wallPose
+			then wallPose.WorldPosition
+			else computeCellObjectPosition(pose.ItemId, pose.CellX, pose.CellZ, pose.Facing)
 		PlacementCelebration.ShowFailure(failurePosition, pose.ItemId, message)
 		return
 	end
@@ -435,15 +434,37 @@ function PlotBuilder.PlaceWallStrip(selection: WallStripSelectionInfo)
 		return
 	end
 
-	if orientation ~= "Horizontal" and orientation ~= "Vertical" then
+	local isDiagonalForward = orientation == "DiagonalForward"
+	local isDiagonalBackward = orientation == "DiagonalBackward"
+	local isDiagonal = isDiagonalForward or isDiagonalBackward
+
+	if orientation ~= "Horizontal" and orientation ~= "Vertical" and not isDiagonal then
 		return
 	end
 
-	if
-		(orientation == "Horizontal" and startCellZ ~= endCellZ)
-		or (orientation == "Vertical" and startCellX ~= endCellX)
-	then
+	if orientation == "Horizontal" and startCellZ ~= endCellZ then
 		return
+	end
+
+	if orientation == "Vertical" and startCellX ~= endCellX then
+		return
+	end
+
+	if isDiagonal then
+		local deltaX = endCellX - startCellX
+		local deltaZ = endCellZ - startCellZ
+		if math.abs(deltaX) ~= math.abs(deltaZ) then
+			return
+		end
+		if deltaX ~= 0 or deltaZ ~= 0 then
+			local product = deltaX * deltaZ
+			if isDiagonalForward and product < 0 then
+				return
+			end
+			if isDiagonalBackward and product > 0 then
+				return
+			end
+		end
 	end
 
 	local success, message = Packets.PlaceWallStripRequest:Fire({

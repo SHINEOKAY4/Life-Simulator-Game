@@ -1,44 +1,118 @@
 --!strict
--- StarterPlayerScripts/Client/UserInterface/PlotBuilderUI.lua
+-- StarterPlayerScripts/Client/UserInterface/PlotBuilderUI.luau
 
-local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local PlotBuilder = require(script.Parent.Parent.Modules.PlotBuilder)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local Tooltip = require(script.Parent:WaitForChild("Tooltip"))
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
-local PlotBuilderGui = PlayerGui:WaitForChild("PlotBuilderGui")
+
+local plotBuilderGuiInstance = PlayerGui:FindFirstChild("PlotBuilderUI") or PlayerGui:FindFirstChild("PlotBuilderGui")
+assert(
+	plotBuilderGuiInstance and plotBuilderGuiInstance:IsA("ScreenGui"),
+	"PlotBuilderUI expected PlotBuilderUI or PlotBuilderGui ScreenGui"
+)
+local PlotBuilderGui = plotBuilderGuiInstance :: ScreenGui
+
 local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
-local InterfacesTemplates = AssetsFolder:WaitForChild("InterfacesTemplates")
-local ItemButtonTemplate = InterfacesTemplates:WaitForChild("ItemButtonTemplate")
+local InterfacesTemplatesFolder = AssetsFolder:WaitForChild("InterfacesTemplates")
+local ItemButtonTemplate = InterfacesTemplatesFolder:WaitForChild("ItemButtonTemplate") :: ImageButton
 
-local CloseButtonContext = PlotBuilderGui:WaitForChild("CloseButtonContext")
+local MainFrame = PlotBuilderGui:WaitForChild("Main") :: Frame
+local RightFrame = MainFrame:WaitForChild("Right") :: Frame
+local Header = RightFrame:FindFirstChild("Header") :: Frame
+local SearchFrame = Header and Header:FindFirstChild("SearchFrame")
+local LeftDockFrame = RightFrame:WaitForChild("LeftDock") :: Frame
+local CategoriesFrame = LeftDockFrame:WaitForChild("Categories") :: Frame
+local RightDockFrame = RightFrame:WaitForChild("RightDock") :: Frame
+local ScrollingFrame = RightDockFrame:WaitForChild("ScrollingFrame") :: ScrollingFrame
+local TitleLabel = Header:WaitForChild("Title") :: TextLabel
+local CategorySelectionFolder = PlotBuilderGui:FindFirstChild("CategorySelection")
+local PanelsInputContexts = PlotBuilderGui:FindFirstChild("PanelsInputContexts")
+local ExitButtonContextFolder = PlotBuilderGui:FindFirstChild("ExitButtonContext")
+local ExitAction = ExitButtonContextFolder and ExitButtonContextFolder:FindFirstChild("ExitButton")
+
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
-local LeftDock = PlotBuilderGui:WaitForChild("Main").Bottom.LeftDock
-local RightDock = PlotBuilderGui:WaitForChild("Main").Bottom.RightDock
+local PlotBuilderEnabledValue = ActiveQueryFolder and ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
+local ObjectPreviewEnabledValue = ActiveQueryFolder and ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled")
+local PlotExpansionEnabledValue = ActiveQueryFolder and ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
+local ObjectSelectorEnabledValue = ActiveQueryFolder and ActiveQueryFolder:FindFirstChild("ObjectSelectorEnabled")
 
-local HomeFrame = LeftDock:WaitForChild("Home")
-local FurnitureFrame = LeftDock:WaitForChild("Furnitures")
-local EnvironmentFrame = LeftDock:WaitForChild("Environment")
+local Categories = {
+	"Build",
+	"Furnitures",
+	"Appliances",
+	"Decorations",
+	"Utilities",
+	"Outdoor",
+	"Rooms",
+}
 
-local CategorySelection = PlotBuilderGui:WaitForChild("CategorySelection")
-local HomeSelection = PlotBuilderGui:WaitForChild("HomeSelection")
-local FurnitureSelection = PlotBuilderGui:WaitForChild("FurnitureSelection")
-local EnvironmentSelection = PlotBuilderGui:WaitForChild("EnvironmentSelection")
+local INPUT_DEBOUNCE_SECONDS = 0.2
+local PLACEHOLDER_THUMBNAIL = "rbxasset://textures/ui/GuiImagePlaceholder.png"
+local THUMBNAIL_TEMPLATE = "rbxthumb://type=Asset&id=%d&w=420&h=420"
+local CATEGORY_HOVER_OFFSET = Vector2.new(12, 8)
+local CATEGORY_HOVER_TWEEN = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+type ItemSpec = { [string]: any }
+type ItemEntry = { Id: string, Spec: ItemSpec, Path: { string } }
+type SearchResultEntry = { Id: string, Spec: ItemSpec, Path: { string }, Category: string }
+type FilterInfo = {
+	Key: string?,
+	RawKey: string,
+	Button: GuiButton?,
+	Action: Instance?,
+}
+type CategoryInfo = {
+	Button: GuiButton?,
+	Label: TextLabel?,
+	Panel: Frame?,
+	Filters: { [string]: FilterInfo },
+	FilterOrder: { FilterInfo },
+	ActiveFilterKey: string?,
+}
+type ButtonVisualState = "base" | "hover"
+type ButtonMetrics = {
+	BaseSize: UDim2,
+	BasePosition: UDim2,
+	HoverSize: UDim2,
+	HoverPosition: UDim2,
+	Hovered: boolean,
+}
 
 local PlotBuilderUI = {}
+local CategoryInfos: { [string]: CategoryInfo } = {}
+local CurrentCategory: string? = nil
+local CurrentPanel: Frame? = nil
+local ActiveItemButton: GuiButton? = nil
+local SearchQuery = ""
+local SearchQueryRaw = ""
+local CachedSearchKey: string? = nil
+local CachedSearchResults: { SearchResultEntry } = {}
 
-local ActiveView: string? = nil
-type CategoryPanel = "Home" | "Furnitures" | "Environment"
-local ActivePanel: CategoryPanel? = nil
-type SelectionButton = ImageButton
-local INPUT_DEBOUNCE_SECONDS = 0.2
+local ItemLayout = ScrollingFrame:FindFirstChildWhichIsA("UIGridLayout")
+local EmptyStateLabel: TextLabel? = nil
+local CategoryButtonMetrics: { [GuiButton]: ButtonMetrics } = {}
+local CategoryButtonTweens: { [GuiButton]: Tween? } = {}
 
-local function connectDebounced(action: InputAction, actionName: string, callback: () -> ()): ()
+local selectCategory: (string) -> ()
+local populateCategoryItems: (string, string?) -> ()
+local refreshItems: () -> ()
+local refreshCategoryButtonVisual: (GuiButton, boolean?) -> ()
+local bindCategoryHoverEffect: (GuiButton) -> ()
+local handleFilterInput: (string, string?) -> ()
+
+local function connectDebounced(action: Instance?, actionName: string, callback: () -> ())
+	if not action or not action:IsA("InputAction") then
+		return
+	end
+
 	action.Pressed:Connect(function()
 		Debounce.RunIfAvailable(
 			string.format("PlotBuilderUI/%s", actionName),
@@ -49,307 +123,1238 @@ local function connectDebounced(action: InputAction, actionName: string, callbac
 	end)
 end
 
-local CATEGORY_TAGS = {
-	Floors = "Floor",
-	Walls = "Wall",
-	Roofs = "Roof",
-	Decorations = "Decoration",
-	Doors = "Door",
-	Chairs = "Chair",
-	Tables = "Table",
-	Beds = "Bed",
-	Trees = "Tree",
-	Plants = "Plant",
-	Rocks = "Rock",
-	Outdoors = "Outdoor",
-	Appliances = "Appliance",
-}
-
-local buttonCache: { [string]: { SelectionButton } } = {}
-local emptyStateLabel: TextLabel? = nil
-local PLACEHOLDER_THUMBNAIL = "rbxasset://textures/ui/GuiImagePlaceholder.png"
-local THUMBNAIL_TEMPLATE = "rbxthumb://type=Asset&id=%d&w=420&h=420"
-
-local ITEM_THUMBNAIL_ASSET_IDS: { [string]: number } = {
-	Bed = 136367494509090,
-	StandardBed = 136367494509090,
-	Refridgerator = 95612768406124,
-	WoodenChair = 97857212871579,
-	BigWoodenTable = 76848440269937,
-	Lamp = 116003840493275,
-	Campfire = 116024324956421,
-}
-
-local function buildThumbnailUri(itemName: string): string
-	local assetId = ITEM_THUMBNAIL_ASSET_IDS[itemName]
-	if typeof(assetId) == "number" and assetId > 0 then
-		return string.format(THUMBNAIL_TEMPLATE, assetId)
-	end
-	return PLACEHOLDER_THUMBNAIL
+local function trim(text: string): string
+	local trimmed = text:gsub("^%s+", "")
+	return trimmed:gsub("%s+$", "")
 end
 
-local function formatCost(cost: number?): string
-	if typeof(cost) ~= "number" then
-		return "—"
-	end
-	local rounded = math.floor(cost + 0.5)
-	return string.format("$%d", rounded)
+local function escapeRichText(text: string): string
+	local escaped = text:gsub("&", "&amp;")
+	escaped = escaped:gsub("<", "&lt;")
+	escaped = escaped:gsub(">", "&gt;")
+	return escaped
 end
 
-local function getScrollingFrame(): ScrollingFrame
-	local scrollingFrame = RightDock:FindFirstChild("ScrollingFrame")
-	assert(
-		scrollingFrame and scrollingFrame:IsA("ScrollingFrame"),
-		"PlotBuilderUI expects a ScrollingFrame inside RightDock"
-	)
-
-	if not scrollingFrame:FindFirstChildWhichIsA("UIListLayout") then
-		local layout = Instance.new("UIListLayout")
-		layout.SortOrder = Enum.SortOrder.LayoutOrder
-		layout.Padding = UDim.new(0, 4)
-		layout.Parent = scrollingFrame
+local function normalizeFilterKey(rawValue: string?): string?
+	if typeof(rawValue) ~= "string" then
+		return nil
 	end
 
-	return scrollingFrame
+	local trimmed = trim(rawValue)
+	if trimmed == "" then
+		return nil
+	end
+
+	return string.lower(trimmed)
 end
 
-local function ensureEmptyStateLabel(scrollFrame: ScrollingFrame)
-	if emptyStateLabel == nil then
+local function normalizeSearch(term: string?): string
+	if typeof(term) ~= "string" then
+		return ""
+	end
+
+	return string.lower(trim(term))
+end
+
+local function normalizedEquals(value: any, normalized: string): boolean
+	if typeof(value) ~= "string" then
+		return false
+	end
+
+	return normalizeFilterKey(value) == normalized
+end
+
+local function boolValueTrue(value: BoolValue?): boolean
+	return value ~= nil and value.Value == true
+end
+
+local function shouldShowMainFrame(): boolean
+	if PlotBuilderEnabledValue and not boolValueTrue(PlotBuilderEnabledValue) then
+		return false
+	end
+
+	if ObjectPreviewEnabledValue and boolValueTrue(ObjectPreviewEnabledValue) then
+		return false
+	end
+
+	if PlotExpansionEnabledValue and boolValueTrue(PlotExpansionEnabledValue) then
+		return false
+	end
+
+	if ObjectSelectorEnabledValue and boolValueTrue(ObjectSelectorEnabledValue) then
+		return false
+	end
+
+	return true
+end
+
+local function syncVisibility()
+	MainFrame.Visible = shouldShowMainFrame()
+end
+
+local function ensureItemLayout()
+	if ItemLayout then
+		return
+	end
+
+	local layout = Instance.new("UIGridLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.CellPadding = UDim2.fromOffset(8, 8)
+	layout.CellSize = UDim2.fromOffset(180, 180)
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	layout.VerticalAlignment = Enum.VerticalAlignment.Top
+	layout.Parent = ScrollingFrame
+
+	ItemLayout = layout
+end
+
+local function ensureEmptyStateLabel(message: string?)
+	if not EmptyStateLabel then
 		local label = Instance.new("TextLabel")
 		label.Name = "EmptyState"
-		label.Size = UDim2.new(1, 0, 0, 32)
 		label.BackgroundTransparency = 1
-		label.TextColor3 = Color3.fromRGB(200, 200, 200)
+		label.Size = UDim2.new(1, 0, 0, 48)
 		label.Font = Enum.Font.Gotham
 		label.TextSize = 18
+		label.TextColor3 = Color3.fromRGB(210, 210, 210)
 		label.TextWrapped = true
 		label.RichText = true
-		emptyStateLabel = label
+		EmptyStateLabel = label
 	end
 
-	local label = emptyStateLabel :: TextLabel
-	label.Text = "<i>No items available in this category yet.</i>"
+	local label = EmptyStateLabel :: TextLabel
+	label.Text = message or "<i>No items available yet.</i>"
 	label.Visible = true
-	label.Parent = scrollFrame
+	label.Parent = ScrollingFrame
 end
 
 local function hideEmptyStateLabel()
-	local label = emptyStateLabel
-	if label ~= nil then
-		label.Visible = false
-		label.Parent = nil
+	if EmptyStateLabel then
+		EmptyStateLabel.Visible = false
+		EmptyStateLabel.Parent = nil
 	end
 end
 
-local function createButtonsForCategory(category: string): { SelectionButton }
-	local tag = CATEGORY_TAGS[category]
-	if tag == nil then
-		warn("PlotBuilderUI received unknown category", category)
-		return {}
+local function animateCategoryButton(
+	button: GuiButton,
+	metrics: ButtonMetrics,
+	targetState: ButtonVisualState,
+	instant: boolean?
+)
+	local targetSize: UDim2
+	local targetPosition: UDim2
+
+	if targetState == "hover" then
+		targetSize = metrics.HoverSize
+		targetPosition = metrics.HoverPosition
+	else
+		targetSize = metrics.BaseSize
+		targetPosition = metrics.BasePosition
 	end
 
-	local buttons = {}
-	for _, itemModel in ipairs(CollectionService:GetTagged(tag)) do
-		local buttonIndex = #buttons + 1
-		local button = ItemButtonTemplate:Clone()
-		button.Name = itemModel.Name
-		button.LayoutOrder = buttonIndex
-		button.Visible = true
-		button.Image = buildThumbnailUri(itemModel.Name)
-		button.ImageColor3 = Color3.new(1, 1, 1)
-		button.ImageTransparency = 0
+	if instant then
+		button.Size = targetSize
+		button.Position = targetPosition
+		local activeInstantTween = CategoryButtonTweens[button]
+		if activeInstantTween then
+			activeInstantTween:Cancel()
+			CategoryButtonTweens[button] = nil
+		end
+		return
+	end
 
-		local itemSpec = ItemFinder.FindItemById(itemModel.Name)
-		local costText = formatCost(itemSpec and itemSpec.Cost)
-		local infoContainer = button:FindFirstChild("Info")
-		if infoContainer and infoContainer:IsA("Frame") then
-			local costLabel = infoContainer:FindFirstChild("ItemCost")
-			if costLabel and costLabel:IsA("TextLabel") then
-				costLabel.Text = costText
+	local activeTween = CategoryButtonTweens[button]
+	if activeTween then
+		activeTween:Cancel()
+	end
+
+	if button.Size == targetSize and button.Position == targetPosition then
+		CategoryButtonTweens[button] = nil
+		return
+	end
+
+	local tween = TweenService:Create(button, CATEGORY_HOVER_TWEEN, {
+		Size = targetSize,
+		Position = targetPosition,
+	})
+	CategoryButtonTweens[button] = tween
+
+	tween.Completed:Connect(function()
+		if CategoryButtonTweens[button] == tween then
+			CategoryButtonTweens[button] = nil
+		end
+	end)
+
+	tween:Play()
+end
+
+refreshCategoryButtonVisual = function(button: GuiButton, instant: boolean?)
+	local metrics = CategoryButtonMetrics[button]
+	if not metrics then
+		return
+	end
+
+	local shouldHover = metrics.Hovered or button:GetAttribute("Selected") == true
+	local targetState: ButtonVisualState = "base"
+	if shouldHover then
+		targetState = "hover"
+	end
+	animateCategoryButton(button, metrics, targetState, instant)
+end
+
+bindCategoryHoverEffect = function(button: GuiButton)
+	if CategoryButtonMetrics[button] then
+		return
+	end
+
+	local baseSize = button.Size
+	local basePosition = button.Position
+	local hoverSize = UDim2.new(
+		baseSize.X.Scale,
+		baseSize.X.Offset + CATEGORY_HOVER_OFFSET.X,
+		baseSize.Y.Scale,
+		baseSize.Y.Offset + CATEGORY_HOVER_OFFSET.Y
+	)
+	local hoverPosition = UDim2.new(
+		basePosition.X.Scale,
+		basePosition.X.Offset - math.floor(CATEGORY_HOVER_OFFSET.X / 2),
+		basePosition.Y.Scale,
+		basePosition.Y.Offset - math.floor(CATEGORY_HOVER_OFFSET.Y / 2)
+	)
+
+	local metrics: ButtonMetrics = {
+		BaseSize = baseSize,
+		BasePosition = basePosition,
+		HoverSize = hoverSize,
+		HoverPosition = hoverPosition,
+		Hovered = false,
+	}
+
+	CategoryButtonMetrics[button] = metrics
+
+	button.MouseEnter:Connect(function()
+		local stored = CategoryButtonMetrics[button]
+		if not stored then
+			return
+		end
+		stored.Hovered = true
+		refreshCategoryButtonVisual(button)
+		local categoryNameAttr = button:GetAttribute("PlotBuilderCategoryName")
+		if typeof(categoryNameAttr) == "string" then
+			local info = CategoryInfos[categoryNameAttr]
+			if info and info.Label then
+				info.Label.Visible = true
+			end
+		end
+	end)
+
+	button.MouseLeave:Connect(function()
+		local stored = CategoryButtonMetrics[button]
+		if not stored then
+			return
+		end
+		stored.Hovered = false
+		refreshCategoryButtonVisual(button)
+		local categoryNameAttr = button:GetAttribute("PlotBuilderCategoryName")
+		if typeof(categoryNameAttr) == "string" and CurrentCategory ~= categoryNameAttr then
+			local info = CategoryInfos[categoryNameAttr]
+			if info and info.Label then
+				info.Label.Visible = false
+			end
+		end
+	end)
+
+	button.AncestryChanged:Connect(function(_, parent)
+		if parent ~= nil then
+			return
+		end
+
+		local activeTween = CategoryButtonTweens[button]
+		if activeTween then
+			activeTween:Cancel()
+		end
+
+		CategoryButtonTweens[button] = nil
+		CategoryButtonMetrics[button] = nil
+		local categoryNameAttr = button:GetAttribute("PlotBuilderCategoryName")
+		if typeof(categoryNameAttr) == "string" and CurrentCategory ~= categoryNameAttr then
+			local info = CategoryInfos[categoryNameAttr]
+			if info and info.Label then
+				info.Label.Visible = false
+			end
+		end
+	end)
+
+	refreshCategoryButtonVisual(button, true)
+end
+
+local function clearItemButtons()
+	ActiveItemButton = nil
+	for _, child in ipairs(ScrollingFrame:GetChildren()) do
+		if child:IsA("GuiButton") then
+			child:Destroy()
+		end
+	end
+end
+
+local function buildThumbnail(spec: ItemSpec): string
+	local assetId = spec.AssetId
+	if typeof(assetId) == "number" and assetId > 0 then
+		return string.format(THUMBNAIL_TEMPLATE, assetId)
+	end
+
+	return PLACEHOLDER_THUMBNAIL
+end
+
+local function formatCategoryPath(categoryName: string?, path: { string }): string?
+	local segments = table.create(#path + 1)
+	if categoryName and categoryName ~= "" then
+		segments[#segments + 1] = categoryName
+	end
+	for _, segment in ipairs(path) do
+		segments[#segments + 1] = segment
+	end
+	if #segments == 0 then
+		return nil
+	end
+	return table.concat(segments, " > ")
+end
+
+local function formatTags(spec: ItemSpec): string?
+	local tags = spec.Tags
+	if typeof(tags) == "table" and #tags > 0 then
+		return "Tags: " .. table.concat(tags, " / ")
+	end
+	return nil
+end
+
+local function resolveItemDescription(entry: ItemEntry, categoryName: string?): string
+	local spec = entry.Spec
+	local description = spec.Description
+	if typeof(description) == "string" and description ~= "" then
+		return description
+	end
+	local categoryPath = formatCategoryPath(categoryName, entry.Path)
+	if categoryPath then
+		return string.format("Available under %s.", categoryPath)
+	end
+	local tagsLine = formatTags(spec)
+	if tagsLine then
+		return tagsLine
+	end
+	return "Preview this item to see how it reshapes your plot."
+end
+
+local NEED_EMOJI: { [string]: string } = {
+	Hunger = "🍽",
+	Energy = "😴",
+	Hygiene = "🧼",
+	Social = "🗨",
+	Fun = "🎮",
+	Bladder = "🚽",
+}
+
+local DURATION_EMOJI = "⏱"
+local POWER_EMOJI = "⚡"
+local STORAGE_EMOJI = "📦"
+
+local REST_MODE_SUMMARY: { [string]: { DurationSeconds: number?, RatePerHour: number? } } = {
+	Sleep = { DurationSeconds = 420, RatePerHour = 12 },
+	Nap = { DurationSeconds = 180, RatePerHour = 10 },
+	Relax = { DurationSeconds = 210, RatePerHour = 9 },
+	DaySleep = { DurationSeconds = 240, RatePerHour = 10 },
+	Ground = { DurationSeconds = 420, RatePerHour = 6 },
+}
+
+type DetailSegment = {
+	label: string,
+	value: string,
+}
+
+local function formatNeedLabel(needName: string): string
+	if needName == "" then
+		return "Need"
+	end
+	local emoji = NEED_EMOJI[needName]
+	if emoji then
+		return string.format("%s %s", emoji, needName)
+	end
+	return needName
+end
+
+local function formatEffectValue(rateValue: number?, amountValue: number?): string?
+	if typeof(rateValue) == "number" then
+		local rounded = math.floor(math.abs(rateValue) + 0.5)
+		local sign = if rateValue >= 0 then "+" else "-"
+		return string.format("%s%d/hr", sign, rounded)
+	end
+	if typeof(amountValue) == "number" then
+		local rounded = math.floor(math.abs(amountValue) + 0.5)
+		local sign = if amountValue >= 0 then "+" else "-"
+		return string.format("%s%d", sign, rounded)
+	end
+	return nil
+end
+
+local function collectDetailSegments(entry: ItemEntry): { DetailSegment }
+	local spec = entry.Spec
+	local segments: { DetailSegment } = {}
+
+	local cost = spec.Cost
+	if typeof(cost) == "number" then
+		segments[#segments + 1] = {
+			label = "Cost",
+			value = string.format("$%d", math.floor(cost + 0.5)),
+		}
+	end
+
+	local stationEffects = spec.StationEffects
+	if typeof(stationEffects) == "table" then
+		local restDefaults = nil
+		local restMode = stationEffects.RestMode
+		if typeof(restMode) == "string" then
+			restDefaults = REST_MODE_SUMMARY[restMode]
+		end
+
+		local duration = stationEffects.DurationSeconds
+		if typeof(duration) ~= "number" and restDefaults and typeof(restDefaults.DurationSeconds) == "number" then
+			duration = restDefaults.DurationSeconds
+		end
+		if typeof(duration) == "number" then
+			segments[#segments + 1] = {
+				label = string.format("%s Duration", DURATION_EMOJI),
+				value = string.format("%ds", math.floor(duration + 0.5)),
+			}
+		end
+
+		local effectsList = stationEffects.Effects
+		local addedEffectLine = false
+		if typeof(effectsList) == "table" then
+			for _, effect in ipairs(effectsList) do
+				local needName = effect.Need
+				if typeof(needName) == "string" and needName ~= "" then
+					local displayValue = formatEffectValue(effect.RatePerHour, effect.Amount or effect.Instant)
+					if displayValue then
+						segments[#segments + 1] = {
+							label = formatNeedLabel(needName),
+							value = displayValue,
+						}
+						addedEffectLine = true
+					end
+				end
 			end
 		end
 
-		button.MouseButton1Click:Connect(function()
-			print("Selected item: " .. itemModel.Name)
-			PlotBuilder.PreviewSelected(itemModel.Name)
+		if not addedEffectLine and restDefaults and typeof(restDefaults.RatePerHour) == "number" then
+			local restValue = formatEffectValue(restDefaults.RatePerHour, nil)
+			if restValue then
+				segments[#segments + 1] = {
+					label = formatNeedLabel("Energy"),
+					value = restValue,
+				}
+			end
+		end
+	end
+
+	local energyUse = spec.EnergyConsumptionPerHour
+	if typeof(energyUse) == "number" and energyUse > 0 then
+		segments[#segments + 1] = {
+			label = string.format("%s Power", POWER_EMOJI),
+			value = string.format("-%d/hr", math.floor(energyUse + 0.5)),
+		}
+	end
+
+	local storage = spec.StorageConfig
+	if typeof(storage) == "table" then
+		local capacity = storage.Capacity
+		if typeof(capacity) == "number" and capacity > 0 then
+			segments[#segments + 1] = {
+				label = string.format("%s Storage", STORAGE_EMOJI),
+				value = string.format("%d slots", math.floor(capacity + 0.5)),
+			}
+		end
+	end
+
+	return segments
+end
+
+local function buildDetailLine(entry: ItemEntry): string
+	local segments = collectDetailSegments(entry)
+	if #segments == 0 then
+		return ""
+	end
+
+	local parts = table.create(#segments)
+	for index, segment in ipairs(segments) do
+		parts[index] = string.format("%s %s", segment.label, segment.value)
+	end
+
+	return table.concat(parts, "    ")
+end
+
+local function attachItemTooltip(button: GuiButton, entry: ItemEntry, categoryName: string?)
+	local spec = entry.Spec
+	local itemName = typeof(spec.Name) == "string" and spec.Name or entry.Id
+	local description = resolveItemDescription(entry, categoryName)
+	local detailText = buildDetailLine(entry)
+	local thumbnail = buildThumbnail(spec)
+
+	local tooltip = Tooltip.new(button, {
+		title = itemName,
+		description = description,
+		detailText = detailText,
+		thumbnail = thumbnail,
+		delay = 0.1,
+		maxWidth = 360,
+		detailTextSize = 16,
+	})
+
+	tooltip:SetItemContent({
+		Title = itemName,
+		Description = description,
+		Detail = detailText,
+		Thumbnail = thumbnail,
+	})
+
+	button.Destroying:Connect(function()
+		tooltip:Destroy()
+	end)
+end
+
+local function formatCost(costValue: any): string
+	if typeof(costValue) ~= "number" then
+		return "—"
+	end
+
+	return string.format("$%d", math.floor(costValue + 0.5))
+end
+
+local function configureItemButton(button: ImageButton, entry: ItemEntry, layoutOrder: number)
+	button.Name = entry.Id
+	button.LayoutOrder = layoutOrder
+	button.Visible = true
+	button.Image = buildThumbnail(entry.Spec)
+	button:SetAttribute("Selected", false)
+
+	local infoFrame = button:FindFirstChild("Info")
+	if infoFrame and infoFrame:IsA("Frame") then
+		local costLabel = infoFrame:FindFirstChild("ItemCost")
+		if costLabel and costLabel:IsA("TextLabel") then
+			costLabel.Text = formatCost(entry.Spec.Cost)
+		end
+
+		local nameLabel = infoFrame:FindFirstChild("ItemName")
+		if nameLabel and nameLabel:IsA("TextLabel") then
+			local displayName = entry.Spec.Name
+			nameLabel.Text = typeof(displayName) == "string" and displayName or entry.Id
+		end
+	end
+end
+
+local function selectItemButton(button: GuiButton, entry: ItemEntry)
+	if ActiveItemButton and ActiveItemButton ~= button then
+		ActiveItemButton:SetAttribute("Selected", false)
+	end
+
+	ActiveItemButton = button
+	button:SetAttribute("Selected", true)
+
+	local spec = entry.Spec
+	local facing = spec.Facing
+	local initialFacing: string? = nil
+	if typeof(facing) == "table" and #facing > 0 then
+		local firstFacing = facing[1]
+		if typeof(firstFacing) == "string" then
+			initialFacing = firstFacing
+		end
+	end
+
+	PlotBuilder.PreviewSelected(entry.Id, initialFacing)
+end
+
+local function createItemButton(entry: ItemEntry, layoutOrder: number, categoryName: string?): GuiButton
+	local button = ItemButtonTemplate:Clone()
+	configureItemButton(button, entry, layoutOrder)
+
+	button.Activated:Connect(function()
+		selectItemButton(button, entry)
+	end)
+
+	attachItemTooltip(button, entry, categoryName)
+
+	return button
+end
+
+local function matchesFilter(entry: ItemEntry, normalizedFilter: string?): boolean
+	if normalizedFilter == nil or normalizedFilter == "" or normalizedFilter == "all" then
+		return true
+	end
+
+	for _, segment in ipairs(entry.Path) do
+		if normalizedEquals(segment, normalizedFilter) then
+			return true
+		end
+	end
+
+	local spec = entry.Spec
+	if normalizedEquals(spec.PlacementType, normalizedFilter) then
+		return true
+	end
+
+	if normalizedEquals(spec.StationType, normalizedFilter) then
+		return true
+	end
+
+	local tags = spec.Tags
+	if typeof(tags) == "table" then
+		for _, tag in ipairs(tags) do
+			if normalizedEquals(tag, normalizedFilter) then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+local function matchesSearch(entry: ItemEntry, normalizedQuery: string): boolean
+	if normalizedQuery == "" then
+		return true
+	end
+
+	local spec = entry.Spec
+	local displayName = spec.Name
+	if typeof(displayName) == "string" and string.find(string.lower(displayName), normalizedQuery, 1, true) then
+		return true
+	end
+
+	if string.find(string.lower(entry.Id), normalizedQuery, 1, true) then
+		return true
+	end
+
+	local tags = spec.Tags
+	if typeof(tags) == "table" then
+		for _, tag in ipairs(tags) do
+			if typeof(tag) == "string" and string.find(string.lower(tag), normalizedQuery, 1, true) then
+				return true
+			end
+		end
+	end
+
+	for _, segment in ipairs(entry.Path) do
+		if string.find(string.lower(segment), normalizedQuery, 1, true) then
+			return true
+		end
+	end
+
+	return false
+end
+
+populateCategoryItems = function(categoryName: string, normalizedFilter: string?)
+	ensureItemLayout()
+
+	local entries = ItemFinder.GetCategoryEntries(categoryName)
+	local filtered = table.create(#entries)
+
+	for _, entry in ipairs(entries) do
+		if matchesFilter(entry, normalizedFilter) and matchesSearch(entry, SearchQuery) then
+			filtered[#filtered + 1] = entry
+		end
+	end
+
+	clearItemButtons()
+
+	if #filtered == 0 then
+		ensureEmptyStateLabel("<i>No items available yet.</i>")
+		return
+	end
+
+	hideEmptyStateLabel()
+
+	for index, entry in ipairs(filtered) do
+		local button = createItemButton(entry, index, categoryName)
+		button.Parent = ScrollingFrame
+	end
+
+	ScrollingFrame.CanvasPosition = Vector2.new(0, 0)
+end
+
+local function getSearchDisplayText(): string
+	return SearchQueryRaw ~= "" and SearchQueryRaw or SearchQuery
+end
+
+local function formatSearchTitle(resultCount: number): string
+	local display = getSearchDisplayText()
+	if display ~= "" then
+		local escapedDisplay = display:gsub("%%", "%%%%")
+		return string.format("Results for '%s' (%d)", escapedDisplay, resultCount)
+	end
+
+	return string.format("Search Results (%d)", resultCount)
+end
+
+local function populateSearchResults(normalizedFilter: string?)
+	ensureItemLayout()
+	clearItemButtons()
+
+	if CachedSearchKey ~= SearchQuery then
+		if SearchQuery == "" then
+			CachedSearchResults = {}
+			CachedSearchKey = nil
+		else
+			CachedSearchResults = ItemFinder.SearchCatalog(SearchQuery)
+			CachedSearchKey = SearchQuery
+		end
+	end
+
+	local candidates = CachedSearchResults
+	local filtered = table.create(#candidates)
+	local effectiveFilter = (SearchQuery == "" and normalizedFilter) or nil
+	for _, entry in ipairs(candidates) do
+		if matchesFilter(entry, effectiveFilter) then
+			filtered[#filtered + 1] = entry
+		end
+	end
+
+	TitleLabel.Text = formatSearchTitle(#filtered)
+
+	if #filtered == 0 then
+		local safeQuery = getSearchDisplayText()
+		if safeQuery ~= "" then
+			local escaped = escapeRichText(safeQuery)
+			ensureEmptyStateLabel(string.format("<i>No matches for '%s'.</i>", escaped))
+		else
+			ensureEmptyStateLabel("<i>No matches found.</i>")
+		end
+		return
+	end
+
+	hideEmptyStateLabel()
+
+	for index, entry in ipairs(filtered) do
+		local button = createItemButton(entry, index, entry.Category)
+		button:SetAttribute("Category", entry.Category)
+		button.Parent = ScrollingFrame
+	end
+
+	ScrollingFrame.CanvasPosition = Vector2.new(0, 0)
+end
+
+local function getSlotKey(normalizedKey: string?): string
+	return normalizedKey or "__all"
+end
+
+local function resolveCategoryAlias(name: string): string?
+	if CategoryInfos[name] then
+		return name
+	end
+
+	if #name > 9 and string.sub(name, -9) == "Selection" then
+		local trimmed = string.sub(name, 1, #name - 9)
+		if CategoryInfos[trimmed] then
+			return trimmed
+		end
+	end
+
+	return nil
+end
+
+local function resolveActionButton(action: Instance): GuiButton?
+	local binding = (action :: any).InputBinding
+	if not binding then
+		return nil
+	end
+
+	local candidate = (binding :: any).UIButton
+	if typeof(candidate) ~= "Instance" then
+		return nil
+	end
+
+	if candidate:IsA("GuiButton") then
+		return candidate
+	end
+
+	return nil
+end
+
+local function ensureFilterInfo(categoryName: string, rawKey: string, normalizedKey: string?): FilterInfo
+	local info = CategoryInfos[categoryName]
+	if not info then
+		error(("PlotBuilderUI missing category info for %s"):format(categoryName))
+	end
+
+	local slotKey = getSlotKey(normalizedKey)
+	local filterInfo: FilterInfo? = info.Filters[slotKey]
+	if not filterInfo then
+		local newFilterInfo: FilterInfo = {
+			Key = normalizedKey,
+			RawKey = rawKey,
+			Button = nil,
+			Action = nil,
+		}
+		info.Filters[slotKey] = newFilterInfo
+		table.insert(info.FilterOrder, newFilterInfo)
+		filterInfo = newFilterInfo
+	elseif rawKey ~= "" then
+		filterInfo.RawKey = rawKey
+	end
+
+	return filterInfo :: FilterInfo
+end
+
+local function registerFilterAction(categoryName: string, action: Instance)
+	local attributeValue = action:GetAttribute("FilterKey")
+	local rawKey: string? = nil
+	if typeof(attributeValue) == "string" then
+		rawKey = attributeValue
+	end
+	if not rawKey or rawKey == "" then
+		rawKey = action.Name
+	end
+
+	local normalized = normalizeFilterKey(rawKey)
+	if normalized == "all" then
+		normalized = nil
+	end
+
+	local filterInfo = ensureFilterInfo(categoryName, rawKey or "", normalized)
+	filterInfo.Action = action
+
+	local button = resolveActionButton(action)
+	if button then
+		filterInfo.Button = button
+		button:SetAttribute("Selected", false)
+	end
+
+	local eventLabel = rawKey or "All"
+	connectDebounced(action, "Filter:" .. categoryName .. ":" .. eventLabel, function()
+		handleFilterInput(categoryName, normalized)
+	end)
+end
+
+local function updateFilterHighlight(info: CategoryInfo, normalizedKey: string?)
+	local activeSlot = getSlotKey(normalizedKey)
+
+	for slotKey, filterInfo in info.Filters do
+		local button = filterInfo.Button
+		if button then
+			button:SetAttribute("Selected", slotKey == activeSlot)
+		end
+	end
+end
+
+local function getButtonDisplayText(button: GuiButton): string?
+	if button:IsA("TextButton") then
+		local text = button.Text
+		if text ~= "" then
+			return text
+		end
+	end
+
+	local textLabel = button:FindFirstChildWhichIsA("TextLabel")
+	if textLabel then
+		local labelText = textLabel.Text
+		if labelText ~= "" then
+			return labelText
+		end
+	end
+
+	return nil
+end
+
+local function updateTitle(categoryName: string, normalizedFilter: string?)
+	local info = CategoryInfos[categoryName]
+	if not info then
+		TitleLabel.Text = categoryName
+		return
+	end
+
+	local titleText = categoryName
+	local filterInfo = info.Filters[getSlotKey(normalizedFilter)]
+	if filterInfo then
+		local displayText: string? = nil
+		local button = filterInfo.Button
+		if button then
+			displayText = getButtonDisplayText(button)
+		end
+		if (not displayText or displayText == "") and filterInfo.RawKey ~= "" then
+			displayText = filterInfo.RawKey
+		end
+		if displayText and displayText ~= "" then
+			titleText = displayText
+		end
+	end
+
+	TitleLabel.Text = titleText
+end
+
+local function determineDefaultFilterKey(info: CategoryInfo): string?
+	if #info.FilterOrder == 0 then
+		return nil
+	end
+
+	for _, filterInfo in ipairs(info.FilterOrder) do
+		if filterInfo.Key == nil then
+			return nil
+		end
+	end
+
+	local first = info.FilterOrder[1]
+	return first and first.Key or nil
+end
+
+local function applyFilter(categoryName: string, normalizedKey: string?)
+	local info = CategoryInfos[categoryName]
+	if not info then
+		return
+	end
+
+	info.ActiveFilterKey = normalizedKey
+	updateFilterHighlight(info, normalizedKey)
+	refreshItems()
+end
+
+local function setCurrentCategory(categoryName: string): CategoryInfo?
+	local info = CategoryInfos[categoryName]
+	if not info then
+		warn(("PlotBuilderUI missing category info for %s"):format(categoryName))
+		return nil
+	end
+
+	if CurrentCategory == categoryName then
+		if info.Label then
+			info.Label.Visible = true
+		end
+		if info.Panel then
+			info.Panel.Visible = true
+			CurrentPanel = info.Panel
+		end
+		return info
+	end
+
+	if CurrentCategory then
+		local previousInfo = CategoryInfos[CurrentCategory]
+		if previousInfo then
+			if previousInfo.Button then
+				previousInfo.Button:SetAttribute("Selected", false)
+				refreshCategoryButtonVisual(previousInfo.Button)
+			end
+			if previousInfo.Panel then
+				previousInfo.Panel.Visible = false
+			end
+			if previousInfo.Label then
+				previousInfo.Label.Visible = false
+			end
+		end
+	end
+
+	CurrentCategory = categoryName
+
+	if info.Button then
+		info.Button:SetAttribute("Selected", true)
+		refreshCategoryButtonVisual(info.Button)
+	end
+
+	if info.Label then
+		info.Label.Visible = true
+	end
+
+	if CurrentPanel and CurrentPanel ~= info.Panel then
+		CurrentPanel.Visible = false
+	end
+
+	CurrentPanel = info.Panel
+	if CurrentPanel then
+		CurrentPanel.Visible = true
+	end
+
+	return info
+end
+
+selectCategory = function(categoryName: string)
+	local info = setCurrentCategory(categoryName)
+	if not info then
+		return
+	end
+
+	local defaultFilter = determineDefaultFilterKey(info)
+	applyFilter(categoryName, defaultFilter)
+end
+
+handleFilterInput = function(categoryName: string, normalizedKey: string?)
+	local info = setCurrentCategory(categoryName)
+	if not info then
+		return
+	end
+
+	applyFilter(categoryName, normalizedKey)
+end
+
+refreshItems = function()
+	local info = CurrentCategory and CategoryInfos[CurrentCategory] or nil
+	local filterKey = info and info.ActiveFilterKey or nil
+
+	if SearchQuery ~= "" then
+		populateSearchResults(nil)
+		return
+	end
+
+	if not CurrentCategory then
+		clearItemButtons()
+		TitleLabel.Text = "Catalog"
+		ensureEmptyStateLabel("<i>Select a category to get started.</i>")
+		return
+	end
+
+	updateTitle(CurrentCategory, filterKey)
+	populateCategoryItems(CurrentCategory, filterKey)
+end
+
+local function registerCategory(categoryName: string)
+	local categoryFrame = CategoriesFrame:FindFirstChild(categoryName)
+	local button: GuiButton? = nil
+	local label: TextLabel? = nil
+
+	if categoryFrame then
+		if categoryFrame:IsA("GuiButton") then
+			button = categoryFrame
+		else
+			local buttonCandidate = categoryFrame:FindFirstChildWhichIsA("GuiButton")
+			if buttonCandidate and buttonCandidate:IsA("GuiButton") then
+				button = buttonCandidate
+			end
+			local labelCandidate = categoryFrame:FindFirstChildWhichIsA("TextLabel")
+			if labelCandidate and labelCandidate:IsA("TextLabel") then
+				label = labelCandidate
+			end
+		end
+	end
+
+	if label then
+		label.Text = categoryName
+		label.Visible = false
+	end
+
+	local panel: Frame? = nil
+	local panelCandidate = LeftDockFrame:FindFirstChild(categoryName)
+	if not panelCandidate then
+		panelCandidate = LeftDockFrame:FindFirstChild(categoryName .. "Panel")
+	end
+	if panelCandidate and panelCandidate:IsA("Frame") then
+		local framePanel = panelCandidate :: Frame
+		framePanel.Visible = false
+		panel = framePanel
+	end
+
+	local info: CategoryInfo = {
+		Button = button,
+		Label = label,
+		Panel = panel,
+		Filters = {} :: { [string]: FilterInfo },
+		FilterOrder = {} :: { FilterInfo },
+		ActiveFilterKey = nil,
+	}
+
+	CategoryInfos[categoryName] = info
+
+	if button then
+		button:SetAttribute("Selected", false)
+		button:SetAttribute("PlotBuilderCategoryName", categoryName)
+		button.Activated:Connect(function()
+			selectCategory(categoryName)
 		end)
 
-		table.insert(buttons, button)
+		bindCategoryHoverEffect(button)
 	end
 
-	buttonCache[category] = buttons
-	return buttons
+	local actionInstance = CategorySelectionFolder and CategorySelectionFolder:FindFirstChild(categoryName)
+	connectDebounced(actionInstance, "Category:" .. categoryName, function()
+		selectCategory(categoryName)
+	end)
 end
 
-local function getButtonsForCategory(category: string): { SelectionButton }
-	local cached = buttonCache[category]
-	if cached ~= nil then
-		return cached
-	end
-
-	return createButtonsForCategory(category)
-end
-
-local function detachButtons(buttons: { SelectionButton })
-	for _, button in ipairs(buttons) do
-		button.Parent = nil
-	end
-end
-
-local function attachButtons(scrollFrame: ScrollingFrame, buttons: { SelectionButton })
-	for _, button in ipairs(buttons) do
-		button.Parent = scrollFrame
-	end
-end
-
-local function clearActiveCategory()
-	if ActiveView ~= nil then
-		local previousButtons = buttonCache[ActiveView]
-		if previousButtons ~= nil then
-			detachButtons(previousButtons)
-		end
-		ActiveView = nil
-	end
-
-	hideEmptyStateLabel()
-end
-
-local function switchCategoryPanel(category: CategoryPanel)
-	local scrollFrame = getScrollingFrame()
-
-	ActivePanel = category
-	clearActiveCategory()
-
-	local isHome = ActivePanel == "Home"
-	local isFurniture = ActivePanel == "Furnitures"
-	local isEnvironment = ActivePanel == "Environment"
-	HomeFrame.Visible = isHome
-
-	FurnitureFrame.Visible = isFurniture
-	EnvironmentFrame.Visible = isEnvironment
-
-	scrollFrame.Visible = true
-end
-
-local function setActiveCategory(category: string)
-	if ActiveView == category then
-		return
-	end
-
-	local scrollFrame = getScrollingFrame()
-
-	if ActiveView ~= nil then
-		local previousButtons = buttonCache[ActiveView]
-		if previousButtons ~= nil then
-			detachButtons(previousButtons)
+local function resolveActionCategory(action: Instance): string?
+	local attributeCategory = action:GetAttribute("Category")
+	if typeof(attributeCategory) == "string" then
+		local mapped = resolveCategoryAlias(attributeCategory)
+		if mapped then
+			return mapped
 		end
 	end
 
-	ActiveView = category
+	local ancestor = action.Parent
+	while ancestor and ancestor ~= PanelsInputContexts do
+		local mapped = resolveCategoryAlias(ancestor.Name)
+		if mapped then
+			return mapped
+		end
+		ancestor = ancestor.Parent
+	end
 
-	local buttons = getButtonsForCategory(category)
-	if #buttons == 0 then
-		ensureEmptyStateLabel(scrollFrame)
+	if ancestor == PanelsInputContexts then
+		local mapped = resolveCategoryAlias(action.Name)
+		if mapped then
+			return mapped
+		end
+	end
+
+	return nil
+end
+
+local function bindPanelInputActions()
+	if not PanelsInputContexts then
 		return
 	end
 
-	hideEmptyStateLabel()
-	attachButtons(scrollFrame, buttons)
+	for _, descendant in ipairs(PanelsInputContexts:GetDescendants()) do
+		if descendant:IsA("InputAction") then
+			local categoryName = resolveActionCategory(descendant)
+			if categoryName then
+				registerFilterAction(categoryName, descendant)
+			end
+		end
+	end
+
+	for categoryName in pairs(CategoryInfos) do
+		ensureFilterInfo(categoryName, "", nil)
+	end
+end
+
+local function bindSearchBox()
+	if not SearchFrame then
+		return
+	end
+
+	local searchBox = SearchFrame:FindFirstChildWhichIsA("TextBox", true)
+	if not searchBox then
+		return
+	end
+
+	local clearButton = SearchFrame:FindFirstChild("ClearButton", true)
+
+	local function updateSearch()
+		local rawTrimmed = trim(searchBox.Text)
+		local normalized = normalizeSearch(searchBox.Text)
+		if normalized == SearchQuery and rawTrimmed == SearchQueryRaw then
+			return
+		end
+
+		SearchQuery = normalized
+		SearchQueryRaw = rawTrimmed
+		CachedSearchKey = nil
+		CachedSearchResults = {}
+		refreshItems()
+	end
+
+	searchBox:GetPropertyChangedSignal("Text"):Connect(updateSearch)
+	searchBox.FocusLost:Connect(function()
+		updateSearch()
+	end)
+
+	if clearButton and clearButton:IsA("GuiButton") then
+		clearButton.Activated:Connect(function()
+			if searchBox.Text ~= "" then
+				searchBox.Text = ""
+			elseif SearchQuery ~= "" or SearchQueryRaw ~= "" then
+				SearchQuery = ""
+				SearchQueryRaw = ""
+				CachedSearchKey = nil
+				CachedSearchResults = {}
+				refreshItems()
+			end
+		end)
+	end
+end
+
+local function bindExitControls()
+	if ExitAction then
+		if ExitAction:IsA("InputAction") then
+			connectDebounced(ExitAction, "Exit", function()
+				PlotBuilder.Hide()
+			end)
+		elseif ExitAction:IsA("GuiButton") then
+			ExitAction.Activated:Connect(function()
+				PlotBuilder.Hide()
+			end)
+		end
+	end
+
+	if ExitButtonContextFolder then
+		local buttonCandidate = ExitButtonContextFolder:FindFirstChildWhichIsA("GuiButton")
+		if buttonCandidate then
+			buttonCandidate.Activated:Connect(function()
+				PlotBuilder.Hide()
+			end)
+		end
+	end
+
+	local headerClose = Header and Header:FindFirstChild("CloseButton")
+	if headerClose and headerClose:IsA("GuiButton") then
+		headerClose.Activated:Connect(function()
+			PlotBuilder.Hide()
+		end)
+	end
+end
+
+local function initializeVisibilityObservers()
+	if PlotBuilderEnabledValue then
+		PlotBuilderEnabledValue.Changed:Connect(syncVisibility)
+	end
+	if ObjectPreviewEnabledValue then
+		ObjectPreviewEnabledValue.Changed:Connect(syncVisibility)
+	end
+	if PlotExpansionEnabledValue then
+		PlotExpansionEnabledValue.Changed:Connect(syncVisibility)
+	end
+	if ObjectSelectorEnabledValue then
+		ObjectSelectorEnabledValue.Changed:Connect(syncVisibility)
+	end
+end
+
+local function registerCategories()
+	for _, categoryName in ipairs(Categories) do
+		registerCategory(categoryName)
+	end
+end
+
+local function selectInitialCategory()
+	local candidate: string? = nil
+
+	for _, categoryName in ipairs(Categories) do
+		if CategoryInfos[categoryName] then
+			if not candidate then
+				candidate = categoryName
+			end
+			local entries = ItemFinder.GetCategoryEntries(categoryName)
+			if #entries > 0 then
+				candidate = categoryName
+				break
+			end
+		end
+	end
+
+	if candidate then
+		selectCategory(candidate)
+	end
 end
 
 function PlotBuilderUI:Init()
-	local objectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled")
-	objectPreviewEnabled.Changed:Connect(function()
-		local enabled = objectPreviewEnabled.Value
-		if enabled then
-			PlotBuilderGui.Main.Visible = false
-		end
-	end)
+	ensureItemLayout()
+	registerCategories()
+	bindPanelInputActions()
+	bindSearchBox()
+	bindExitControls()
+	initializeVisibilityObservers()
+	selectInitialCategory()
+	syncVisibility()
+end
 
-	connectDebounced(CategorySelection.Home, "CategoryHome", function()
-		print("CategorySelection Home button pressed")
-		switchCategoryPanel("Home")
-	end)
+function PlotBuilderUI.Show()
+	syncVisibility()
+end
 
-	connectDebounced(CategorySelection.Furnitures, "CategoryFurniture", function()
-		print("CategorySelection Furniture button pressed")
-		switchCategoryPanel("Furnitures")
-	end)
-
-	connectDebounced(CategorySelection.Environment, "CategoryEnvironment", function()
-		print("CategorySelection Environment button pressed")
-		switchCategoryPanel("Environment")
-	end)
-
-	connectDebounced(HomeSelection.Floors, "HomeFloors", function()
-		print("HomeSelection Floors button pressed")
-		setActiveCategory("Floors")
-	end)
-
-	connectDebounced(HomeSelection.Walls, "HomeWalls", function()
-		print("HomeSelection Walls button pressed")
-		setActiveCategory("Walls")
-	end)
-
-	connectDebounced(HomeSelection.Roofs, "HomeRoofs", function()
-		print("HomeSelection Roofs button pressed")
-		setActiveCategory("Roofs")
-	end)
-
-	connectDebounced(HomeSelection.Decorations, "HomeDecorations", function()
-		print("HomeSelection Decorations button pressed")
-		setActiveCategory("Decorations")
-	end)
-
-	connectDebounced(HomeSelection.Doors, "HomeDoors", function()
-		print("HomeSelection Doors button pressed")
-		setActiveCategory("Doors")
-	end)
-
-	connectDebounced(HomeSelection.Appliances, "HomeAppliances", function()
-		print("HomeSelection Appliances button pressed")
-		setActiveCategory("Appliances")
-	end)
-
-	connectDebounced(FurnitureSelection.Chairs, "FurnitureChairs", function()
-		print("FurnitureSelection Chairs button pressed")
-		setActiveCategory("Chairs")
-	end)
-
-	connectDebounced(FurnitureSelection.Tables, "FurnitureTables", function()
-		print("FurnitureSelection Tables button pressed")
-		setActiveCategory("Tables")
-	end)
-
-	connectDebounced(FurnitureSelection.Beds, "FurnitureBeds", function()
-		print("FurnitureSelection Beds button pressed")
-		setActiveCategory("Beds")
-	end)
-
-	connectDebounced(EnvironmentSelection.Outdoors, "EnvironmentOutdoors", function()
-		print("FurnitureSelection Outdoors button pressed")
-		setActiveCategory("Outdoors")
-	end)
-
-	connectDebounced(EnvironmentSelection.Trees, "EnvironmentTrees", function()
-		print("EnvironmentSelection Trees button pressed")
-		setActiveCategory("Trees")
-	end)
-
-	connectDebounced(EnvironmentSelection.Plants, "EnvironmentPlants", function()
-		print("EnvironmentSelection Plants button pressed")
-		setActiveCategory("Plants")
-	end)
-
-	connectDebounced(EnvironmentSelection.Rocks, "EnvironmentRocks", function()
-		print("EnvironmentSelection Rocks button pressed")
-		setActiveCategory("Rocks")
-	end)
-	connectDebounced(CloseButtonContext.CloseButton, "ClosePlotBuilderUI", function()
-		print("CloseButtonContext Close button pressed")
-		PlotBuilder.Hide()
-	end)
-	switchCategoryPanel("Home")
+function PlotBuilderUI.Hide()
+	MainFrame.Visible = false
 end
 
 return PlotBuilderUI

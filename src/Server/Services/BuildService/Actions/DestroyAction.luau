@@ -78,6 +78,16 @@ local function DestroyAction(
 		restoredId = result.restoredId
 	elseif placementType == "Roof" then
 		state:RemoveRoof(payload.CellX, payload.CellZ, w, d, facing)
+	elseif placementType == "WallMounted" then
+		local removed = state:RemoveWallMounted(payload.CellX, payload.CellZ, facing)
+		if not removed or removed.id ~= resolvedId then
+			return false, "Item not found at location"
+		end
+		savedMetadata = removed.Metadata
+		removedId = removed.id
+		if spec.StationType then
+			PlotService.RemoveStationForPlayer(player, spec.StationType, key)
+		end
 	else
 		state:RemoveCellObject(payload.CellX, payload.CellZ, w, d, facing)
 		if spec.StationType then

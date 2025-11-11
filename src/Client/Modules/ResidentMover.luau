@@ -23,7 +23,6 @@ local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEn
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled") :: BoolValue
 local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled") :: BoolValue
 local RadialBillboardButtonEnabled = ActiveQueryFolder:WaitForChild("RadialBillboardButtonEnabled") :: BoolValue
-local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
 local _ResidentRadialEnabled = ActiveQueryFolder:FindFirstChild("ResidentRadialEnabled") :: BoolValue
 --local ObjectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled") :: BoolValue
 
@@ -167,7 +166,6 @@ function ResidentMover.Init()
 			or PlotBuilderEnabled.Value
 			or PlotExpansionEnabled.Value
 			or RadialBillboardButtonEnabled.Value
-			or JobSelectionUIEnabled.Value
 		then
 			return
 		end

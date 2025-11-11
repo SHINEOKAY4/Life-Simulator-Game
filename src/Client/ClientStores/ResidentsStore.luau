@@ -5,27 +5,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
-local ResidentAppearanceConfig = require(ReplicatedStorage.Shared.Configurations.ResidentAppearanceConfig)
 
 local Players = game:GetService("Players")
 
 local ResidentsStore = {}
 local PlayersResidents = {}
-
-export type AppearanceSelectionIds = {
-	SkinToneId: string,
-	HairId: string,
-	FaceId: string,
-	TopId: string,
-	PantsId: string,
-}
-
-export type ResidentCreationRequest = {
-	Name: string,
-	GenderId: string,
-	AgeId: string,
-	Appearance: AppearanceSelectionIds,
-}
 
 ResidentsStore.ResidentsUpdated = GoodSignal.new()
 ResidentsStore.ResidentAdded = GoodSignal.new()
@@ -105,35 +89,6 @@ function ResidentsStore.Init()
 			end
 		end
 	end)
-end
-
-local function sanitizeAppearanceIds(rawAppearance: AppearanceSelectionIds?): AppearanceSelectionIds
-	local appearance = rawAppearance or (ResidentAppearanceConfig.GetDefaultSelection() :: AppearanceSelectionIds)
-	return {
-		SkinToneId = ResidentAppearanceConfig.ResolveSkinTone(appearance.SkinToneId).Id,
-		HairId = ResidentAppearanceConfig.ResolveHair(appearance.HairId).Id,
-		FaceId = ResidentAppearanceConfig.ResolveFace(appearance.FaceId).Id,
-		TopId = ResidentAppearanceConfig.ResolveTop(appearance.TopId).Id,
-		PantsId = ResidentAppearanceConfig.ResolvePants(appearance.PantsId).Id,
-	}
-end
-
-function ResidentsStore.RequestAddResident(residentData: ResidentCreationRequest)
-	local trimmedName = string.gsub(residentData.Name, "^%s+", "")
-	trimmedName = string.gsub(trimmedName, "%s+$", "")
-	local genderId = ResidentAppearanceConfig.ResolveGender(residentData.GenderId).Id
-	local ageDefinition = ResidentAppearanceConfig.ResolveAge(residentData.AgeId)
-	local appearancePayload = sanitizeAppearanceIds(residentData.Appearance)
-
-	local payload = {
-		Name = trimmedName,
-		Gender = genderId,
-		Age = ageDefinition.Numeric,
-		Appearance = appearancePayload,
-	}
-
-	local success, message = ResidentsPackets.AddResidentRequest:Fire(payload)
-	return success, message
 end
 
 function ResidentsStore.RequestDeleteResident(residentName: string)

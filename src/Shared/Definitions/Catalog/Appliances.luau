@@ -1,0 +1,124 @@
+--!strict
+-- ReplicatedStorage/Shared/Definitions/Catalog/Appliances.luau
+
+local Appliances = {
+	Entertainment = {
+		Computer = {
+			Name = "Computer",
+			PlacementType = "CellObject",
+			StationType = "FunStation",
+			Station = true,
+			maxOccupancy = 1,
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West", "NorthEast", "NorthWest", "SouthEast", "SouthWest" },
+			Cost = 150,
+			Description = "Clacky-budget desktop with a few stickers and a lot of heart.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Comfort", "Electronics" },
+			ModelPath = { "Furnitures", "Computer" },
+			AssetId = 125885722018361,
+			StationEffects = {
+				DurationSeconds = 120,
+				Effects = {
+					{ Need = "Fun", RatePerHour = 15 },
+				},
+			},
+			EffectSummary = {
+				"Lets residents game, browse, or chat for fun.",
+				"Seats one player and hums softly while it runs.",
+			},
+		},
+
+		-- Wall placement system coming soon this will be changed like cellobject etc. This might not be a station
+		FlatScreenTelevision = {
+			Name = "Flat Screen Television",
+			PlacementType = "WallMounted",
+			StationType = "FunStation",
+			Station = true,
+			maxOccupancy = 2,
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West", "NorthEast", "NorthWest", "SouthEast", "SouthWest" },
+			Cost = 300,
+			Description = "Sleek flat screen TV with vibrant colors and crisp sound.",
+			WallMountConfig = {
+				AttachmentSurface = "Back",
+				OffsetFromWall = 0.15,
+				MinHeight = 2.5,
+				MaxHeight = 10,
+				RequiresFloorSupport = false,
+				CollisionCheck = true,
+				VisualSize = Vector3.new(2.4, 1.4, 0.3),
+			},
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Comfort", "Electronics", "WallMounted" },
+			ModelPath = { "Furnitures", "FlatScreenTelevision" },
+			AssetId = 125291589700804,
+			StationEffects = {
+				DurationSeconds = 90,
+				Effects = {
+					{ Need = "Fun", RatePerHour = 20 },
+				},
+			},
+			EffectSummary = {
+				"Provides hours of entertainment with shows and movies.",
+				"Seats two players for shared viewing experiences.",
+			},
+		},
+	},
+	Kitchen = {
+		Refridgerator = {
+			Name = "Refridgerator",
+			PlacementType = "CellObject",
+			StationType = "FoodStorage",
+			Station = true,
+			maxOccupancy = 1,
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 250,
+			EnergyConsumptionPerHour = 5,
+			Description = "Tall stainless fridge with a cheerful hum and bright interior light.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Comfort", "Appliance", "Storage" },
+			ModelPath = { "Furnitures", "Refridgerator" },
+			AssetId = 95612768406124,
+			StorageConfig = {
+				Capacity = 24,
+			},
+			EffectSummary = {
+				"Keeps groceries cold and leftovers safe to reheat.",
+				"Adds a steady kitchen hum that means dinner's covered.",
+			},
+		},
+
+		Stove = {
+			Name = "Stove",
+			PlacementType = "CellObject",
+			StationType = "CookStation",
+			Station = true,
+			maxOccupancy = 1,
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			EnergyConsumptionPerHour = 5,
+			Cost = 200,
+			Description = "Four-burner stove with a tempered glass top and trusty oven door.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Comfort", "Appliance" },
+			ModelPath = { "Furnitures", "Stove" },
+			AssetId = 84035900564492,
+			StationEffects = {
+				DurationSeconds = 22,
+			},
+			EffectSummary = {
+				"Fires up fast for quick weekday meals.",
+				"Fills the kitchen with the smell of fresh cooking.",
+			},
+		},
+	},
+	Laundry = {},
+}
+
+return Appliances

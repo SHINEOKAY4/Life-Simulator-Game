@@ -17,6 +17,65 @@ local PlotModel = nil
 local CachedSurface: BasePart? = nil
 local CachedGrid: any? = nil
 
+local function deepClone(value: any): any
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local result = {}
+	for key, entry in pairs(value) do
+		result[key] = deepClone(entry)
+	end
+
+	return result
+end
+
+local function coerceVector3(value: any): Vector3?
+	if typeof(value) == "Vector3" then
+		return value
+	end
+	if typeof(value) ~= "table" then
+		return nil
+	end
+
+	local xValue = value.X or value.x
+	local yValue = value.Y or value.y
+	local zValue = value.Z or value.z
+	if typeof(xValue) ~= "number" or typeof(yValue) ~= "number" or typeof(zValue) ~= "number" then
+		return nil
+	end
+	return Vector3.new(xValue, yValue, zValue)
+end
+
+local function normalizeMetadata(metadata: any): any
+	if metadata == nil then
+		return nil
+	end
+
+	if typeof(metadata) ~= "table" then
+		return metadata
+	end
+
+	local cloned = deepClone(metadata)
+	local wallData = cloned.WallMountData
+	if typeof(wallData) == "table" then
+		local convertedPosition = coerceVector3(wallData.WorldPosition)
+		if convertedPosition then
+			wallData.WorldPosition = convertedPosition
+		end
+		local convertedNormal = coerceVector3(wallData.WallNormal)
+		if convertedNormal then
+			if convertedNormal.Magnitude > 1e-3 then
+				wallData.WallNormal = convertedNormal.Unit
+			else
+				wallData.WallNormal = Vector3.new(0, 0, -1)
+			end
+		end
+	end
+
+	return cloned
+end
+
 local function ChunkToIndex(chunkX: number, chunkZ: number, chunkColumns: number): number
 	return (chunkZ - 1) * chunkColumns + chunkX
 end
@@ -30,6 +89,7 @@ function PlotStateStore.Init()
 			for _, entry in ipairs(placedItems) do
 				local facing = entry.facing or "North"
 				local spec = entry.id and ItemFinder.FindItemById(entry.id) or nil
+				local metadata = normalizeMetadata(entry.Metadata)
 				local widthCells = entry.WidthCells or entry.widthCells
 				local depthCells = entry.DepthCells or entry.depthCells
 				if not widthCells or widthCells <= 0 then
@@ -45,6 +105,7 @@ function PlotStateStore.Init()
 					facing = facing,
 					WidthCells = widthCells,
 					DepthCells = depthCells,
+					Metadata = metadata,
 				}
 				local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
 				local key = PlacementKey.ForPlacementType(itemSnapshot.cellX, itemSnapshot.cellZ, facing, placementType)
@@ -101,6 +162,7 @@ function PlotStateStore.Init()
 		local facing = delta.Item.Facing or "North"
 		local spec = itemId and ItemFinder.FindItemById(itemId) or nil
 		local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
+		local metadata = normalizeMetadata(delta.Item.Metadata)
 		local widthCells = delta.Item.WidthCells or delta.Item.widthCells
 		local depthCells = delta.Item.DepthCells or delta.Item.depthCells
 		if not widthCells or widthCells <= 0 then
@@ -126,6 +188,7 @@ function PlotStateStore.Init()
 			facing = facing,
 			WidthCells = widthCells,
 			DepthCells = depthCells,
+			Metadata = metadata,
 		}
 	end)
 end

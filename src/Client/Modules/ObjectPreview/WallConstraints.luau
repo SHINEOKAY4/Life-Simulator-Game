@@ -7,9 +7,9 @@ local PlacementUtils = require(script.Parent.PlacementUtils)
 
 type Facing = string
 
-type MoveOriginInfo = PlacementUtils.MoveOriginInfo
+type EdgeAlignment = "Horizontal" | "Vertical" | "DiagonalForward" | "DiagonalBackward"
 
-type EdgeAlignment = "Horizontal" | "Vertical"
+type MoveOriginInfo = PlacementUtils.MoveOriginInfo
 
 local WallConstraints = {}
 
@@ -24,33 +24,49 @@ WallConstraints.EdgeKind = {
 	Interior = EDGE_KIND_INTERIOR,
 }
 
+local ForwardDiagonalWallEdges: { [string]: string } = {}
+local BackwardDiagonalWallEdges: { [string]: string } = {}
+
 local function edgeKey(edgeX: number, edgeZ: number): string
 	return string.format("%d:%d", edgeX, edgeZ)
 end
 
 function WallConstraints.EdgeOfCell(cellX: number, cellZ: number, facing: Facing): (EdgeAlignment, number, number)
-	if facing == "North" then
+	local resolvedFacing = PlacementKey.NormalizeFacing(facing :: any)
+	if resolvedFacing == "North" then
 		return "Horizontal", cellX, cellZ
-	elseif facing == "South" then
+	elseif resolvedFacing == "South" then
 		return "Horizontal", cellX, cellZ + 1
-	elseif facing == "West" then
+	elseif resolvedFacing == "West" then
 		return "Vertical", cellX, cellZ
-	else
+	elseif resolvedFacing == "East" then
 		return "Vertical", cellX + 1, cellZ
+	elseif resolvedFacing == "NorthEast" then
+		return "DiagonalForward", cellX, cellZ
+	elseif resolvedFacing == "NorthWest" then
+		return "DiagonalBackward", cellX, cellZ
 	end
+
+	error(("Unsupported facing '%s' for wall constraints"):format(tostring(facing)))
 end
 
 local function setEdgeOccupied(alignment: EdgeAlignment, key: string, kind: string)
 	if alignment == "Horizontal" then
 		HorizontalWallEdges[key] = kind
-	else
+	elseif alignment == "Vertical" then
 		VerticalWallEdges[key] = kind
+	elseif alignment == "DiagonalForward" then
+		ForwardDiagonalWallEdges[key] = kind
+	else
+		BackwardDiagonalWallEdges[key] = kind
 	end
 end
 
 function WallConstraints.Clear()
 	table.clear(HorizontalWallEdges)
 	table.clear(VerticalWallEdges)
+	table.clear(ForwardDiagonalWallEdges)
+	table.clear(BackwardDiagonalWallEdges)
 end
 
 function WallConstraints.Populate(grid: any, placed: any, ignorePlacement: MoveOriginInfo?)
@@ -106,8 +122,12 @@ function WallConstraints.GetEdgeOccupant(cellX: number, cellZ: number, facing: F
 	local key = edgeKey(edgeX, edgeZ)
 	if alignment == "Horizontal" then
 		return HorizontalWallEdges[key]
-	else
+	elseif alignment == "Vertical" then
 		return VerticalWallEdges[key]
+	elseif alignment == "DiagonalForward" then
+		return ForwardDiagonalWallEdges[key]
+	else
+		return BackwardDiagonalWallEdges[key]
 	end
 end
 

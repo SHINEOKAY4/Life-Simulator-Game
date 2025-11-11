@@ -1,7 +1,7 @@
 --!strict
 -- ServerScriptService/Server/Classes/PlotState/CellObjects.lua
 
-type Facing = "North" | "East" | "South" | "West"
+type Facing = "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest"
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)

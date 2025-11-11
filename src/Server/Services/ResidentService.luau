@@ -11,7 +11,6 @@ local ResidentPlacer = require(ServerScriptService.Server.Utilities.ResidentPlac
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
-local ResidentAppearanceConfig = require(ReplicatedStorage.Shared.Configurations.ResidentAppearanceConfig)
 
 type ResidentData = ResidentState.ResidentData
 
@@ -25,50 +24,37 @@ local Config = {
 	MaxResidentsPerHousehold = 8,
 }
 
-local function sanitizeGender(rawValue: any): string
-	local resolved = ResidentAppearanceConfig.ResolveGender(if typeof(rawValue) == "string" then rawValue else nil)
-	return resolved.Id
+local DEFAULT_RESIDENT_GENDER = "Female"
+local DEFAULT_RESIDENT_AGE = 2
+
+local function sanitizeGender(_rawValue: any): string
+	return DEFAULT_RESIDENT_GENDER
 end
 
 local function resolveAgeNumeric(rawValue: any): number
 	if typeof(rawValue) == "number" then
-		for _, definition in ipairs(ResidentAppearanceConfig.AgeOptions) do
-			if definition.Numeric == rawValue then
-				return rawValue
-			end
-		end
-	elseif typeof(rawValue) == "string" then
-		local ageDefinition = ResidentAppearanceConfig.ResolveAge(rawValue)
-		return ageDefinition.Numeric
+		return math.clamp(math.floor(rawValue), 0, DEFAULT_RESIDENT_AGE)
 	end
-	local fallback = ResidentAppearanceConfig.ResolveAge(nil)
-	return fallback.Numeric
+	return DEFAULT_RESIDENT_AGE
 end
 
-local function sanitizeAppearance(rawAppearance: any): any
-	local appearanceTable = if typeof(rawAppearance) == "table" then rawAppearance else nil
-	local skinTone = ResidentAppearanceConfig.ResolveSkinTone(appearanceTable and appearanceTable.SkinToneId)
-	local hair = ResidentAppearanceConfig.ResolveHair(appearanceTable and appearanceTable.HairId)
-	local face = ResidentAppearanceConfig.ResolveFace(appearanceTable and appearanceTable.FaceId)
-	local top = ResidentAppearanceConfig.ResolveTop(appearanceTable and appearanceTable.TopId)
-	local pants = ResidentAppearanceConfig.ResolvePants(appearanceTable and appearanceTable.PantsId)
-
-	return {
-		SkinToneId = skinTone.Id,
-		HairId = hair.Id,
-		FaceId = face.Id,
-		TopId = top.Id,
-		PantsId = pants.Id,
-	}
-end
-
-local function ensureAppearance(residentSave: any)
+local function stripAppearance(residentSave: any)
 	if typeof(residentSave) ~= "table" then
 		return
 	end
-	residentSave.Appearance = sanitizeAppearance(residentSave.Appearance)
+	residentSave.Appearance = nil
 	residentSave.Age = resolveAgeNumeric(residentSave.Age)
 	residentSave.Gender = sanitizeGender(residentSave.Gender)
+end
+
+local function stripCareerData(residentSave: any)
+	if typeof(residentSave) ~= "table" then
+		return
+	end
+	residentSave.Occupation = nil
+	residentSave.CurrentCareerId = nil
+	residentSave.CareerStreak = nil
+	residentSave.AssignedShiftId = nil
 end
 
 local function cloneTable(value: any): any
@@ -95,22 +81,60 @@ local function ensureHouseholdState(player: Player, data: any?)
 	return data
 end
 
-local function ensureResidentCareerState(save: any)
-	if typeof(save) ~= "table" then
-		return
+local function buildResidentNameSet(residents: { any }): { [string]: boolean }
+	local used = {} :: { [string]: boolean }
+	for _, resident in ipairs(residents) do
+		if typeof(resident) == "table" then
+			local residentName = resident.Name
+			if type(residentName) == "string" and residentName ~= "" then
+				used[string.lower(residentName)] = true
+			end
+		end
 	end
-	if typeof(save.Occupation) ~= "string" or save.Occupation == "" then
-		save.Occupation = "Unemployed"
+	return used
+end
+
+local function generateDefaultResidentName(residents: { any }): string
+	local used = buildResidentNameSet(residents)
+	local homelessKey = string.lower("Homeless Resident")
+	if not used[homelessKey] then
+		return "Homeless Resident"
 	end
-	if typeof(save.CurrentCareerId) ~= "string" then
-		save.CurrentCareerId = if save.Occupation ~= "Unemployed" then save.Occupation else ""
+	local index = 1
+	while true do
+		local candidate = if index == 1 then "Resident" else string.format("Resident %d", index)
+		if not used[string.lower(candidate)] then
+			return candidate
+		end
+		index += 1
 	end
-	if typeof(save.CareerStreak) ~= "number" then
-		save.CareerStreak = 0
-	end
-	if typeof(save.AssignedShiftId) ~= "string" then
-		save.AssignedShiftId = ""
-	end
+end
+
+local function createDefaultResidentTemplate(existingResidents: { any }): any
+	local newResident = {
+		Name = generateDefaultResidentName(existingResidents),
+		Age = DEFAULT_RESIDENT_AGE,
+		Gender = DEFAULT_RESIDENT_GENDER,
+		Traits = { "Balanced" },
+		Statistics = {
+			Intelligence = 1,
+			Discipline = 1,
+			Creativity = 1,
+			Fitness = 1,
+		},
+		Needs = {
+			Hunger = 100,
+			Bladder = 100,
+			Energy = 100,
+			Hygiene = 100,
+			Fun = 100,
+			Social = 100,
+		},
+	}
+
+	stripCareerData(newResident)
+	stripAppearance(newResident)
+	return newResident
 end
 
 local function prepareResidentForRemoval(residentState, timeoutSeconds: number?): (boolean, string?)
@@ -142,11 +166,6 @@ function ResidentService.Init()
 		ResidentService.Load(player)
 	end)
 
-	ResidentsPackets.AddResidentRequest.OnServerInvoke = function(player: Player, residentData: any)
-		local success, message = ResidentService.CreateResident(player, residentData)
-		return success, message
-	end
-
 	ResidentsPackets.DeleteResidentRequest.OnServerInvoke = function(player: Player, residentName: string)
 		local success, message = ResidentService.DeleteResident(player, residentName)
 		return success, message
@@ -160,8 +179,13 @@ function ResidentService.Load(player: Player)
 	end
 	local userId = player.UserId
 
-	if data.ResidentsCount == 0 then
-		ResidentsPackets.PromptResidentCreation:FireClient(player)
+	data.Residents = data.Residents or {}
+	if #data.Residents == 0 then
+		local defaultResident = createDefaultResidentTemplate(data.Residents)
+		data.Residents[1] = defaultResident
+		data.ResidentsCount = 1
+	else
+		data.ResidentsCount = math.max(#data.Residents, 0)
 	end
 
 	-- Build a keyed map and index map for easier access
@@ -174,8 +198,8 @@ function ResidentService.Load(player: Player)
 
 	for _, resident in ipairs(data.Residents) do
 		if typeof(resident) == "table" and type(resident.Name) == "string" then
-			ensureResidentCareerState(resident)
-			ensureAppearance(resident)
+			stripCareerData(resident)
+			stripAppearance(resident)
 			local count = #filteredResidents + 1
 			filteredResidents[count] = resident
 			local residentName = resident.Name
@@ -237,10 +261,6 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 		Age = resolveAgeNumeric(residentData.Age),
 		Gender = sanitizeGender(residentData.Gender),
 		Traits = residentData.Traits or { "Balanced" },
-		Occupation = "Unemployed",
-		CurrentCareerId = "",
-		CareerStreak = 0,
-		AssignedShiftId = "",
 		Statistics = {
 			Intelligence = 1,
 			Discipline = 1,
@@ -255,10 +275,10 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 			Fun = 100,
 			Social = 100,
 		},
-		Appearance = sanitizeAppearance(residentData.Appearance),
 	}
 
-	ensureResidentCareerState(newResidentData)
+	stripCareerData(newResidentData)
+	stripAppearance(newResidentData)
 
 	local payload = {
 		UserId = player.UserId,
@@ -371,8 +391,8 @@ function ResidentService.DispatchResidentUpdate(player: Player, residentState: a
 	if typeof(save) ~= "table" then
 		return
 	end
-	ensureAppearance(save)
-	ensureResidentCareerState(save)
+	stripAppearance(save)
+	stripCareerData(save)
 	local residentName = save.Name
 	if type(residentName) ~= "string" or residentName == "" then
 		return

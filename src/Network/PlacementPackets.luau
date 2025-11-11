@@ -25,6 +25,7 @@ PlacementPackets.PlotStateSync = Packet("PlotStateSync", {
 		facing = Packet.String,
 		WidthCells = Packet.NumberU16,
 		DepthCells = Packet.NumberU16,
+		Metadata = Packet.Any,
 	},
 })
 
@@ -35,6 +36,17 @@ PlacementPackets.PlaceRequest = Packet("PlaceRequest", {
 	CellX = Packet.NumberU8,
 	CellZ = Packet.NumberU8,
 	Facing = Packet.String,
+	WallMountEnabled = Packet.Boolean8,
+	WallMountCellX = Packet.NumberU16,
+	WallMountCellZ = Packet.NumberU16,
+	WallMountFacing = Packet.String,
+	WallMountHeightOffset = Packet.NumberF32,
+	WallMountPosX = Packet.NumberF32,
+	WallMountPosY = Packet.NumberF32,
+	WallMountPosZ = Packet.NumberF32,
+	WallMountNormalX = Packet.NumberF32,
+	WallMountNormalY = Packet.NumberF32,
+	WallMountNormalZ = Packet.NumberF32,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
 PlacementPackets.PlaceFloorAreaRequest = Packet("PlaceFloorAreaRequest", {
@@ -74,6 +86,7 @@ PlacementPackets.PlacementDelta = Packet("PlacementDelta", {
 		Facing = Packet.String,
 		WidthCells = Packet.NumberU16,
 		DepthCells = Packet.NumberU16,
+		Metadata = Packet.Any,
 	},
 })
 

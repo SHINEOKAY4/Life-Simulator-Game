@@ -2,7 +2,7 @@
 -- ReplicatedStorage/Shared/Utilities/PlacementHelpers.lua
 -- Shared helper utilities for placement math used by both client previews and server placement.
 
-export type Facing = "North" | "East" | "South" | "West"
+export type Facing = "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest"
 
 local PlacementHelpers = {}
 PlacementHelpers.__index = PlacementHelpers
@@ -24,6 +24,10 @@ function PlacementHelpers.GetYawFromFacing(facing: Facing): number
 		return math.rad(180)
 	elseif facing == "West" then
 		return math.rad(270)
+	elseif facing == "NorthEast" or facing == "SouthWest" then
+		return math.rad(45)
+	elseif facing == "NorthWest" or facing == "SouthEast" then
+		return math.rad(315)
 	end
 	return 0
 end

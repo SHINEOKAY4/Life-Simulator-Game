@@ -3,7 +3,11 @@
 -- Grid and chunk math aligned to a rectangular Plot (BasePart).
 -- 1-based indices. Rotation-safe via CFrame transforms.
 
-export type Facing = "North" | "East" | "South" | "West"
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+
+export type Facing = "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest"
 export type OriginMode = "BottomLeft" | "TopLeft" | "BottomRight" | "TopRight" | "Center"
 
 --[=[
@@ -250,10 +254,7 @@ function Grid:FootprintCells(
 	local maxCellZ = anchorCellZ + rotatedDepth - 1
 
 	assert(
-		anchorCellX >= 1
-			and anchorCellZ >= 1
-			and maxCellX <= self.Columns
-			and maxCellZ <= self.Rows,
+		anchorCellX >= 1 and anchorCellZ >= 1 and maxCellX <= self.Columns and maxCellZ <= self.Rows,
 		"Footprint goes out of bounds"
 	)
 
@@ -457,24 +458,49 @@ end
 
 function Grid:CellToWorldEdgeCenterCFrame(cellX: number, cellZ: number, facing: Facing, heightOffset: number?): CFrame
 	self = self :: GridInstance
+	local normalizedFacing = PlacementKey.NormalizeFacing(facing)
 	local half = self.CellSize * 0.5
 	local y = heightOffset or 0
 	local offsetX = (cellX - 0.5) * self.CellSize
 	local offsetZ = (cellZ - 0.5) * self.CellSize
 
-	if facing == "North" then
+	if normalizedFacing == "North" then
 		-- top edge of the cell
 		return self.OriginTopCFrame * CFrame.new(offsetX, y, offsetZ - half)
-	elseif facing == "South" then
+	elseif normalizedFacing == "South" then
 		-- bottom edge
 		return self.OriginTopCFrame * CFrame.new(offsetX, y, offsetZ + half) * CFrame.Angles(0, math.rad(180), 0)
-	elseif facing == "West" then
+	elseif normalizedFacing == "West" then
 		-- left edge
 		return self.OriginTopCFrame * CFrame.new(offsetX - half, y, offsetZ) * CFrame.Angles(0, math.rad(270), 0)
-	else -- "East"
+	elseif normalizedFacing == "East" then
 		-- right edge
 		return self.OriginTopCFrame * CFrame.new(offsetX + half, y, offsetZ) * CFrame.Angles(0, math.rad(90), 0)
+	elseif normalizedFacing == "NorthEast" then
+		local localRight = Vector3.new(1, 0, 1).Unit
+		local localUp = Vector3.yAxis
+		local localBack = localRight:Cross(localUp)
+		local position = (self.OriginTopCFrame * CFrame.new(offsetX, y, offsetZ)).Position
+		return CFrame.fromMatrix(
+			position,
+			self.OriginTopCFrame:VectorToWorldSpace(localRight),
+			self.OriginTopCFrame:VectorToWorldSpace(localUp),
+			self.OriginTopCFrame:VectorToWorldSpace(localBack)
+		)
+	elseif normalizedFacing == "NorthWest" then
+		local localRight = Vector3.new(1, 0, -1).Unit
+		local localUp = Vector3.yAxis
+		local localBack = localRight:Cross(localUp)
+		local position = (self.OriginTopCFrame * CFrame.new(offsetX, y, offsetZ)).Position
+		return CFrame.fromMatrix(
+			position,
+			self.OriginTopCFrame:VectorToWorldSpace(localRight),
+			self.OriginTopCFrame:VectorToWorldSpace(localUp),
+			self.OriginTopCFrame:VectorToWorldSpace(localBack)
+		)
 	end
+
+	error(("Unsupported facing '%s' for CellToWorldEdgeCenterCFrame"):format(tostring(facing)))
 end
 
 return Grid

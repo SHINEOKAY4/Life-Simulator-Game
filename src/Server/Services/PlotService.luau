@@ -24,6 +24,7 @@ type PlacedObjectSnapshot = {
 	facing: string,
 	WidthCells: number,
 	DepthCells: number,
+	Metadata: any?,
 }
 type Facing = PlotState.Facing
 type StationOccupancy = {
@@ -57,6 +58,19 @@ PlotService.PlotClaimed = GoodSignal.new()
 PlotService.PlotUnclaimed = GoodSignal.new()
 PlotService.StationRemoved = GoodSignal.new()
 
+local function cloneMetadata(value: any): any
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local result = {}
+	for key, entry in pairs(value) do
+		result[key] = cloneMetadata(entry)
+	end
+
+	return result
+end
+
 local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapshot }
 	local keys = {}
 	for key in pairs(map) do
@@ -71,6 +85,7 @@ local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapsho
 		if saved then
 			local spec = saved.id and ItemFinder.FindItemById(saved.id) or nil
 			local metadata = saved.Metadata
+			local metadataClone = if metadata ~= nil then cloneMetadata(metadata) else nil
 			local widthCells = metadata and (metadata.WidthCells or metadata.widthCells)
 			if not widthCells or widthCells <= 0 then
 				widthCells = if spec then (spec.WidthCells or spec.Width or 1) else 1
@@ -87,6 +102,7 @@ local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapsho
 				facing = facing,
 				WidthCells = widthCells,
 				DepthCells = depthCells,
+				Metadata = metadataClone,
 			}
 		end
 	end
@@ -197,8 +213,9 @@ function PlotService.Load(player: Player, plotModel: Model)
 	local stationCache = PlayerStations[userId]
 	for uniqueKey, obj in pairs(plotStateData.PlacedObjects) do
 		local facing = obj.facing or "North"
+		local metadataClone = if obj.Metadata ~= nil then cloneMetadata(obj.Metadata) else nil
 		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing, {
-			metadata = obj.Metadata,
+			metadata = metadataClone,
 		})
 
 		local itemSpec = ItemFinder.FindItemById(obj.id)

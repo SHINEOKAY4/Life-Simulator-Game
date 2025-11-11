@@ -23,9 +23,7 @@ local BillContext = InputContextsFolder:WaitForChild("BillContext")
 
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local HUDBottomRightEnabled = ActiveQueryFolder:FindFirstChild("HUDBottomRightEnabled") :: BoolValue
-local JobSelectionUIEnabled = ActiveQueryFolder:FindFirstChild("JobSelectionUIEnabled") :: BoolValue
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled") :: BoolValue
-local CustomizationUIEnabled = ActiveQueryFolder:FindFirstChild("CustomizationUIEnabled") :: BoolValue
 
 local MainHUDGui = PlayerGui:WaitForChild("MainHUD") :: ScreenGui
 local BillFrame = MainHUDGui:WaitForChild("BillFrame") :: Frame
@@ -700,13 +698,6 @@ function MainHUD.Init()
 		end, Player.UserId)
 	end)
 
-	CustomizationUIEnabled.Changed:Connect(function()
-		if CustomizationUIEnabled.Value then
-			MainHUD.Hide()
-		else
-			MainHUD.Show()
-		end
-	end)
 	BillContext.PayAction.Pressed:Connect(function()
 		Debounce.RunIfAvailable("BillPayPress", BILLING_PAY_DEBOUNCE, function()
 			local success, message = BillingPackets.PayBillRequest:Fire()
@@ -717,14 +708,6 @@ function MainHUD.Init()
 				warn(message or "Unable to process bill payment")
 			end
 		end, Player.UserId)
-	end)
-
-	JobSelectionUIEnabled.Changed:Connect(function()
-		if JobSelectionUIEnabled.Value then
-			MainHUD.Hide()
-		else
-			MainHUD.Show()
-		end
 	end)
 
 	PlotBuilderEnabled.Changed:Connect(function()

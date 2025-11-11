@@ -8,6 +8,8 @@ local WallConstraints = require(script.Parent:WaitForChild("WallConstraints"))
 
 export type Facing = string
 
+type Orientation = "Horizontal" | "Vertical" | "DiagonalForward" | "DiagonalBackward"
+
 export type WallStripSelectionInfo = {
 	ItemId: string?,
 	AnchorCellX: number,
@@ -18,7 +20,7 @@ export type WallStripSelectionInfo = {
 	StartCellZ: number,
 	EndCellZ: number,
 	SegmentCount: number,
-	Orientation: "Horizontal" | "Vertical",
+	Orientation: Orientation,
 	CanPlace: boolean,
 }
 
@@ -55,12 +57,13 @@ local selectionActive = false
 local anchorCellX: number? = nil
 local anchorCellZ: number? = nil
 local anchorFacing: Facing? = nil
-local anchorOrientation: ("Horizontal" | "Vertical")? = nil
+local anchorOrientation: Orientation? = nil
 local anchorItemId: string? = nil
 local currentSummary: WallStripSelectionInfo? = nil
 local currentHighlightCells: { number } = {}
 
 local floorSupportMap: { [number]: boolean } = {}
+local cellOccupancyMap: { [number]: boolean } = {}
 
 local MAX_SEGMENTS = 48
 
@@ -75,12 +78,22 @@ local function resetState()
 	currentHighlightCells = {}
 end
 
-local function determineOrientation(facing: Facing?): ("Horizontal" | "Vertical")?
-	if facing == "North" or facing == "South" then
+local function determineOrientation(facing: Facing?): Orientation?
+	if not facing then
+		return nil
+	end
+	local normalized = PlacementKey.NormalizeFacing(facing :: any)
+	if normalized == "North" or normalized == "South" then
 		return "Horizontal"
 	end
-	if facing == "East" or facing == "West" then
+	if normalized == "East" or normalized == "West" then
 		return "Vertical"
+	end
+	if normalized == "NorthEast" then
+		return "DiagonalForward"
+	end
+	if normalized == "NorthWest" then
+		return "DiagonalBackward"
 	end
 	return nil
 end
@@ -171,7 +184,7 @@ function WallStripPreview.TryBeginDrag(args: BeginArgs): boolean
 	end
 
 	local normalizedFacing = PlacementKey.NormalizeFacing(args.facing :: any)
-	local orientation: ("Horizontal" | "Vertical")? = determineOrientation(normalizedFacing)
+	local orientation: Orientation? = determineOrientation(normalizedFacing)
 	if not orientation then
 		return false
 	end
@@ -208,9 +221,7 @@ function WallStripPreview.GetFallbackSummary(): WallStripSelectionInfo?
 	if not orientationValue then
 		return nil
 	end
-	local orientationLiteral: "Horizontal" | "Vertical" = if orientationValue == "Horizontal"
-		then "Horizontal"
-		else "Vertical"
+	local finalOrientation: Orientation = orientationValue :: Orientation
 
 	return {
 		ItemId = itemId,
@@ -222,7 +233,7 @@ function WallStripPreview.GetFallbackSummary(): WallStripSelectionInfo?
 		StartCellZ = anchorZ,
 		EndCellZ = anchorZ,
 		SegmentCount = 1,
-		Orientation = orientationLiteral,
+		Orientation = finalOrientation,
 		CanPlace = true,
 	}
 end
@@ -256,6 +267,7 @@ local function isWallPlacementAllowed(
 	placed: any,
 	spec: any?,
 	floorMap: { [number]: boolean }?,
+	cellMap: { [number]: boolean }?,
 	isChunkUnlocked: (number, number) -> boolean
 ): boolean
 	if cellX < 1 or cellX > grid.Columns then
@@ -265,25 +277,45 @@ local function isWallPlacementAllowed(
 		return false
 	end
 
-	if not validateChunkRange(grid, chunkSize, cellX, cellZ, facing, isChunkUnlocked) then
+	local resolvedFacing = PlacementKey.NormalizeFacing(facing :: any)
+
+	if not validateChunkRange(grid, chunkSize, cellX, cellZ, resolvedFacing, isChunkUnlocked) then
 		return false
 	end
 
-	local edgeOccupant = WallConstraints.GetEdgeOccupant(cellX, cellZ, facing)
+	local edgeOccupant = WallConstraints.GetEdgeOccupant(cellX, cellZ, resolvedFacing)
 	if edgeOccupant ~= nil then
 		return false
 	end
 
-	local key = PlacementKey.ForPlacementType(cellX, cellZ, facing :: any, "Wall")
+	local key = PlacementKey.ForPlacementType(cellX, cellZ, resolvedFacing :: any, "Wall")
 	local occupant = placed and placed[key]
 	if occupant then
 		return false
 	end
 
 	if spec and spec.RequiresFloorOnBothSides == true then
-		local map = floorMap or {}
-		if not hasFloorSupport(grid, map, cellX, cellZ, facing) then
+		if resolvedFacing == "NorthEast" or resolvedFacing == "NorthWest" then
 			return false
+		end
+		local map = floorMap or {}
+		if not hasFloorSupport(grid, map, cellX, cellZ, resolvedFacing) then
+			return false
+		end
+	end
+
+	if
+		resolvedFacing == "NorthEast"
+		or resolvedFacing == "NorthWest"
+		or resolvedFacing == "SouthEast"
+		or resolvedFacing == "SouthWest"
+	then
+		local map = cellMap
+		if map then
+			local index = grid:CellToIndex(cellX, cellZ)
+			if map[index] then
+				return false
+			end
 		end
 	end
 
@@ -312,7 +344,7 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 			resetState()
 			return false
 		end
-		anchorOrientation = orientationValue :: "Horizontal" | "Vertical"
+		anchorOrientation = orientationValue :: Orientation
 		anchorCellX = currentCellX
 		anchorCellZ = currentCellZ
 		return true
@@ -330,7 +362,7 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 				resetState()
 				return
 			end
-			anchorOrientation = orientationValue :: "Horizontal" | "Vertical"
+			anchorOrientation = orientationValue :: Orientation
 		end
 		if not anchorCellX or not anchorCellZ then
 			anchorCellX = currentCellX
@@ -340,14 +372,11 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 
 	local anchorX = anchorCellX or currentCellX
 	local anchorZ = anchorCellZ or currentCellZ
-	local orientationValue: ("Horizontal" | "Vertical")? = anchorOrientation
+	local orientationValue: Orientation? = anchorOrientation
 	if not orientationValue then
 		resetState()
 		return
 	end
-	local orientationLiteral: "Horizontal" | "Vertical" = if orientationValue == "Horizontal"
-		then "Horizontal"
-		else "Vertical"
 
 	local facingValue: Facing = (anchorFacing or normalizedFacing) :: Facing
 
@@ -355,8 +384,12 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 	local endCellX = anchorX
 	local startCellZ = anchorZ
 	local endCellZ = anchorZ
+	local segmentCount = 1
+	local diagonalStepX = 0
+	local diagonalStepZ = 0
+	local diagonalSpan = 0
 
-	if orientationLiteral == "Horizontal" then
+	if orientationValue == "Horizontal" then
 		local targetCellX = math.clamp(args.currentCellX, 1, columns)
 		startCellX = math.clamp(math.min(anchorX, targetCellX), 1, columns)
 		endCellX = math.clamp(math.max(anchorX, targetCellX), 1, columns)
@@ -367,8 +400,10 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 			else
 				startCellX = endCellX - MAX_SEGMENTS + 1
 			end
+			span = MAX_SEGMENTS
 		end
-	else
+		segmentCount = endCellX - startCellX + 1
+	elseif orientationValue == "Vertical" then
 		local targetCellZ = math.clamp(args.currentCellZ, 1, rows)
 		startCellZ = math.clamp(math.min(anchorZ, targetCellZ), 1, rows)
 		endCellZ = math.clamp(math.max(anchorZ, targetCellZ), 1, rows)
@@ -379,7 +414,43 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 			else
 				startCellZ = endCellZ - MAX_SEGMENTS + 1
 			end
+			span = MAX_SEGMENTS
 		end
+		segmentCount = endCellZ - startCellZ + 1
+	else
+		local targetX = math.clamp(args.currentCellX, 1, columns)
+		local targetZ = math.clamp(args.currentCellZ, 1, rows)
+		local dx = targetX - anchorX
+		local dz = targetZ - anchorZ
+		local stepX = if dx >= 0 then 1 else -1
+		local stepZ = if orientationValue == "DiagonalForward" then stepX else -stepX
+		local alignmentValid = dx == 0 and dz == 0
+		if not alignmentValid then
+			if orientationValue == "DiagonalForward" then
+				alignmentValid = (dx >= 0 and dz >= 0) or (dx <= 0 and dz <= 0)
+			else
+				alignmentValid = (dx >= 0 and dz <= 0) or (dx <= 0 and dz >= 0)
+			end
+		end
+		local span = if alignmentValid then math.min(math.abs(dx), math.abs(dz)) else 0
+		if span > MAX_SEGMENTS - 1 then
+			span = MAX_SEGMENTS - 1
+		end
+		while span > 0 do
+			local candidateX = anchorX + stepX * span
+			local candidateZ = anchorZ + stepZ * span
+			if candidateX < 1 or candidateX > columns or candidateZ < 1 or candidateZ > rows then
+				span -= 1
+			else
+				break
+			end
+		end
+		diagonalStepX = if span > 0 then stepX else 0
+		diagonalStepZ = if span > 0 then stepZ else 0
+		diagonalSpan = span
+		endCellX = anchorX + (stepX * span)
+		endCellZ = anchorZ + (stepZ * span)
+		segmentCount = span + 1
 	end
 
 	local floorMapRef: { [number]: boolean }? = nil
@@ -387,10 +458,12 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 		floorMapRef = PlacementUtils.PopulateCellMapForType(grid, placed, "Floor", floorSupportMap, nil)
 	end
 
+	local cellObjectMapRef = PlacementUtils.PopulateCellMapForType(grid, placed, "CellObject", cellOccupancyMap, nil)
+
 	local highlightCells: { number } = {}
 	local canPlace = true
 
-	if orientationLiteral == "Horizontal" then
+	if orientationValue == "Horizontal" then
 		for cellX = startCellX, endCellX do
 			if
 				not isWallPlacementAllowed(
@@ -402,6 +475,7 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 					placed,
 					args.spec,
 					floorMapRef,
+					cellObjectMapRef,
 					args.isChunkUnlocked
 				)
 			then
@@ -410,7 +484,7 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 
 			highlightCells[#highlightCells + 1] = grid:CellToIndex(cellX, anchorZ)
 		end
-	else
+	elseif orientationValue == "Vertical" then
 		for cellZ = startCellZ, endCellZ do
 			if
 				not isWallPlacementAllowed(
@@ -422,6 +496,7 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 					placed,
 					args.spec,
 					floorMapRef,
+					cellObjectMapRef,
 					args.isChunkUnlocked
 				)
 			then
@@ -430,11 +505,30 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 
 			highlightCells[#highlightCells + 1] = grid:CellToIndex(anchorX, cellZ)
 		end
-	end
+	else
+		for i = 0, diagonalSpan do
+			local cellX = anchorX + diagonalStepX * i
+			local cellZ = anchorZ + diagonalStepZ * i
+			if
+				not isWallPlacementAllowed(
+					grid,
+					chunkSize,
+					cellX,
+					cellZ,
+					facingValue,
+					placed,
+					args.spec,
+					floorMapRef,
+					cellObjectMapRef,
+					args.isChunkUnlocked
+				)
+			then
+				canPlace = false
+			end
 
-	local segmentCount = if orientationLiteral == "Horizontal"
-		then endCellX - startCellX + 1
-		else endCellZ - startCellZ + 1
+			highlightCells[#highlightCells + 1] = grid:CellToIndex(cellX, cellZ)
+		end
+	end
 
 	currentSummary = {
 		ItemId = args.itemId,
@@ -446,7 +540,7 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 		StartCellZ = startCellZ,
 		EndCellZ = endCellZ,
 		SegmentCount = segmentCount,
-		Orientation = orientationLiteral,
+		Orientation = orientationValue,
 		CanPlace = canPlace,
 	}
 

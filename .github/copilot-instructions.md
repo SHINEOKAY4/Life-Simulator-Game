@@ -35,18 +35,6 @@ src/
 ## Core Architectural Patterns
 
 ### 1. **Network Communication: Packet Library**
-- **Never use RemoteEvents/RemoteFunctions directly** - use `Packages/Packet` for all client-server communication
-- Define packets in `src/Network/*Packets.luau` with typed parameters:
-  ```lua
-  ResidentsPackets.AddResidentRequest = Packet("CreateResidentRequest", {
-      Name = Packet.String,
-      Gender = Packet.String,
-  }):Response(Packet.Boolean8, Packet.StringLong)
-  ```
-- Server: `Packet.OnServerInvoke` (request/response) or `OnServerEvent` (fire-and-forget)
-- Client: `Packet:Fire()` or `Packet.OnClientEvent:Connect()`
-
-### 2. **Resident Lifecycle & Autonomy System**
 - **ResidentState** (`Server/Classes/ResidentState.luau`): Stateful object wrapping resident data
   - Owns `ActionQueue` (serialized action execution)
   - Maintains `CancelToken` for interrupting actions

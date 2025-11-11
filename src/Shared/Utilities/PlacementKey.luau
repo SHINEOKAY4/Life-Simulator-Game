@@ -2,14 +2,34 @@
 -- ReplicatedStorage/Shared/Utilities/PlacementKey.luau
 -- Utility helpers to build and parse placement keys formed from cell coordinates and facing.
 
-type Facing = "North" | "East" | "South" | "West"
+type Facing = "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest"
 
 local PlacementKey = {}
 
 local DEFAULT_FACING: Facing = "North"
 
+local FacingAliases: { [string]: Facing } = {
+	North = "North",
+	East = "East",
+	South = "South",
+	West = "West",
+	NorthEast = "NorthEast",
+	SouthWest = "NorthEast",
+	NorthWest = "NorthWest",
+	SouthEast = "NorthWest",
+}
+
 local function normalizeFacing(facing: Facing?): Facing
-	return facing or DEFAULT_FACING
+	if facing == nil then
+		return DEFAULT_FACING
+	end
+
+	local mapped = FacingAliases[tostring(facing)]
+	if not mapped then
+		error(("Invalid facing '%s' in placement key"):format(tostring(facing)))
+	end
+
+	return mapped :: Facing
 end
 
 local function sanitizePlacementType(label: string?): string
@@ -32,10 +52,11 @@ function PlacementKey.NormalizeFacing(facing: Facing?): Facing
 end
 
 local function assertFacing(value: string): Facing
-	if value ~= "North" and value ~= "East" and value ~= "South" and value ~= "West" then
+	local mapped = FacingAliases[value]
+	if not mapped then
 		error(("Invalid facing '%s' in placement key"):format(value))
 	end
-	return value :: Facing
+	return mapped :: Facing
 end
 
 function PlacementKey.Parse(key: string): (number, number, Facing)

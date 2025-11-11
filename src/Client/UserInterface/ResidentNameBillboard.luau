@@ -7,14 +7,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local BillboardText = require(script.Parent:WaitForChild("BillboardText"))
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ClientFolder = script.Parent.Parent
-local ModulesFolder = ClientFolder:WaitForChild("Modules")
 local ClientStoresFolder = ClientFolder:WaitForChild("ClientStores")
-local ShiftStatusFormatter = require(ModulesFolder:WaitForChild("ShiftStatusFormatter"))
 local ResidentsStore = require(ClientStoresFolder:WaitForChild("ResidentsStore"))
 
 local SUBTITLE_COLOR = Color3.fromRGB(218, 223, 235)
-
-type StatusState = "OnShift" | "WindowOpen" | "Scheduled" | "OffDuty" | "Unassigned" | "Unknown"
 
 type BillboardTextHandle = BillboardText.BillboardTextHandle
 
@@ -26,7 +22,6 @@ export type NameplateEntry = {
 	Handle: BillboardTextHandle,
 	Connections: { RBXScriptConnection },
 	ResidentName: string,
-	Snapshot: any?,
 }
 
 local ResidentNameBillboard = {}
@@ -35,7 +30,6 @@ local currentPlotIndex: number? = nil
 local nameplatesByModel: { [Model]: NameplateEntry } = {}
 local nameplatesByResident: { [string]: NameplateEntry } = {}
 local residentsFolderConnections: { RBXScriptConnection } = {}
-local residentSnapshots: { [string]: any } = {}
 
 local function disconnectAll(connections: { RBXScriptConnection })
 	for _, connection in ipairs(connections) do
@@ -110,15 +104,6 @@ local STATION_TYPE_OVERRIDES: { [string]: string } = {
 	SocialStation = "Socializing",
 	HygieneStation = "Freshening Up",
 	FunStation = "Relaxing",
-}
-
-local SHIFT_STATE_LABELS: { [StatusState]: string } = {
-	OnShift = "Working",
-	WindowOpen = "On Call",
-	Scheduled = "Shift Scheduled",
-	OffDuty = "Off Duty",
-	Unassigned = "Idle",
-	Unknown = "Idle",
 }
 
 local COLLAPSE_LABEL = "Collapsed"
@@ -224,22 +209,7 @@ local function formatActionPhrase(raw: string): string?
 	return table.concat(words, " ")
 end
 
-local function resolveShiftFallback(status: ShiftStatusFormatter.StatusResult?): string
-	if not status then
-		return DEFAULT_IDLE_LABEL
-	end
-	local label = SHIFT_STATE_LABELS[status.state]
-	local baseLabel = if label and label ~= "" then label else DEFAULT_IDLE_LABEL
-	if status.state == "OnShift" and status.jobName and status.jobName ~= "" then
-		return string.format("%s - %s", baseLabel, status.jobName)
-	end
-	if status.jobName and status.jobName ~= "" and status.state ~= "Unassigned" then
-		return string.format("%s - %s", baseLabel, status.jobName)
-	end
-	return baseLabel
-end
-
-local function resolveActionSubtitle(model: Model, status: ShiftStatusFormatter.StatusResult?): string
+local function resolveActionSubtitle(model: Model): string
 	if model:GetAttribute("EnergyCollapseActive") == true then
 		return COLLAPSE_LABEL
 	end
@@ -270,7 +240,7 @@ local function resolveActionSubtitle(model: Model, status: ShiftStatusFormatter.
 			return formattedAction
 		end
 	end
-	return resolveShiftFallback(status)
+	return DEFAULT_IDLE_LABEL
 end
 
 local function color3ToHex(color: Color3): string
@@ -306,18 +276,6 @@ local function getAdornee(model: Model): BasePart?
 	return nil
 end
 
-local function getSnapshot(residentName: string): any?
-	local snapshot = residentSnapshots[residentName]
-	if snapshot then
-		return snapshot
-	end
-	local fetched = ResidentsStore.GetResident(nil, residentName)
-	if fetched then
-		residentSnapshots[residentName] = fetched
-	end
-	return fetched
-end
-
 local function applyBillboard(entry: NameplateEntry)
 	local model = entry.Model
 	if not model or not model:IsDescendantOf(workspace) then
@@ -331,15 +289,11 @@ local function applyBillboard(entry: NameplateEntry)
 	end
 
 	local residentName = entry.ResidentName
-	local snapshot = getSnapshot(residentName)
-	entry.Snapshot = snapshot
-
-	local status = ShiftStatusFormatter.Compute(snapshot, model)
 
 	local titleLine = string.format("<b>%s</b>", escapeRichText(residentName))
 
 	local lines = { titleLine }
-	local subtitleText = resolveActionSubtitle(model, status)
+	local subtitleText = resolveActionSubtitle(model)
 	if subtitleText and subtitleText ~= "" then
 		lines[#lines + 1] = string.format(
 			'<font size="18" color="%s">%s</font>',
@@ -414,7 +368,6 @@ local function attachResident(model: Model)
 		Handle = handle,
 		Connections = {},
 		ResidentName = residentName,
-		Snapshot = nil,
 	}
 
 	nameplatesByModel[model] = entry
@@ -423,18 +376,6 @@ local function attachResident(model: Model)
 	local function bind(connection: RBXScriptConnection)
 		table.insert(entry.Connections, connection)
 	end
-
-	bind(model:GetAttributeChangedSignal("IsOnShift"):Connect(function()
-		applyBillboard(entry)
-	end))
-
-	bind(model:GetAttributeChangedSignal("WorkingJobId"):Connect(function()
-		applyBillboard(entry)
-	end))
-
-	bind(model:GetAttributeChangedSignal("AssignedShiftId"):Connect(function()
-		applyBillboard(entry)
-	end))
 
 	bind(model:GetAttributeChangedSignal("StationActivityActive"):Connect(function()
 		applyBillboard(entry)
@@ -483,7 +424,6 @@ local function clearAllNameplates()
 	for model in pairs(nameplatesByModel) do
 		detachResident(model)
 	end
-	residentSnapshots = {}
 end
 
 local function detachAllConnections()
@@ -565,7 +505,6 @@ function ResidentNameBillboard.Init()
 		if type(residentData.Name) ~= "string" then
 			return
 		end
-		residentSnapshots[residentData.Name] = residentData
 		updateResidentNameplate(residentData.Name)
 	end)
 
@@ -576,7 +515,6 @@ function ResidentNameBillboard.Init()
 		if type(residentData.Name) ~= "string" then
 			return
 		end
-		residentSnapshots[residentData.Name] = residentData
 		updateResidentNameplate(residentData.Name)
 	end)
 
@@ -584,7 +522,6 @@ function ResidentNameBillboard.Init()
 		if userId ~= LocalPlayer.UserId then
 			return
 		end
-		residentSnapshots[residentName] = nil
 		local entry = nameplatesByResident[residentName]
 		if entry then
 			detachResident(entry.Model)

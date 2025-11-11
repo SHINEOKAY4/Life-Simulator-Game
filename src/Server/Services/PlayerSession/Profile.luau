@@ -7,7 +7,7 @@ local Profile = {
 	HouseholdState = {
 		ResidentsCount = 0,
 		MaxResidents = 4, -- Default max residents per player; can be increased via in-game purchases later
-		Residents = {}, -- {name, age, occupation, gender, traits, needs}
+		Residents = {}, -- {name, age, gender, traits, needs}
 	},
 	CurrencyState = {
 		-- CurrencyName: Balance
@@ -18,12 +18,6 @@ local Profile = {
 		RotationId = "",
 		RotationEndsAt = 0,
 		ActiveEvents = {},
-		CareerBoost = {
-			Amount = 0,
-			ExpiresAt = 0,
-			SourceId = "",
-			Description = "",
-		},
 	},
 	BillingState = {
 		lastPaymentTime = 0,
@@ -53,12 +47,6 @@ local Profile = {
 		LastTimestamp = 0,
 		OutageActive = false,
 	},
-	PayrollState = {
-		LastPayoutTime = 0,
-		ResidentEarnings = {},
-		PendingCash = 0,
-	},
-
 	InventoryState = {},
 }
 

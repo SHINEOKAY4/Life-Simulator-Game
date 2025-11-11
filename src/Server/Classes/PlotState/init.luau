@@ -9,11 +9,12 @@ local CellObjects = require(script.CellObjects)
 local Floors = require(script.Floors)
 local Roofs = require(script.Roofs)
 local Walls = require(script.Walls)
+local Attachments = require(script.Attachments)
 
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 
-export type Facing = "North" | "East" | "South" | "West"
+export type Facing = "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest"
 export type SavedChunk = { cx: number, cz: number }
 export type SavedPlacedObject = {
 	id: string,
@@ -51,6 +52,12 @@ export type PlotState = {
 	VerticalEdgeRows: number,
 	EdgeFreeHorizontal: { [number]: boolean },
 	EdgeFreeVertical: { [number]: boolean },
+	DiagonalForwardEdgeColumns: number,
+	DiagonalForwardEdgeRows: number,
+	DiagonalBackwardEdgeColumns: number,
+	DiagonalBackwardEdgeRows: number,
+	EdgeFreeDiagonalForward: { [number]: boolean },
+	EdgeFreeDiagonalBackward: { [number]: boolean },
 	Save: SaveData,
 	PlacementKey: (self: PlotState, cellX: number, cellZ: number, facing: Facing?) -> string,
 	PlacementKeyForType: (
@@ -164,6 +171,16 @@ export type PlotState = {
 		depthCells: number,
 		facing: Facing
 	) -> (),
+	CanPlaceWallMounted: (self: PlotState, cellX: number, cellZ: number, facing: Facing) -> (boolean, string?),
+	PlaceWallMounted: (
+		self: PlotState,
+		objectId: string,
+		cellX: number,
+		cellZ: number,
+		facing: Facing,
+		metadata: { [string]: any }?
+	) -> (boolean, string?),
+	RemoveWallMounted: (self: PlotState, cellX: number, cellZ: number, facing: Facing) -> SavedPlacedObject?,
 	IsCellBuildable: (self: PlotState, cellX: number, cellZ: number) -> boolean,
 	CanPlace: (
 		self: PlotState,
@@ -298,6 +315,12 @@ function PlotState.new(grid: any, chunkSizeInCells: number, save: SaveData): Plo
 	self.VerticalEdgeRows = grid.Rows
 	self.EdgeFreeHorizontal = table.create(self.HorizontalEdgeColumns * self.HorizontalEdgeRows, true)
 	self.EdgeFreeVertical = table.create(self.VerticalEdgeColumns * self.VerticalEdgeRows, true)
+	self.DiagonalForwardEdgeColumns = grid.Columns
+	self.DiagonalForwardEdgeRows = grid.Rows
+	self.DiagonalBackwardEdgeColumns = grid.Columns
+	self.DiagonalBackwardEdgeRows = grid.Rows
+	self.EdgeFreeDiagonalForward = table.create(self.DiagonalForwardEdgeColumns * self.DiagonalForwardEdgeRows, true)
+	self.EdgeFreeDiagonalBackward = table.create(self.DiagonalBackwardEdgeColumns * self.DiagonalBackwardEdgeRows, true)
 	self.Save = save
 	self.Save.UnlockedChunks = self.Save.UnlockedChunks or {}
 	self.Save.PlacedObjects = self.Save.PlacedObjects or {}
@@ -330,7 +353,7 @@ function PlotState:HydrateFromSave()
 	for _, savedObject in pairs(self.Save.PlacedObjects) do
 		local spec = ItemFinder.FindItemById(savedObject.id)
 		assert(spec, ("Unknown catalog item '%s'"):format(savedObject.id))
-		local placementType = spec.PlacementType
+		local placementType = spec.PlacementType or spec.Type or "CellObject"
 		local facing = savedObject.facing or "North"
 		local metadata = savedObject.Metadata
 		local metaWidth = metadata and metadata.WidthCells or metadata and metadata.widthCells
@@ -356,8 +379,18 @@ function PlotState:HydrateFromSave()
 			local alignment, edgeX, edgeZ = self:EdgeOfCell(savedObject.cellX, savedObject.cellZ, facing)
 			if alignment == "Horizontal" then
 				self.EdgeFreeHorizontal[self:HorizontalEdgeIndex(edgeX, edgeZ)] = false
-			else
+			elseif alignment == "Vertical" then
 				self.EdgeFreeVertical[self:VerticalEdgeIndex(edgeX, edgeZ)] = false
+			elseif alignment == "DiagonalForward" then
+				if self.EdgeFreeDiagonalForward then
+					self.EdgeFreeDiagonalForward[self:DiagonalForwardEdgeIndex(edgeX, edgeZ)] = false
+				end
+				self.CellFree[self.Grid:CellToIndex(savedObject.cellX, savedObject.cellZ)] = false
+			elseif alignment == "DiagonalBackward" then
+				if self.EdgeFreeDiagonalBackward then
+					self.EdgeFreeDiagonalBackward[self:DiagonalBackwardEdgeIndex(edgeX, edgeZ)] = false
+				end
+				self.CellFree[self.Grid:CellToIndex(savedObject.cellX, savedObject.cellZ)] = false
 			end
 		elseif placementType == "Roof" then
 			local indices =
@@ -365,6 +398,9 @@ function PlotState:HydrateFromSave()
 			for j = 1, #indices do
 				self.RoofFilled[indices[j]] = true
 			end
+		elseif placementType == "WallMounted" then
+			-- Wall-mounted attachments do not reserve grid footprint.
+			resolvedWidth = resolvedWidth
 		else
 			local cellIndices =
 				self.Grid:FootprintCells(savedObject.cellX, savedObject.cellZ, resolvedWidth, resolvedDepth, facing)
@@ -390,5 +426,6 @@ CellObjects.attach(PlotState)
 Floors.attach(PlotState)
 Roofs.attach(PlotState)
 Walls.attach(PlotState)
+Attachments.attach(PlotState)
 
 return PlotState

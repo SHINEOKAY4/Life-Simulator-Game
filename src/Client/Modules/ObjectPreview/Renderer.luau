@@ -56,7 +56,7 @@ local function ensureWallPreviewAttributes(part: BasePart, cellSize: number)
 	end
 end
 
-local function applyWallPreviewScaling(part: BasePart, cellSize: number, span: WallSpanInfo?)
+local function applyWallPreviewScaling(part: BasePart, cellSize: number, span: WallSpanInfo?, facing: Facing)
 	ensureWallPreviewAttributes(part, cellSize)
 
 	local axis = part:GetAttribute("PreviewLengthAxis") :: string? or "X"
@@ -64,7 +64,11 @@ local function applyWallPreviewScaling(part: BasePart, cellSize: number, span: W
 	local baseThickness = part:GetAttribute("PreviewBaseThickness") :: number?
 		or (axis == "X" and part.Size.Z or part.Size.X)
 	local segmentCount = if span and span.SegmentCount and span.SegmentCount > 0 then span.SegmentCount else 1
-	local targetLength = segmentCount * cellSize
+	local lengthMultiplier = 1
+	if facing == "NorthEast" or facing == "SouthEast" or facing == "NorthWest" or facing == "SouthWest" then
+		lengthMultiplier = math.sqrt(2)
+	end
+	local targetLength = segmentCount * cellSize * lengthMultiplier
 
 	if axis == "X" then
 		part.Size = Vector3.new(targetLength, baseHeight, baseThickness)
@@ -110,7 +114,7 @@ function Renderer.PreviewWall(
 	if shouldApplyScaling then
 		local rootPart: BasePart? = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
 		if rootPart then
-			applyWallPreviewScaling(rootPart, grid.CellSize, span)
+			applyWallPreviewScaling(rootPart, grid.CellSize, span, facing)
 		end
 	end
 
@@ -187,6 +191,19 @@ function Renderer.PreviewCellObject(
 	local liftedPosition = center.Position + surface.CFrame.UpVector * lift
 
 	model:PivotTo(CFrame.new(liftedPosition) * orientation)
+end
+
+function Renderer.PreviewWallMounted(
+	model: Model,
+	worldPosition: Vector3,
+	wallNormal: Vector3,
+	upVector: Vector3,
+	pivotRotation: CFrame
+)
+	local forward = (-wallNormal).Unit
+	local safeUp = if upVector.Magnitude > 1e-3 then upVector.Unit else Vector3.new(0, 1, 0)
+	local previewCFrame = CFrame.lookAt(worldPosition, worldPosition + forward, safeUp)
+	model:PivotTo(previewCFrame * pivotRotation)
 end
 
 return Renderer

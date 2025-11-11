@@ -8,7 +8,7 @@ local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
-local PayrollPackets = require(ReplicatedStorage.Network.PayrollPackets)
+--local PayrollPackets = require(ReplicatedStorage.Network.PayrollPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 
 local LocalPlayer = Players.LocalPlayer

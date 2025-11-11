@@ -5,7 +5,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
-local ResidentAppearanceUtils = require(ReplicatedStorage.Shared.Utilities.ResidentAppearanceUtils)
 
 export type ResidentData = {
 	Name: string,
@@ -13,18 +12,7 @@ export type ResidentData = {
 	Gender: string,
 	Needs: { [string]: number },
 	Traits: { string },
-	Occupation: string,
 	Statistics: { [string]: number }?,
-	CurrentCareerId: string?,
-	CareerStreak: number?,
-	AssignedShiftId: string?,
-	Appearance: {
-		SkinToneId: string,
-		HairId: string,
-		FaceId: string,
-		TopId: string,
-		PantsId: string,
-	},
 }
 
 local ResidentPlacer = {}
@@ -120,9 +108,21 @@ local function ensureResidentModel(residentState: any): Model?
 		return existing
 	end
 	local gender = residentState.Save.Gender
-	local template = gender and residentsFolder:FindFirstChild(gender)
-	if not template or not template:IsA("Model") then
-		warn("ResidentPlacer: missing template for resident", residentState.Save and residentState.Save.Name)
+	local template: Model? = nil
+	if typeof(gender) == "string" then
+		local found = residentsFolder:FindFirstChild(gender)
+		if found and found:IsA("Model") then
+			template = found
+		end
+	end
+	if not template then
+		local fallback = residentsFolder:FindFirstChildWhichIsA("Model")
+		if fallback then
+			template = fallback
+		end
+	end
+	if not template then
+		warn("ResidentPlacer: missing resident template for", residentState.Save and residentState.Save.Name)
 		return existing
 	end
 	local model = template:Clone()
@@ -144,10 +144,6 @@ local function loadResidentAppearance(residentState: any): Model?
 	end
 
 	residentState:SyncCurrentActionAttribute()
-	local appearanceData = residentState.Save.Appearance
-	if typeof(appearanceData) == "table" then
-		ResidentAppearanceUtils.ApplyToModel(model, appearanceData, residentState.Save.Age)
-	end
 	return model
 end
 function ResidentPlacer.Spawn(player, residentState)

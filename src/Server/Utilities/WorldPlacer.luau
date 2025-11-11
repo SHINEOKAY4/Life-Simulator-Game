@@ -27,6 +27,92 @@ export type SpawnOptions = {
 	sizeCells: { [string]: number }?,
 }
 
+local function coerceVector3(value: any, fallback: Vector3): Vector3
+	if typeof(value) == "Vector3" then
+		return value
+	end
+	if typeof(value) ~= "table" then
+		return fallback
+	end
+	local xValue = value.X or value.x
+	local yValue = value.Y or value.y
+	local zValue = value.Z or value.z
+	if typeof(xValue) ~= "number" or typeof(yValue) ~= "number" or typeof(zValue) ~= "number" then
+		return fallback
+	end
+	return Vector3.new(xValue, yValue, zValue)
+end
+
+local function resolveWallMountMetadata(metadata: { [string]: any }?): { [string]: any }?
+	if typeof(metadata) ~= "table" then
+		return nil
+	end
+
+	local wallData = metadata.WallMountData
+	if typeof(wallData) ~= "table" then
+		return nil
+	end
+
+	local resolved = {
+		ReferenceCellX = wallData.ReferenceCellX,
+		ReferenceCellZ = wallData.ReferenceCellZ,
+		AttachedFacing = wallData.AttachedFacing,
+		HeightOffset = wallData.HeightOffset,
+		OffsetFromWall = wallData.OffsetFromWall,
+		WorldPosition = coerceVector3(wallData.WorldPosition, Vector3.new()),
+		WallNormal = coerceVector3(wallData.WallNormal, Vector3.new(0, 0, -1)),
+	}
+
+	return resolved
+end
+
+local function applyWallModelScaling(model: Model, facing: Facing, cellSize: number)
+	local rootPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+	if not rootPart then
+		return
+	end
+
+	local axisAttr = rootPart:GetAttribute("WallLengthAxis")
+	local baseHeightAttr = rootPart:GetAttribute("WallBaseHeight")
+	local baseLengthAttr = rootPart:GetAttribute("WallBaseLength")
+	local baseThicknessAttr = rootPart:GetAttribute("WallBaseThickness")
+
+	if not axisAttr or not baseHeightAttr or not baseLengthAttr or not baseThicknessAttr then
+		local size = rootPart.Size
+		local axis = "X"
+		if math.abs(size.Z - cellSize) < math.abs(size.X - cellSize) then
+			axis = "Z"
+		end
+		local baseLength = if axis == "X" then size.X else size.Z
+		local baseThickness = if axis == "X" then size.Z else size.X
+		rootPart:SetAttribute("WallLengthAxis", axis)
+		rootPart:SetAttribute("WallBaseHeight", size.Y)
+		rootPart:SetAttribute("WallBaseLength", baseLength)
+		rootPart:SetAttribute("WallBaseThickness", baseThickness)
+		axisAttr = axis
+		baseHeightAttr = size.Y
+		baseLengthAttr = baseLength
+		baseThicknessAttr = baseThickness
+	end
+
+	local axis = axisAttr :: string
+	local baseHeight = baseHeightAttr :: number
+	local baseLength = baseLengthAttr :: number
+	local baseThickness = baseThicknessAttr :: number
+
+	local lengthMultiplier = 1
+	if facing == "NorthEast" or facing == "SouthEast" or facing == "NorthWest" or facing == "SouthWest" then
+		lengthMultiplier = math.sqrt(2)
+	end
+
+	local targetLength = baseLength * lengthMultiplier
+	if axis == "X" then
+		rootPart.Size = Vector3.new(targetLength, baseHeight, baseThickness)
+	else
+		rootPart.Size = Vector3.new(baseThickness, baseHeight, targetLength)
+	end
+end
+
 -- Spawn a physical model for a saved/placed item.
 function WorldPlacer.Spawn(
 	player: Player,
@@ -84,6 +170,7 @@ function WorldPlacer.Spawn(
 	model:SetAttribute("Facing", facingString)
 	model:SetAttribute("WidthCells", footprintWidth)
 	model:SetAttribute("DepthCells", footprintDepth)
+	model:SetAttribute("PlacementType", placementType)
 
 	if options then
 		if options.previousWallId then
@@ -118,6 +205,7 @@ function WorldPlacer.Spawn(
 	local target: CFrame?
 	if placementType == "Wall" then
 		base = grid:CellToWorldEdgeCenterCFrame(cellX, cellZ, facing)
+		applyWallModelScaling(model, facing, grid.CellSize)
 	elseif placementType == "Floor" then
 		local center = grid:FootprintCenterCFrame(cellX, cellZ, footprintWidth, footprintDepth, facing)
 		base = center * CFrame.Angles(0, GetYawFromFacing(facing), 0)
@@ -144,6 +232,26 @@ function WorldPlacer.Spawn(
 			roofLift = extraLift
 		end
 		base = (center * yaw) * CFrame.new(0, roofLift, 0)
+	elseif placementType == "WallMounted" then
+		local resolved = resolveWallMountMetadata(metadata)
+		if not resolved then
+			return
+		end
+		local wallNormal = resolved.WallNormal
+		if wallNormal.Magnitude < 1e-3 then
+			wallNormal = Vector3.new(0, 0, -1)
+		end
+		local upVector = grid and grid.Plot and grid.Plot.CFrame.UpVector or Vector3.yAxis
+		local pivotRotation = GetPivotRotation(model)
+		local forward = (-wallNormal).Unit
+		local lookCFrame = CFrame.lookAt(resolved.WorldPosition, resolved.WorldPosition + forward, upVector)
+		target = lookCFrame * pivotRotation
+		model:SetAttribute("WallMountReferenceCellX", resolved.ReferenceCellX)
+		model:SetAttribute("WallMountReferenceCellZ", resolved.ReferenceCellZ)
+		model:SetAttribute("WallMountHeightOffset", resolved.HeightOffset)
+		model:SetAttribute("WallMountOffsetFromWall", resolved.OffsetFromWall or 0)
+		model:SetAttribute("WallMountWorldPosition", resolved.WorldPosition)
+		model:SetAttribute("WallMountWallNormal", wallNormal.Unit)
 	end
 
 	if target then
