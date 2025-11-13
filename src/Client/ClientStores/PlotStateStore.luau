@@ -4,11 +4,13 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
+local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local GridModule = require(ReplicatedStorage.Shared.Utilities.Grid)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 
 local PlotStateStore = {}
 local StateSnapshot = {}
@@ -16,6 +18,9 @@ local StateSnapshot = {}
 local PlotModel = nil
 local CachedSurface: BasePart? = nil
 local CachedGrid: any? = nil
+local ActiveLevelInitialized = false
+local ActiveLevel = 0
+local ActiveLevelChanged = GoodSignal.new()
 
 local function deepClone(value: any): any
 	if typeof(value) ~= "table" then
@@ -76,14 +81,69 @@ local function normalizeMetadata(metadata: any): any
 	return cloned
 end
 
+local function normalizeSurfaceMountEntry(entry: any)
+	if typeof(entry) ~= "table" then
+		return nil
+	end
+
+	local keyValue = entry.Key or entry.key
+	if typeof(keyValue) ~= "string" or keyValue == "" then
+		return nil
+	end
+
+	local itemIdValue = entry.ItemId or entry.id
+	if typeof(itemIdValue) ~= "string" or itemIdValue == "" then
+		return nil
+	end
+
+	local parentKeyValue = entry.ParentKey or entry.parentKey or ""
+	if typeof(parentKeyValue) ~= "string" then
+		parentKeyValue = ""
+	end
+
+	local localPosition = coerceVector3(entry.LocalPosition) or Vector3.new()
+	local rotationValue = entry.LocalRotationY
+	local rotationY = if typeof(rotationValue) == "number" then rotationValue else 0
+	local metadata = normalizeMetadata(entry.Metadata)
+
+	return {
+		key = keyValue,
+		id = itemIdValue,
+		parentKey = parentKeyValue,
+		LocalPosition = localPosition,
+		LocalRotationY = rotationY,
+		Metadata = metadata,
+	}
+end
+
 local function ChunkToIndex(chunkX: number, chunkZ: number, chunkColumns: number): number
 	return (chunkZ - 1) * chunkColumns + chunkX
 end
 
 function PlotStateStore.Init()
-	Packets.PlotStateSync.OnClientEvent:Connect(function(chunkInfo, unlockedChunks, placedItems)
+	Packets.PlotStateSync.OnClientEvent:Connect(function(chunkInfo, unlockedChunks, placedItems, surfaceMounts)
 		StateSnapshot.ChunkInfo = chunkInfo
 		StateSnapshot.ChunkUnlocked = unlockedChunks
+		StateSnapshot.FloorHeightStuds = chunkInfo.FloorHeightStuds
+		StateSnapshot.DefaultLevel = chunkInfo.DefaultLevel
+		StateSnapshot.MaxLevel = chunkInfo.MaxLevel
+
+		local defaultLevel = if typeof(chunkInfo.DefaultLevel) == "number" then chunkInfo.DefaultLevel else 0
+		local maxLevel = if typeof(chunkInfo.MaxLevel) == "number" then chunkInfo.MaxLevel else defaultLevel
+
+		if not ActiveLevelInitialized then
+			ActiveLevel = defaultLevel
+			ActiveLevelInitialized = true
+			ActiveLevelChanged:Fire(ActiveLevel)
+		else
+			local clamped = math.clamp(ActiveLevel, defaultLevel, maxLevel)
+			if clamped ~= ActiveLevel then
+				ActiveLevel = clamped
+				ActiveLevelChanged:Fire(ActiveLevel)
+			end
+		end
+		StateSnapshot.ActiveLevel = ActiveLevel
+
 		local placedMap = {}
 		if placedItems then
 			for _, entry in ipairs(placedItems) do
@@ -98,6 +158,17 @@ function PlotStateStore.Init()
 				if not depthCells or depthCells <= 0 then
 					depthCells = spec and (spec.DepthCells or spec.Depth) or 1
 				end
+				local levelValue = entry.Level or entry.level or defaultLevel
+				local numericLevel = tonumber(levelValue)
+				if numericLevel then
+					numericLevel = math.floor(numericLevel + 0.5)
+					if numericLevel < defaultLevel then
+						numericLevel = defaultLevel
+					end
+					levelValue = numericLevel
+				else
+					levelValue = defaultLevel
+				end
 				local itemSnapshot = {
 					id = entry.id,
 					cellX = entry.cellX,
@@ -106,13 +177,31 @@ function PlotStateStore.Init()
 					WidthCells = widthCells,
 					DepthCells = depthCells,
 					Metadata = metadata,
+					Level = levelValue,
 				}
 				local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
-				local key = PlacementKey.ForPlacementType(itemSnapshot.cellX, itemSnapshot.cellZ, facing, placementType)
+				local key = PlacementKey.ForPlacementType(
+					itemSnapshot.cellX,
+					itemSnapshot.cellZ,
+					facing,
+					placementType,
+					levelValue
+				)
 				placedMap[key] = itemSnapshot
 			end
 		end
 		StateSnapshot.PlacedItems = placedMap
+
+		local surfaceMap = {}
+		if surfaceMounts then
+			for _, entry in ipairs(surfaceMounts) do
+				local normalized = normalizeSurfaceMountEntry(entry)
+				if normalized then
+					surfaceMap[normalized.key] = normalized
+				end
+			end
+		end
+		StateSnapshot.SurfaceMounts = surfaceMap
 
 		-- Lazy initialize grid, helpful for external modules that need it
 		if not CachedGrid then
@@ -171,7 +260,18 @@ function PlotStateStore.Init()
 		if not depthCells or depthCells <= 0 then
 			depthCells = spec and (spec.DepthCells or spec.Depth) or 1
 		end
-		local key = PlacementKey.ForPlacementType(delta.Item.CellX, delta.Item.CellZ, facing, placementType)
+		local levelValue = delta.Item.Level or delta.Item.level or ActiveLevel
+		local numericLevel = tonumber(levelValue)
+		if numericLevel then
+			numericLevel = math.floor(numericLevel + 0.5)
+			if numericLevel < 0 then
+				numericLevel = 0
+			end
+			levelValue = numericLevel
+		else
+			levelValue = ActiveLevel
+		end
+		local key = PlacementKey.ForPlacementType(delta.Item.CellX, delta.Item.CellZ, facing, placementType, levelValue)
 		if delta.Action == "Removed" then
 			StateSnapshot.PlacedItems[key] = nil
 			return
@@ -189,11 +289,36 @@ function PlotStateStore.Init()
 			WidthCells = widthCells,
 			DepthCells = depthCells,
 			Metadata = metadata,
+			Level = levelValue,
 		}
+	end)
+
+	Packets.SurfaceMountDelta.OnClientEvent:Connect(function(delta)
+		StateSnapshot.SurfaceMounts = StateSnapshot.SurfaceMounts or {}
+		if not delta or not delta.Mount then
+			return
+		end
+
+		local normalized = normalizeSurfaceMountEntry(delta.Mount)
+		if not normalized then
+			return
+		end
+
+		if delta.Action == "Removed" then
+			StateSnapshot.SurfaceMounts[normalized.key] = nil
+			return
+		end
+
+		if delta.Action ~= "Placed" and delta.Action ~= "Updated" then
+			return
+		end
+
+		StateSnapshot.SurfaceMounts[normalized.key] = normalized
 	end)
 end
 
 function PlotStateStore.GetStateSnapshot()
+	StateSnapshot.ActiveLevel = ActiveLevel
 	return StateSnapshot
 end
 
@@ -211,6 +336,62 @@ end
 
 function PlotStateStore.GetSurface(): BasePart?
 	return CachedSurface
+end
+
+function PlotStateStore.GetDefaultLevel(): number
+	local info = StateSnapshot.ChunkInfo
+	if info and typeof(info.DefaultLevel) == "number" then
+		return info.DefaultLevel
+	end
+	return 0
+end
+
+function PlotStateStore.GetMaxLevel(): number
+	local info = StateSnapshot.ChunkInfo
+	if info and typeof(info.MaxLevel) == "number" then
+		return info.MaxLevel
+	end
+	return PlotStateStore.GetDefaultLevel()
+end
+
+function PlotStateStore.GetActiveLevel(): number
+	if ActiveLevelInitialized then
+		return ActiveLevel
+	end
+	return PlotStateStore.GetDefaultLevel()
+end
+
+function PlotStateStore.SetActiveLevel(level: number)
+	if not PlotStateStore.IsReady() then
+		return
+	end
+	local defaultLevel = PlotStateStore.GetDefaultLevel()
+	local maxLevel = PlotStateStore.GetMaxLevel()
+	local clamped = math.clamp(level, defaultLevel, maxLevel)
+	if clamped == ActiveLevel and ActiveLevelInitialized then
+		return
+	end
+	ActiveLevel = clamped
+	ActiveLevelInitialized = true
+	StateSnapshot.ActiveLevel = ActiveLevel
+	ActiveLevelChanged:Fire(ActiveLevel)
+end
+
+function PlotStateStore.OnActiveLevelChanged(handler: (number) -> ()): RBXScriptConnection
+	return ActiveLevelChanged:Connect(handler)
+end
+
+function PlotStateStore.GetFloorHeightStuds(): number
+	local info = StateSnapshot.ChunkInfo
+	if info and typeof(info.FloorHeightStuds) == "number" then
+		return info.FloorHeightStuds
+	end
+	return BuildConstants.FloorHeightStuds or 12
+end
+
+function PlotStateStore.GetLevelHeight(level: number?): number
+	local resolvedLevel = if typeof(level) == "number" then level else PlotStateStore.GetActiveLevel()
+	return PlotStateStore.GetFloorHeightStuds() * resolvedLevel
 end
 
 function PlotStateStore.IsChunkUnlocked(chunkX: number, chunkZ: number): boolean

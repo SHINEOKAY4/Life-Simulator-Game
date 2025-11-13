@@ -135,12 +135,17 @@ end
 
 function PlotSelector.Select()
 	local currentPlot = PlotFinder.FindPlot(CurrentIndex)
+	if not currentPlot then
+		warn("Failed to claim plot: plot not found")
+		return
+	end
 
 	local success, message = Packets.ClaimRequest:Fire(CurrentIndex)
+	local responseMessage = message
 
 	if not success then
 		--#TODO: Toast notification for failure
-		warn("Failed to claim plot: " .. message)
+		warn(("Failed to claim plot: %s"):format(responseMessage or "Unknown error"))
 		return
 	end
 
@@ -162,7 +167,7 @@ function PlotSelector.Select()
 	--#TODO: Toast notification for success
 	--CameraModule.EnableTopDownCamera()
 	MainHUD.Enabled = true
-	print("Successfully claimed plot: " .. message)
+	print(("Successfully claimed plot: %s"):format(responseMessage or ""))
 end
 
 return PlotSelector

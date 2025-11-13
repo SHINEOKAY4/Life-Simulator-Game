@@ -21,7 +21,8 @@ function CellObjects.attach(PlotState)
 		widthCells: number,
 		depthCells: number,
 		facing: Facing,
-		isFree: boolean
+		isFree: boolean,
+		yLevel: number?
 	)
 		local normalizedWidth = normalizeDimension(widthCells)
 		local normalizedDepth = normalizeDimension(depthCells)
@@ -29,13 +30,15 @@ function CellObjects.attach(PlotState)
 			self.Grid:FootprintBounds(anchorX, anchorZ, normalizedWidth, normalizedDepth, facing)
 		local rotatedWidth = maxCellX - minCellX
 		local rotatedDepth = maxCellZ - minCellZ
+		local verticalEdges = self:GetEdgeFreeVerticalForLevel(yLevel)
+		local horizontalEdges = self:GetEdgeFreeHorizontalForLevel(yLevel)
 
 		if rotatedWidth >= 1 then
 			for cellZ = minCellZ, maxCellZ do
 				for cellX = minCellX, maxCellX - 1 do
 					local alignment, edgeX, edgeZ = self:EdgeOfCell(cellX, cellZ, "East")
 					if alignment == "Vertical" then
-						self.EdgeFreeVertical[self:VerticalEdgeIndex(edgeX, edgeZ)] = isFree
+						verticalEdges[self:VerticalEdgeIndex(edgeX, edgeZ)] = isFree
 					end
 				end
 			end
@@ -46,7 +49,7 @@ function CellObjects.attach(PlotState)
 				for cellX = minCellX, maxCellX do
 					local alignment, edgeX, edgeZ = self:EdgeOfCell(cellX, cellZ, "South")
 					if alignment == "Horizontal" then
-						self.EdgeFreeHorizontal[self:HorizontalEdgeIndex(edgeX, edgeZ)] = isFree
+						horizontalEdges[self:HorizontalEdgeIndex(edgeX, edgeZ)] = isFree
 					end
 				end
 			end
@@ -60,12 +63,13 @@ function CellObjects.attach(PlotState)
 		widthCells: number,
 		depthCells: number,
 		facing: Facing,
-		isFree: boolean
+		isFree: boolean,
+		yLevel: number?
 	)
-		setInteriorEdgesFree(self, anchorX, anchorZ, widthCells, depthCells, facing, isFree)
+		setInteriorEdgesFree(self, anchorX, anchorZ, widthCells, depthCells, facing, isFree, yLevel)
 	end
 
-	function PlotState:IsCellBuildable(cellX: number, cellZ: number): boolean
+	function PlotState:IsCellBuildable(cellX: number, cellZ: number, yLevel: number?): boolean
 		if not self.Grid:IsCellInBounds(cellX, cellZ) then
 			return false
 		end
@@ -75,7 +79,8 @@ function CellObjects.attach(PlotState)
 			return false
 		end
 
-		return self.CellFree[self.Grid:CellToIndex(cellX, cellZ)] == true
+		local occupancy = self:GetCellFreeForLevel(yLevel)
+		return occupancy[self.Grid:CellToIndex(cellX, cellZ)] == true
 	end
 
 	function PlotState:CanPlace(
@@ -83,8 +88,10 @@ function CellObjects.attach(PlotState)
 		anchorZ: number,
 		widthCells: number,
 		depthCells: number,
-		facing: Facing
+		facing: Facing,
+		yLevel: number?
 	): boolean
+		local level = self:NormalizeLevel(yLevel)
 		local minChunkX, minChunkZ, maxChunkX, maxChunkZ =
 			self.Grid:FootprintChunkRange(anchorX, anchorZ, widthCells, depthCells, facing, self.ChunkSizeInCells)
 		for chunkZ = minChunkZ, maxChunkZ do
@@ -96,8 +103,9 @@ function CellObjects.attach(PlotState)
 		end
 
 		local cellIndices = self.Grid:FootprintCells(anchorX, anchorZ, widthCells, depthCells, facing)
+		local occupancy = self:GetCellFreeForLevel(level)
 		for i = 1, #cellIndices do
-			if not self.CellFree[cellIndices[i]] then
+			if not occupancy[cellIndices[i]] then
 				return false
 			end
 		end
@@ -106,6 +114,8 @@ function CellObjects.attach(PlotState)
 			self.Grid:FootprintBounds(anchorX, anchorZ, widthCells, depthCells, facing)
 		local rotatedWidth = maxCellX - minCellX + 1
 		local rotatedDepth = maxCellZ - minCellZ + 1
+		local verticalEdges = self:GetEdgeFreeVerticalForLevel(level)
+		local horizontalEdges = self:GetEdgeFreeHorizontalForLevel(level)
 
 		if rotatedWidth > 1 then
 			for cellZ = minCellZ, maxCellZ do
@@ -113,7 +123,7 @@ function CellObjects.attach(PlotState)
 					local alignment, edgeX, edgeZ = self:EdgeOfCell(cellX, cellZ, "East")
 					if alignment == "Vertical" then
 						local edgeIndex = self:VerticalEdgeIndex(edgeX, edgeZ)
-						if not self.EdgeFreeVertical[edgeIndex] then
+						if not verticalEdges[edgeIndex] then
 							return false
 						end
 					end
@@ -127,7 +137,7 @@ function CellObjects.attach(PlotState)
 					local alignment, edgeX, edgeZ = self:EdgeOfCell(cellX, cellZ, "South")
 					if alignment == "Horizontal" then
 						local edgeIndex = self:HorizontalEdgeIndex(edgeX, edgeZ)
-						if not self.EdgeFreeHorizontal[edgeIndex] then
+						if not horizontalEdges[edgeIndex] then
 							return false
 						end
 					end
@@ -143,18 +153,21 @@ function CellObjects.attach(PlotState)
 		anchorZ: number,
 		widthCells: number,
 		depthCells: number,
-		facing: Facing
+		facing: Facing,
+		yLevel: number?
 	): boolean
-		if not self:CanPlace(anchorX, anchorZ, widthCells, depthCells, facing) then
+		if not self:CanPlace(anchorX, anchorZ, widthCells, depthCells, facing, yLevel) then
 			return false
 		end
 
+		local level = self:NormalizeLevel(yLevel)
 		local cellIndices = self.Grid:FootprintCells(anchorX, anchorZ, widthCells, depthCells, facing)
+		local occupancy = self:GetCellFreeForLevel(level)
 		for i = 1, #cellIndices do
-			self.CellFree[cellIndices[i]] = false
+			occupancy[cellIndices[i]] = false
 		end
 
-		self:SetFootprintInteriorEdgesFree(anchorX, anchorZ, widthCells, depthCells, facing, false)
+		self:SetFootprintInteriorEdgesFree(anchorX, anchorZ, widthCells, depthCells, facing, false, level)
 
 		return true
 	end
@@ -164,14 +177,17 @@ function CellObjects.attach(PlotState)
 		anchorZ: number,
 		widthCells: number,
 		depthCells: number,
-		facing: Facing
+		facing: Facing,
+		yLevel: number?
 	)
 		local cellIndices = self.Grid:FootprintCells(anchorX, anchorZ, widthCells, depthCells, facing)
+		local level = self:NormalizeLevel(yLevel)
+		local occupancy = self:GetCellFreeForLevel(level)
 		for i = 1, #cellIndices do
-			self.CellFree[cellIndices[i]] = true
+			occupancy[cellIndices[i]] = true
 		end
 
-		self:SetFootprintInteriorEdgesFree(anchorX, anchorZ, widthCells, depthCells, facing, true)
+		self:SetFootprintInteriorEdgesFree(anchorX, anchorZ, widthCells, depthCells, facing, true, level)
 	end
 
 	function PlotState:Place(
@@ -180,15 +196,17 @@ function CellObjects.attach(PlotState)
 		anchorZ: number,
 		widthCells: number,
 		depthCells: number,
-		facing: Facing
+		facing: Facing,
+		yLevel: number?
 	): boolean
-		if not self:ReserveFootprint(anchorX, anchorZ, widthCells, depthCells, facing) then
+		local level = self:NormalizeLevel(yLevel)
+		if not self:ReserveFootprint(anchorX, anchorZ, widthCells, depthCells, facing, level) then
 			return false
 		end
 
-		local key = self:PlacementKeyForType(anchorX, anchorZ, facing, "CellObject")
+		local key = self:PlacementKeyForType(anchorX, anchorZ, facing, "CellObject", level)
 		if self.Save.PlacedObjects[key] then
-			self:FreeFootprint(anchorX, anchorZ, widthCells, depthCells, facing)
+			self:FreeFootprint(anchorX, anchorZ, widthCells, depthCells, facing, level)
 			return false
 		end
 
@@ -197,20 +215,30 @@ function CellObjects.attach(PlotState)
 			cellX = anchorX,
 			cellZ = anchorZ,
 			facing = facing,
+			yLevel = level,
 		}
 		return true, key
 	end
 
-	function PlotState:RemoveCellObject(cellX: number, cellZ: number, width: number, depth: number, facing: Facing)
+	function PlotState:RemoveCellObject(
+		cellX: number,
+		cellZ: number,
+		width: number,
+		depth: number,
+		facing: Facing,
+		yLevel: number?
+	)
 		local normalizedWidth = normalizeDimension(width)
 		local normalizedDepth = normalizeDimension(depth)
 		local indices = self.Grid:FootprintCells(cellX, cellZ, normalizedWidth, normalizedDepth, facing)
+		local level = self:NormalizeLevel(yLevel)
+		local occupancy = self:GetCellFreeForLevel(level)
 		for i = 1, #indices do
-			self.CellFree[indices[i]] = true
+			occupancy[indices[i]] = true
 		end
-		self:SetFootprintInteriorEdgesFree(cellX, cellZ, normalizedWidth, normalizedDepth, facing, true)
+		self:SetFootprintInteriorEdgesFree(cellX, cellZ, normalizedWidth, normalizedDepth, facing, true, level)
 
-		local key = self:PlacementKeyForType(cellX, cellZ, facing, "CellObject")
+		local key = self:PlacementKeyForType(cellX, cellZ, facing, "CellObject", level)
 		local saved = self.Save.PlacedObjects[key]
 		if saved then
 			local spec = ItemFinder.FindItemById(saved.id)
@@ -226,6 +254,7 @@ function CellObjects.attach(PlotState)
 				and specWidth == normalizedWidth
 				and specDepth == normalizedDepth
 				and objFacing == facing
+				and (saved.yLevel or self.DefaultLevel) == level
 			then
 				self.Save.PlacedObjects[key] = nil
 			end
@@ -239,7 +268,9 @@ function CellObjects.attach(PlotState)
 		fromF: Facing,
 		toX: number,
 		toZ: number,
-		toF: Facing
+		toF: Facing,
+		fromLevel: number?,
+		toLevel: number?
 	): (boolean, string?)
 		local spec = ItemFinder.FindItemById(itemId)
 		assert(spec, ("Unknown catalog item '%s'"):format(itemId))
@@ -250,7 +281,9 @@ function CellObjects.attach(PlotState)
 		local width = spec.WidthCells
 		local depth = spec.DepthCells
 
-		local fromKey = self:PlacementKeyForType(fromX, fromZ, fromF, "CellObject")
+		local resolvedFromLevel = self:NormalizeLevel(fromLevel)
+		local resolvedToLevel = self:NormalizeLevel(toLevel)
+		local fromKey = self:PlacementKeyForType(fromX, fromZ, fromF, "CellObject", resolvedFromLevel)
 		local saved = self.Save.PlacedObjects[fromKey]
 		if not saved then
 			return false, ("No item '%s' found at source (%d, %d) facing %s"):format(itemId, fromX, fromZ, fromF)
@@ -296,26 +329,30 @@ function CellObjects.attach(PlotState)
 		end
 
 		local fromCellSet: { [number]: boolean } = {}
-		for _, index in fromCellsArray do
-			fromCellSet[index] = true
+		local allowSharedCells = resolvedFromLevel == resolvedToLevel
+		if allowSharedCells then
+			for _, index in fromCellsArray do
+				fromCellSet[index] = true
+			end
 		end
 
+		local toOccupancy = self:GetCellFreeForLevel(resolvedToLevel)
 		for _, index in toCellsArray do
-			if not self.CellFree[index] and not fromCellSet[index] then
+			if not toOccupancy[index] and not fromCellSet[index] then
 				local blockX, blockZ = self.Grid:IndexToCell(index)
 				return false, ("Cell (%d, %d) is already occupied"):format(blockX, blockZ)
 			end
 		end
 
-		local toKey = self:PlacementKeyForType(toX, toZ, toF, "CellObject")
+		local toKey = self:PlacementKeyForType(toX, toZ, toF, "CellObject", resolvedToLevel)
 		local existing = self.Save.PlacedObjects[toKey]
 		if existing and existing ~= saved then
 			return false, ("Destination already has item '%s' at (%d, %d) facing %s"):format(existing.id, toX, toZ, toF)
 		end
 
-		self:FreeFootprint(fromX, fromZ, width, depth, fromF)
-		if not self:ReserveFootprint(toX, toZ, width, depth, toF) then
-			self:ReserveFootprint(fromX, fromZ, width, depth, fromF)
+		self:FreeFootprint(fromX, fromZ, width, depth, fromF, resolvedFromLevel)
+		if not self:ReserveFootprint(toX, toZ, width, depth, toF, resolvedToLevel) then
+			self:ReserveFootprint(fromX, fromZ, width, depth, fromF, resolvedFromLevel)
 			return false, "Failed to reserve destination footprint"
 		end
 
@@ -323,13 +360,15 @@ function CellObjects.attach(PlotState)
 		saved.cellX = toX
 		saved.cellZ = toZ
 		saved.facing = toF
+		saved.yLevel = resolvedToLevel
 		self.Save.PlacedObjects[toKey] = saved
 		return true, nil
 	end
 
 	function PlotState:RotateCellObject(itemId: string, fromKey: string, toFacing: Facing): (boolean, string?)
 		local targetFacing: Facing = PlacementKey.NormalizeFacing(toFacing)
-		local okParse, parsedCellX, parsedCellZ, parsedFacing, parsedType = pcall(PlacementKey.ParseWithType, fromKey)
+		local okParse, parsedCellX, parsedCellZ, parsedFacing, parsedType, parsedLevel =
+			pcall(PlacementKey.ParseWithType, fromKey)
 		if not okParse then
 			local parseErr = parsedCellX
 			return false, ("Invalid placement key '%s': %s"):format(fromKey, tostring(parseErr))
@@ -339,6 +378,7 @@ function CellObjects.attach(PlotState)
 		local cellZ = parsedCellZ :: number
 		local currentFacing = PlacementKey.NormalizeFacing(parsedFacing :: Facing)
 		local keyType = parsedType or "CellObject"
+		local level = if typeof(parsedLevel) == "number" then parsedLevel else self.DefaultLevel
 
 		if keyType ~= "CellObject" then
 			return false, ("Placement key type '%s' does not match CellObject rotation"):format(tostring(parsedType))
@@ -367,7 +407,7 @@ function CellObjects.attach(PlotState)
 			return false, "Invalid facing for this item"
 		end
 
-		return self:MoveCellObject(itemId, cellX, cellZ, currentFacing, cellX, cellZ, targetFacing)
+		return self:MoveCellObject(itemId, cellX, cellZ, currentFacing, cellX, cellZ, targetFacing, level, level)
 	end
 end
 

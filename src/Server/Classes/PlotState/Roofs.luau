@@ -18,8 +18,10 @@ function Roofs.attach(PlotState)
 		cellZ: number,
 		widthCells: number,
 		depthCells: number,
-		facing: Facing
+		facing: Facing,
+		yLevel: number?
 	): boolean
+		local level = self:NormalizeLevel(yLevel)
 		local minX, minZ, maxX, maxZ =
 			self.Grid:FootprintChunkRange(cellX, cellZ, widthCells, depthCells, facing, self.ChunkSizeInCells)
 		for cz = minZ, maxZ do
@@ -31,8 +33,9 @@ function Roofs.attach(PlotState)
 		end
 
 		local indices = self.Grid:FootprintCells(cellX, cellZ, widthCells, depthCells, facing)
+		local levelRoofs = self:GetRoofFilledForLevel(level)
 		for i = 1, #indices do
-			if self.RoofFilled[indices[i]] then
+			if levelRoofs[indices[i]] then
 				return false
 			end
 		end
@@ -46,21 +49,24 @@ function Roofs.attach(PlotState)
 		cellZ: number,
 		widthCells: number,
 		depthCells: number,
-		facing: Facing
+		facing: Facing,
+		yLevel: number?
 	): boolean
-		if not self:CanPlaceRoof(cellX, cellZ, widthCells, depthCells, facing) then
+		local level = self:NormalizeLevel(yLevel)
+		if not self:CanPlaceRoof(cellX, cellZ, widthCells, depthCells, facing, level) then
 			return false
 		end
 
 		local indices = self.Grid:FootprintCells(cellX, cellZ, widthCells, depthCells, facing)
+		local levelRoofs = self:GetRoofFilledForLevel(level)
 		for i = 1, #indices do
-			self.RoofFilled[indices[i]] = true
+			levelRoofs[indices[i]] = true
 		end
 
-		local key = self:PlacementKeyForType(cellX, cellZ, facing, "Roof")
+		local key = self:PlacementKeyForType(cellX, cellZ, facing, "Roof", level)
 		if self.Save.PlacedObjects[key] then
 			for i = 1, #indices do
-				self.RoofFilled[indices[i]] = false
+				levelRoofs[indices[i]] = false
 			end
 			return false
 		end
@@ -70,6 +76,7 @@ function Roofs.attach(PlotState)
 			cellX = cellX,
 			cellZ = cellZ,
 			facing = facing,
+			yLevel = level,
 			Metadata = {
 				WidthCells = widthCells,
 				DepthCells = depthCells,
@@ -78,15 +85,24 @@ function Roofs.attach(PlotState)
 		return true
 	end
 
-	function PlotState:RemoveRoof(cellX: number, cellZ: number, width: number, depth: number, facing: Facing)
+	function PlotState:RemoveRoof(
+		cellX: number,
+		cellZ: number,
+		width: number,
+		depth: number,
+		facing: Facing,
+		yLevel: number?
+	)
 		local normalizedWidth = normalize(width)
 		local normalizedDepth = normalize(depth)
 		local indices = self.Grid:FootprintCells(cellX, cellZ, normalizedWidth, normalizedDepth, facing)
+		local level = self:NormalizeLevel(yLevel)
+		local levelRoofs = self:GetRoofFilledForLevel(level)
 		for i = 1, #indices do
-			self.RoofFilled[indices[i]] = false
+			levelRoofs[indices[i]] = false
 		end
 
-		local key = self:PlacementKeyForType(cellX, cellZ, facing, "Roof")
+		local key = self:PlacementKeyForType(cellX, cellZ, facing, "Roof", level)
 		local saved = self.Save.PlacedObjects[key]
 		if saved then
 			local spec = ItemFinder.FindItemById(saved.id)
@@ -116,7 +132,9 @@ function Roofs.attach(PlotState)
 		fromF: Facing,
 		toX: number,
 		toZ: number,
-		toF: Facing
+		toF: Facing,
+		fromLevel: number?,
+		toLevel: number?
 	): (boolean, string?)
 		local spec = ItemFinder.FindItemById(itemId)
 		if not spec then
@@ -130,14 +148,16 @@ function Roofs.attach(PlotState)
 
 		local width = spec.WidthCells or spec.Width or 1
 		local depth = spec.DepthCells or spec.Depth or 1
+		local resolvedFromLevel = self:NormalizeLevel(fromLevel)
+		local resolvedToLevel = self:NormalizeLevel(toLevel)
 
-		local fromKey = self:PlacementKeyForType(fromX, fromZ, fromF, "Roof")
+		local fromKey = self:PlacementKeyForType(fromX, fromZ, fromF, "Roof", resolvedFromLevel)
 		local saved = self.Save.PlacedObjects[fromKey]
 		if not saved or saved.id ~= itemId then
 			return false, ("Roof '%s' not found at (%d, %d) facing %s"):format(itemId, fromX, fromZ, tostring(fromF))
 		end
 
-		local toKey = self:PlacementKeyForType(toX, toZ, toF, "Roof")
+		local toKey = self:PlacementKeyForType(toX, toZ, toF, "Roof", resolvedToLevel)
 		local existing = self.Save.PlacedObjects[toKey]
 		if existing and existing ~= saved then
 			return false,
@@ -174,24 +194,29 @@ function Roofs.attach(PlotState)
 			fromCellSet[index] = true
 		end
 
+		local fromRoof = self:GetRoofFilledForLevel(resolvedFromLevel)
+		local toRoof = self:GetRoofFilledForLevel(resolvedToLevel)
 		for _, index in toCells do
-			if self.RoofFilled[index] and not fromCellSet[index] then
+			local alreadyOccupied = toRoof[index]
+			local sharedCell = resolvedFromLevel == resolvedToLevel and fromCellSet[index]
+			if alreadyOccupied and not sharedCell then
 				local blockX, blockZ = self.Grid:IndexToCell(index)
 				return false, ("Roof already placed at (%d, %d)"):format(blockX, blockZ)
 			end
 		end
 
 		for _, index in fromCells do
-			self.RoofFilled[index] = false
+			fromRoof[index] = false
 		end
 		for _, index in toCells do
-			self.RoofFilled[index] = true
+			toRoof[index] = true
 		end
 
 		self.Save.PlacedObjects[fromKey] = nil
 		saved.cellX = toX
 		saved.cellZ = toZ
 		saved.facing = toF
+		saved.yLevel = resolvedToLevel
 		self.Save.PlacedObjects[toKey] = saved
 
 		return true, nil
@@ -199,7 +224,8 @@ function Roofs.attach(PlotState)
 
 	function PlotState:RotateRoof(itemId: string, fromKey: string, toFacing: Facing): (boolean, string?)
 		local desiredFacing: Facing = PlacementKey.NormalizeFacing(toFacing)
-		local parseOk, parsedCellX, parsedCellZ, parsedFacing, parsedType = pcall(PlacementKey.ParseWithType, fromKey)
+		local parseOk, parsedCellX, parsedCellZ, parsedFacing, parsedType, parsedLevel =
+			pcall(PlacementKey.ParseWithType, fromKey)
 		if not parseOk then
 			local parseErr = parsedCellX
 			return false, ("Invalid placement key '%s': %s"):format(fromKey, tostring(parseErr))
@@ -237,7 +263,8 @@ function Roofs.attach(PlotState)
 			return false, "Invalid facing for this item"
 		end
 
-		return self:MoveRoof(itemId, cellX, cellZ, currentFacing, cellX, cellZ, desiredFacing)
+		local levelHint = saved.yLevel or parsedLevel
+		return self:MoveRoof(itemId, cellX, cellZ, currentFacing, cellX, cellZ, desiredFacing, levelHint, levelHint)
 	end
 end
 

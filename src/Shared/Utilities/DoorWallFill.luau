@@ -179,7 +179,14 @@ function DoorWallFill.Apply(model: Model, spec: DoorSpec?, options: ApplyOptions
 	filler.Color = info.Color
 	filler.Transparency = info.Transparency
 	filler.Reflectance = info.Reflectance
-	filler.Size = Vector3.new(info.Size.X, gapHeight, info.Size.Z)
+	local facingAttr = model:GetAttribute("Facing")
+	local isDiagonalFacing = facingAttr == "NorthEast"
+		or facingAttr == "NorthWest"
+		or facingAttr == "SouthEast"
+		or facingAttr == "SouthWest"
+	local diagonalMultiplier = if isDiagonalFacing then math.sqrt(2) else 1
+	local effectiveWidth = info.Size.X * diagonalMultiplier
+	filler.Size = Vector3.new(effectiveWidth, gapHeight, info.Size.Z)
 
 	local doorCenterCF = computeDoorCenterWorld(model)
 	if not doorCenterCF then

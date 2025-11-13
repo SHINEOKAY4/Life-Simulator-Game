@@ -18,6 +18,7 @@ export type FloorSelectionInfo = {
 	WidthCells: number,
 	DepthCells: number,
 	CanPlace: boolean,
+	Level: number,
 }
 
 export type FloorUpdateResult = {
@@ -40,6 +41,8 @@ type FloorUpdateArgs = {
 	placed: any,
 	ignorePlacement: MoveOriginInfo?,
 	isChunkUnlocked: (number, number) -> boolean,
+	level: number?,
+	levelHeight: number?,
 }
 
 local MAX_FLOOR_SELECTION_CELLS = 256
@@ -185,6 +188,9 @@ function FloorPreview.Update(args: FloorUpdateArgs): FloorUpdateResult?
 		return
 	end
 
+	local resolvedLevel = if typeof(args.level) == "number" then args.level else 0
+	local levelHeight = if typeof(args.levelHeight) == "number" then args.levelHeight else 0
+
 	local anchorX = anchorCellX or args.cellX
 	local anchorZ = anchorCellZ or args.cellZ
 	local targetCellX = args.cellX
@@ -215,12 +221,13 @@ function FloorPreview.Update(args: FloorUpdateArgs): FloorUpdateResult?
 		minCellZ,
 		selectionWidthCells,
 		selectionDepthCells,
-		"North"
+		"North",
+		levelHeight
 	)
 
 	local areaUnlocked =
 		isSelectionUnlocked(args.grid, args.chunkSize, minCellX, minCellZ, maxCellX, maxCellZ, args.isChunkUnlocked)
-	PlacementUtils.PopulateCellMapForType(args.grid, args.placed, "Floor", floorCellMap, ignorePlacement)
+	PlacementUtils.PopulateCellMapForType(args.grid, args.placed, "Floor", floorCellMap, ignorePlacement, resolvedLevel)
 
 	local occupied = false
 	for _, index in indices do
@@ -254,6 +261,7 @@ function FloorPreview.Update(args: FloorUpdateArgs): FloorUpdateResult?
 		WidthCells = selectionWidthCells,
 		DepthCells = selectionDepthCells,
 		CanPlace = canPlace,
+		Level = resolvedLevel,
 	}
 
 	local fillColor = if canPlace then PLACEABLE_FILL else BLOCKED_FILL

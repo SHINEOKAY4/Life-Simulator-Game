@@ -155,6 +155,14 @@ local function PlaceSelectedPreview(object: Model)
 		warn("No valid pose for placing object.")
 		return
 	end
+	if pose.Kind == "SurfaceMounted" then
+		warn("Move is not supported for surface-mounted items yet.")
+		ObjectPreview.ClearPreview()
+		if not restoreDetachedPreview() then
+			clearDetachedPreviewState()
+		end
+		return
+	end
 
 	-- Fire move request to server here
 	local fromCellX = tonumber(object:GetAttribute("CellX")) :: number
@@ -176,17 +184,29 @@ local function PlaceSelectedPreview(object: Model)
 		toFacing = "North"
 	end
 
+	local fromLevelAttr = tonumber(object:GetAttribute("Level"))
+	local fromLevelRaw = fromLevelAttr or PlotStateStore.GetActiveLevel() or 0
+	local fromLevel = math.floor(math.clamp(fromLevelRaw, 0, 255) + 0.5)
+	local poseLevelValue = pose.Level
+	local toLevelRaw = if typeof(poseLevelValue) == "number" then poseLevelValue else fromLevel
+	local toLevel = math.floor(math.clamp(toLevelRaw, 0, 255) + 0.5)
+
 	local payload = {
 		ItemId = itemId,
 		FromCellX = fromCellX,
 		FromCellZ = fromCellZ,
 		FromFacing = fromFacing,
+		FromLevel = fromLevel,
 		ToCellX = pose.CellX,
 		ToCellZ = pose.CellZ,
 		ToFacing = toFacing,
+		ToLevel = toLevel,
 	}
 
-	local isNoOpMove = fromCellX == pose.CellX and fromCellZ == pose.CellZ and fromFacing == toFacing
+	local isNoOpMove = fromCellX == pose.CellX
+		and fromCellZ == pose.CellZ
+		and fromFacing == toFacing
+		and fromLevel == toLevel
 	if isNoOpMove then
 		ObjectActionContext.ClickMoveRequest.Enabled = false
 		ObjectPreview.ClearPreview()
@@ -281,6 +301,9 @@ function ObjectAction.Move(object: Model, newPosition: Vector3)
 	local cellZAttr = tonumber(object:GetAttribute("CellZ"))
 	local widthAttr = tonumber(object:GetAttribute("WidthCells"))
 	local depthAttr = tonumber(object:GetAttribute("DepthCells"))
+	local levelAttr = tonumber(object:GetAttribute("Level"))
+	local fromLevelValue = if levelAttr ~= nil then levelAttr else PlotStateStore.GetActiveLevel()
+	local fromLevel = math.floor(math.clamp(fromLevelValue, 0, 255) + 0.5)
 	if cellXAttr ~= nil and cellZAttr ~= nil then
 		ObjectPreview.SetMoveOrigin({
 			ItemId = itemId,
@@ -289,6 +312,7 @@ function ObjectAction.Move(object: Model, newPosition: Vector3)
 			Facing = initialFacing,
 			WidthCells = widthAttr,
 			DepthCells = depthAttr,
+			Level = fromLevel,
 		})
 	else
 		ObjectPreview.SetMoveOrigin(nil)
@@ -317,6 +341,9 @@ function ObjectAction.Rotate(object: Model, rotation: Vector3)
 
 	local currentFacingAttr = object:GetAttribute("Facing")
 	local currentFacing: Facing = sanitizeFacing(currentFacingAttr)
+	local levelAttr = tonumber(object:GetAttribute("Level"))
+	local rotateLevelValue = if levelAttr ~= nil then levelAttr else PlotStateStore.GetActiveLevel()
+	local rotateLevel = math.floor(math.clamp(rotateLevelValue, 0, 255) + 0.5)
 
 	local allowedFacing = spec.Facing :: { Facing }?
 	local nextFacing: Facing
@@ -341,7 +368,8 @@ function ObjectAction.Rotate(object: Model, rotation: Vector3)
 	end
 
 	local normalizedFacing = PlacementKey.NormalizeFacing(currentFacing :: any)
-	local fromKey = PlacementKey.ForPlacementType(cellXAttr, cellZAttr, normalizedFacing :: any, placementType)
+	local fromKey =
+		PlacementKey.ForPlacementType(cellXAttr, cellZAttr, normalizedFacing :: any, placementType, rotateLevel)
 
 	local success, message = Packets.RotateRequest:Fire({
 		ItemId = itemId,
@@ -365,13 +393,50 @@ function ObjectAction.Delete(object: Model)
 		warn("Cannot delete object without item id")
 		return
 	end
-	local itemData = {
+
+	local placementTypeAttr = object:GetAttribute("PlacementType")
+	if placementTypeAttr == "SurfaceMounted" then
+		local mountKeyAttr = object:GetAttribute("MountKey")
+		if typeof(mountKeyAttr) ~= "string" or mountKeyAttr == "" then
+			warn("Cannot delete surface mount without mount key")
+			return
+		end
+		local success, message = Packets.DestroySurfaceMountRequest:Fire({
+			MountKey = mountKeyAttr,
+		})
+		if not success then
+			warn("Surface mount deletion failed:", message)
+		end
+		return
+	end
+
+	local cellXValue = tonumber(object:GetAttribute("CellX"))
+	local cellZValue = tonumber(object:GetAttribute("CellZ"))
+	if not cellXValue or not cellZValue then
+		warn("Cannot delete object without cell coordinates")
+		return
+	end
+
+	local facingAttr = object:GetAttribute("Facing")
+	local facing = if typeof(facingAttr) == "string" and facingAttr ~= "" then facingAttr else "North"
+
+	local levelAttr = object:GetAttribute("Level")
+	local levelNumber = if typeof(levelAttr) == "number" then levelAttr else PlotStateStore.GetActiveLevel()
+	if typeof(levelNumber) ~= "number" then
+		levelNumber = 0
+	end
+	levelNumber = math.clamp(levelNumber, 0, 255)
+
+	local success, message = Packets.DestroyRequest:Fire({
 		ItemId = itemId,
-		CellX = tonumber(object:GetAttribute("CellX")) :: number,
-		CellZ = tonumber(object:GetAttribute("CellZ")) :: number,
-		Facing = object:GetAttribute("Facing") :: string,
-	}
-	Packets.DestroyRequest:Fire(itemData)
+		CellX = cellXValue,
+		CellZ = cellZValue,
+		Facing = facing,
+		Level = levelNumber,
+	})
+	if not success then
+		warn("Deletion failed:", message)
+	end
 end
 
 -- #TODO: Bug fix the copy and close mechanic (while on the copy preview, clicking the close action does not stop object selection mode)

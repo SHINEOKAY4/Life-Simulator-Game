@@ -2,6 +2,7 @@
 
 local PlacementUtils = require(script.Parent.PlacementUtils)
 local Renderer = require(script.Parent.Renderer)
+local PlotStateStore = require(script.Parent.Parent.Parent.ClientStores.PlotStateStore)
 
 type Facing = string
 export type RoofSelectionInfo = {
@@ -18,6 +19,7 @@ export type RoofSelectionInfo = {
 	WidthCells: number,
 	DepthCells: number,
 	CanPlace: boolean,
+	Level: number?,
 }
 
 export type RoofUpdateResult = {
@@ -41,6 +43,7 @@ type RoofUpdateArgs = {
 	placed: any,
 	ignorePlacement: MoveOriginInfo?,
 	isChunkUnlocked: (number, number) -> boolean,
+	level: number?,
 }
 
 local MAX_ROOF_SELECTION_CELLS = 256
@@ -209,6 +212,9 @@ function RoofPreview.Update(args: RoofUpdateArgs): RoofUpdateResult?
 	local selectionWidthCells = maxCellX - minCellX + 1
 	local selectionDepthCells = maxCellZ - minCellZ + 1
 
+	local resolvedLevel = if typeof(args.level) == "number" then args.level else PlotStateStore.GetActiveLevel()
+	local levelHeight = PlotStateStore.GetLevelHeight(resolvedLevel)
+
 	Renderer.PreviewRoof(
 		model,
 		args.grid,
@@ -218,13 +224,14 @@ function RoofPreview.Update(args: RoofUpdateArgs): RoofUpdateResult?
 		selectionWidthCells,
 		selectionDepthCells,
 		"North",
+		levelHeight,
 		args.spec
 	)
 
 	local areaUnlocked =
 		isSelectionUnlocked(args.grid, args.chunkSize, minCellX, minCellZ, maxCellX, maxCellZ, args.isChunkUnlocked)
 
-	PlacementUtils.PopulateCellMapForType(args.grid, args.placed, "Roof", roofCellMap, ignorePlacement)
+	PlacementUtils.PopulateCellMapForType(args.grid, args.placed, "Roof", roofCellMap, ignorePlacement, resolvedLevel)
 
 	local roofOccupied = false
 	for _, index in indices do
@@ -236,7 +243,14 @@ function RoofPreview.Update(args: RoofUpdateArgs): RoofUpdateResult?
 
 	local missingFloorSupport = false
 	if args.spec and args.spec.Rules and args.spec.Rules.RequiresFloorUnderAllCells then
-		PlacementUtils.PopulateCellMapForType(args.grid, args.placed, "Floor", floorCellMap, ignorePlacement)
+		PlacementUtils.PopulateCellMapForType(
+			args.grid,
+			args.placed,
+			"Floor",
+			floorCellMap,
+			ignorePlacement,
+			resolvedLevel
+		)
 		for _, index in indices do
 			if not floorCellMap[index] then
 				missingFloorSupport = true
@@ -269,6 +283,7 @@ function RoofPreview.Update(args: RoofUpdateArgs): RoofUpdateResult?
 		WidthCells = selectionWidthCells,
 		DepthCells = selectionDepthCells,
 		CanPlace = canPlace,
+		Level = resolvedLevel,
 	}
 
 	local fillColor = if canPlace then PLACEABLE_FILL else BLOCKED_FILL

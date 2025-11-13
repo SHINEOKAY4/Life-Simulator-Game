@@ -31,12 +31,18 @@ local function validateChunkUnlocked(self, cellX: number, cellZ: number): boolea
 end
 
 function Attachments.attach(PlotState)
-	function PlotState:CanPlaceWallMounted(cellX: number, cellZ: number, facing: Facing): (boolean, string?)
+	function PlotState:CanPlaceWallMounted(
+		cellX: number,
+		cellZ: number,
+		facing: Facing,
+		yLevel: number?
+	): (boolean, string?)
+		local level = self:NormalizeLevel(yLevel)
 		if not validateChunkUnlocked(self, cellX, cellZ) then
 			return false, "Chunk locked"
 		end
 
-		local wallKey = self:PlacementKeyForType(cellX, cellZ, facing, "Wall")
+		local wallKey = self:PlacementKeyForType(cellX, cellZ, facing, "Wall", level)
 		if not self.Save.PlacedObjects[wallKey] then
 			return false, "No supporting wall"
 		end
@@ -49,14 +55,16 @@ function Attachments.attach(PlotState)
 		cellX: number,
 		cellZ: number,
 		facing: Facing,
-		metadata: { [string]: any }?
+		metadata: { [string]: any }?,
+		yLevel: number?
 	): (boolean, string?)
-		local canPlace, failureReason = self:CanPlaceWallMounted(cellX, cellZ, facing)
+		local level = self:NormalizeLevel(yLevel)
+		local canPlace, failureReason = self:CanPlaceWallMounted(cellX, cellZ, facing, level)
 		if not canPlace then
 			return false, failureReason
 		end
 
-		local key = self:PlacementKeyForType(cellX, cellZ, facing, "WallMounted")
+		local key = self:PlacementKeyForType(cellX, cellZ, facing, "WallMounted", level)
 		if self.Save.PlacedObjects[key] ~= nil then
 			return false, "Wall already has attachment"
 		end
@@ -68,14 +76,16 @@ function Attachments.attach(PlotState)
 			cellX = cellX,
 			cellZ = cellZ,
 			facing = facing,
+			yLevel = level,
 			Metadata = clonedMetadata,
 		}
 
 		return true, nil
 	end
 
-	function PlotState:RemoveWallMounted(cellX: number, cellZ: number, facing: Facing)
-		local key = self:PlacementKeyForType(cellX, cellZ, facing, "WallMounted")
+	function PlotState:RemoveWallMounted(cellX: number, cellZ: number, facing: Facing, yLevel: number?)
+		local level = self:NormalizeLevel(yLevel)
+		local key = self:PlacementKeyForType(cellX, cellZ, facing, "WallMounted", level)
 		local saved = self.Save.PlacedObjects[key]
 		self.Save.PlacedObjects[key] = nil
 		return saved

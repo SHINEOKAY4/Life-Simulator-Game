@@ -46,7 +46,7 @@ local function Rotate(player: Player, payload: Payload): (boolean, string)
 		return false, "Item not found at key"
 	end
 
-	local parseOk, parsedCellX, parsedCellZ, parsedFacing, keyPlacementType =
+	local parseOk, parsedCellX, parsedCellZ, parsedFacing, keyPlacementType, parsedLevel =
 		pcall(PlacementKey.ParseWithType, payload.FromKey)
 	if not parseOk then
 		local parseErr = parsedCellX
@@ -57,6 +57,7 @@ local function Rotate(player: Player, payload: Payload): (boolean, string)
 	local cellZ = parsedCellZ :: number
 	local currentFacingValue = Helpers.coerceFacing(parsedFacing :: string?) or "North"
 	local currentFacing = currentFacingValue :: Facing
+	local level = if typeof(parsedLevel) == "number" then parsedLevel else state.DefaultLevel
 
 	if keyPlacementType and keyPlacementType ~= placementType then
 		return false, "Placement type mismatch"
@@ -77,7 +78,7 @@ local function Rotate(player: Player, payload: Payload): (boolean, string)
 		local width = spec.WidthCells or spec.Width or 1
 		local depth = spec.DepthCells or spec.Depth or 1
 		if spec.Rules and spec.Rules.RequiresFloorUnderAllCells then
-			if not state:HasFloorUnderFootprint(cellX, cellZ, width, depth, targetFacing) then
+			if not state:HasFloorUnderFootprint(cellX, cellZ, width, depth, targetFacing, level) then
 				return false, "Floor required under all cells"
 			end
 		end
@@ -88,7 +89,7 @@ local function Rotate(player: Player, payload: Payload): (boolean, string)
 		local width = spec.WidthCells or spec.Width or 1
 		local depth = spec.DepthCells or spec.Depth or 1
 		if spec.Rules and spec.Rules.RequiresFloorUnderAllCells then
-			if not state:HasFloorUnderFootprint(cellX, cellZ, width, depth, targetFacing) then
+			if not state:HasFloorUnderFootprint(cellX, cellZ, width, depth, targetFacing, level) then
 				return false, "Floor required under roof"
 			end
 		end
@@ -102,8 +103,8 @@ local function Rotate(player: Player, payload: Payload): (boolean, string)
 	end
 
 	if spec.StationType then
-		local fromKeyNormalized = state:PlacementKeyForType(cellX, cellZ, currentFacing, placementType)
-		local toKey = state:PlacementKeyForType(cellX, cellZ, targetFacing, placementType)
+		local fromKeyNormalized = state:PlacementKeyForType(cellX, cellZ, currentFacing, placementType, level)
+		local toKey = state:PlacementKeyForType(cellX, cellZ, targetFacing, placementType, level)
 		if fromKeyNormalized ~= toKey then
 			PlotService.RemoveStationForPlayer(player, spec.StationType, fromKeyNormalized)
 			PlotService.AddStationForPlayer(player, spec.StationType, toKey, resolvedId)
@@ -111,14 +112,14 @@ local function Rotate(player: Player, payload: Payload): (boolean, string)
 	end
 
 	local metadata = saved.Metadata
-	WorldPlacer.Despawn(player, resolvedId, cellX, cellZ, currentFacing)
-	WorldPlacer.Spawn(player, state.Grid, resolvedId, cellX, cellZ, targetFacing, {
+	WorldPlacer.Despawn(player, resolvedId, cellX, cellZ, currentFacing, level)
+	WorldPlacer.Spawn(player, state.Grid, resolvedId, cellX, cellZ, targetFacing, level, {
 		metadata = metadata,
 		sizeCells = metadata,
 	})
 
-	Helpers.sendPlacementDelta(player, "Removed", resolvedId, cellX, cellZ, currentFacing, metadata)
-	Helpers.sendPlacementDelta(player, "Placed", resolvedId, cellX, cellZ, targetFacing, metadata)
+	Helpers.sendPlacementDelta(player, "Removed", resolvedId, cellX, cellZ, currentFacing, metadata, level)
+	Helpers.sendPlacementDelta(player, "Placed", resolvedId, cellX, cellZ, targetFacing, metadata, level)
 
 	return true, "Rotated"
 end

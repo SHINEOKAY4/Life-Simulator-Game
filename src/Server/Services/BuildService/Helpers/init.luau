@@ -35,6 +35,35 @@ local function cloneMetadata(value: any): any
 	return result
 end
 
+local function serializeVector3(value: any): { X: number, Y: number, Z: number }
+	if typeof(value) == "Vector3" then
+		return {
+			X = value.X,
+			Y = value.Y,
+			Z = value.Z,
+		}
+	end
+
+	if typeof(value) == "table" then
+		local xValue = value.X or value.x
+		local yValue = value.Y or value.y
+		local zValue = value.Z or value.z
+		if typeof(xValue) == "number" and typeof(yValue) == "number" and typeof(zValue) == "number" then
+			return {
+				X = xValue,
+				Y = yValue,
+				Z = zValue,
+			}
+		end
+	end
+
+	return {
+		X = 0,
+		Y = 0,
+		Z = 0,
+	}
+end
+
 function Helpers.resolveFootprintDimensions(itemId: string, metadata: Metadata?): (number, number)
 	local spec = ItemFinder.FindItemById(itemId)
 	local widthOverride = metadata and (metadata.WidthCells or metadata.widthCells or metadata.Width or metadata.width)
@@ -57,7 +86,8 @@ function Helpers.sendPlacementDelta(
 	cellX: number,
 	cellZ: number,
 	facing: Facing,
-	metadata: Metadata?
+	metadata: Metadata?,
+	level: number?
 )
 	local width, depth = Helpers.resolveFootprintDimensions(itemId, metadata)
 	local metadataPayload = if metadata ~= nil then cloneMetadata(metadata) else nil
@@ -70,6 +100,27 @@ function Helpers.sendPlacementDelta(
 			Facing = facing,
 			WidthCells = width,
 			DepthCells = depth,
+			Metadata = metadataPayload,
+			Level = level,
+		},
+	})
+end
+
+function Helpers.sendSurfaceMountDelta(
+	player: Player,
+	action: string,
+	mountKey: string,
+	mountEntry: PlotStateModule.SavedSurfaceMount
+)
+	local metadataPayload = if mountEntry.Metadata ~= nil then cloneMetadata(mountEntry.Metadata) else nil
+	Packets.SurfaceMountDelta:FireClient(player, {
+		Action = action,
+		Mount = {
+			Key = mountKey,
+			ParentKey = mountEntry.parentKey,
+			ItemId = mountEntry.id,
+			LocalPosition = serializeVector3(mountEntry.LocalPosition),
+			LocalRotationY = mountEntry.LocalRotationY,
 			Metadata = metadataPayload,
 		},
 	})

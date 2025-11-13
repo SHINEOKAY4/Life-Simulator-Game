@@ -70,7 +70,8 @@ export type PlotState = {
 		widthCells: number,
 		depthCells: number,
 		facing: Facing,
-		requiresFloorOnBothSides: boolean?
+		requiresFloorOnBothSides: boolean?,
+		metadata: { [string]: any }?
 	) -> boolean,
 	RemoveWall: (self: PlotState, cellX: number, cellZ: number, facing: Facing) -> (),
 	HydrateFromSave: (self: PlotState) -> (),

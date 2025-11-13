@@ -18,11 +18,13 @@ function Floors.attach(PlotState)
 		cellZ: number,
 		widthCells: number,
 		depthCells: number,
-		facing: Facing
+		facing: Facing,
+		yLevel: number?
 	): boolean
+		local levelFloors = self:GetFloorFilledForLevel(yLevel)
 		local indices = self.Grid:FootprintCells(cellX, cellZ, widthCells, depthCells, facing)
 		for i = 1, #indices do
-			if not self.FloorFilled[indices[i]] then
+			if not levelFloors[indices[i]] then
 				return false
 			end
 		end
@@ -34,11 +36,13 @@ function Floors.attach(PlotState)
 		cellZ: number,
 		widthCells: number?,
 		depthCells: number?,
-		facing: Facing?
+		facing: Facing?,
+		yLevel: number?
 	): boolean
 		local w = widthCells or 1
 		local d = depthCells or 1
 		local f = defaultFacing(facing)
+		local level = self:NormalizeLevel(yLevel)
 
 		if w < 1 or d < 1 then
 			return false
@@ -61,8 +65,9 @@ function Floors.attach(PlotState)
 		end
 
 		local indices = self.Grid:FootprintCells(cellX, cellZ, w, d, f)
+		local levelFloors = self:GetFloorFilledForLevel(level)
 		for i = 1, #indices do
-			if self.FloorFilled[indices[i]] then
+			if levelFloors[indices[i]] then
 				return false
 			end
 		end
@@ -76,25 +81,28 @@ function Floors.attach(PlotState)
 		cellZ: number,
 		widthCells: number?,
 		depthCells: number?,
-		facing: Facing?
+		facing: Facing?,
+		yLevel: number?
 	): boolean
 		local w = widthCells or 1
 		local d = depthCells or 1
 		local f = defaultFacing(facing)
+		local level = self:NormalizeLevel(yLevel)
 
-		if not self:CanPlaceFloor(cellX, cellZ, w, d, f) then
+		if not self:CanPlaceFloor(cellX, cellZ, w, d, f, level) then
 			return false
 		end
 
 		local indices = self.Grid:FootprintCells(cellX, cellZ, w, d, f)
+		local levelFloors = self:GetFloorFilledForLevel(level)
 		for i = 1, #indices do
-			self.FloorFilled[indices[i]] = true
+			levelFloors[indices[i]] = true
 		end
 
-		local key = self:PlacementKeyForType(cellX, cellZ, f, "Floor")
+		local key = self:PlacementKeyForType(cellX, cellZ, f, "Floor", level)
 		if self.Save.PlacedObjects[key] then
 			for i = 1, #indices do
-				self.FloorFilled[indices[i]] = false
+				levelFloors[indices[i]] = false
 			end
 			return false
 		end
@@ -104,6 +112,7 @@ function Floors.attach(PlotState)
 			cellX = cellX,
 			cellZ = cellZ,
 			facing = f,
+			yLevel = level,
 			Metadata = {
 				WidthCells = w,
 				DepthCells = d,
@@ -117,13 +126,15 @@ function Floors.attach(PlotState)
 		cellZ: number,
 		widthCells: number?,
 		depthCells: number?,
-		facing: Facing?
+		facing: Facing?,
+		yLevel: number?
 	)
 		local f = defaultFacing(facing)
 		local resolvedWidth = widthCells
 		local resolvedDepth = depthCells
+		local level = self:NormalizeLevel(yLevel)
 
-		local placementKey = self:PlacementKeyForType(cellX, cellZ, f, "Floor")
+		local placementKey = self:PlacementKeyForType(cellX, cellZ, f, "Floor", level)
 		local saved = self.Save.PlacedObjects[placementKey]
 		local spec = saved and ItemFinder.FindItemById(saved.id) or nil
 		local metadata = saved and saved.Metadata or nil
@@ -142,8 +153,9 @@ function Floors.attach(PlotState)
 		local w = resolvedWidth or 1
 		local d = resolvedDepth or 1
 		local indices = self.Grid:FootprintCells(cellX, cellZ, w, d, f)
+		local levelFloors = self:GetFloorFilledForLevel(level)
 		for i = 1, #indices do
-			self.FloorFilled[indices[i]] = false
+			levelFloors[indices[i]] = false
 		end
 
 		if saved then
@@ -156,7 +168,9 @@ function Floors.attach(PlotState)
 		fromX: number,
 		fromZ: number,
 		toX: number,
-		toZ: number
+		toZ: number,
+		fromLevel: number?,
+		toLevel: number?
 	): (boolean, string?)
 		local spec = ItemFinder.FindItemById(itemId)
 		if not spec then
@@ -169,7 +183,9 @@ function Floors.attach(PlotState)
 		end
 
 		local facing: Facing = "North"
-		local fromKey = self:PlacementKeyForType(fromX, fromZ, facing, "Floor")
+		local resolvedFromLevel = self:NormalizeLevel(fromLevel)
+		local resolvedToLevel = self:NormalizeLevel(toLevel)
+		local fromKey = self:PlacementKeyForType(fromX, fromZ, facing, "Floor", resolvedFromLevel)
 		local saved = self.Save.PlacedObjects[fromKey]
 		if not saved or saved.id ~= itemId then
 			return false, ("Floor '%s' not found at (%d, %d)"):format(itemId, fromX, fromZ)
@@ -179,7 +195,7 @@ function Floors.attach(PlotState)
 		local width = metadata and metadata.WidthCells or spec.WidthCells or spec.Width or 1
 		local depth = metadata and metadata.DepthCells or spec.DepthCells or spec.Depth or 1
 
-		local toKey = self:PlacementKeyForType(toX, toZ, facing, "Floor")
+		local toKey = self:PlacementKeyForType(toX, toZ, facing, "Floor", resolvedToLevel)
 		if fromKey == toKey then
 			return true, nil
 		end
@@ -221,28 +237,34 @@ function Floors.attach(PlotState)
 		local toCells = toCellsResult :: { number }
 
 		local fromCellSet: { [number]: boolean } = {}
-		for _, index in fromCells do
-			fromCellSet[index] = true
+		local allowSharedCells = resolvedFromLevel == resolvedToLevel
+		if allowSharedCells then
+			for _, index in fromCells do
+				fromCellSet[index] = true
+			end
 		end
 
+		local toFloors = self:GetFloorFilledForLevel(resolvedToLevel)
 		for _, index in toCells do
-			if self.FloorFilled[index] and not fromCellSet[index] then
+			if toFloors[index] and not fromCellSet[index] then
 				local blockX, blockZ = self.Grid:IndexToCell(index)
 				return false, ("Floor already placed at (%d, %d)"):format(blockX, blockZ)
 			end
 		end
 
+		local fromFloors = self:GetFloorFilledForLevel(resolvedFromLevel)
 		for _, index in fromCells do
-			self.FloorFilled[index] = false
+			fromFloors[index] = false
 		end
 		for _, index in toCells do
-			self.FloorFilled[index] = true
+			toFloors[index] = true
 		end
 
 		self.Save.PlacedObjects[fromKey] = nil
 		saved.cellX = toX
 		saved.cellZ = toZ
 		saved.facing = facing
+		saved.yLevel = resolvedToLevel
 		local savedMetadata = saved.Metadata
 		if savedMetadata then
 			savedMetadata.WidthCells = width

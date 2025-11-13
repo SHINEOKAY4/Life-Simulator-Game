@@ -26,6 +26,25 @@ local Furnitures = {
 				"Seats two comfortably for long chats or quick breaks.",
 			},
 		},
+		GlassCoffeeTable = {
+			Name = "Glass Coffee Table",
+			PlacementType = "CellObject",
+			Station = false,
+			maxOccupancy = 0,
+			WidthCells = 2,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 150,
+			Description = "Sleek glass coffee table that adds a modern touch to any living space.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Modern", "Table" },
+			ModelPath = { "Furnitures", "GlassCoffeeTable" },
+			AssetId = 89237121094035,
+			EffectSummary = {
+				"Enhances the aesthetic of your living room with contemporary style.",
+				"Provides a functional surface for decor and drinks.",
+			},
+		},
 	},
 	Bathroom = {
 		Bathtub = {
@@ -261,7 +280,31 @@ local Furnitures = {
 			},
 		},
 	},
-	Office = {},
+	Office = {
+		DesktopChair = {
+			Name = "Desktop Chair",
+			PlacementType = "CellObject",
+			--StationType = "WorkStation",
+			Station = false,
+			maxOccupancy = 1,
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 125,
+			Description = "Ergonomic chair designed for long hours at the desk.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Comfort", "Seating" },
+			ModelPath = { "Furnitures", "DesktopChair" },
+			AssetId = 89977144304157,
+			StationEffects = {
+				RestMode = "Nap",
+			},
+			EffectSummary = {
+				"Keeps residents comfortable during focused work sessions.",
+				"Boosts productivity with ergonomic support.",
+			},
+		},
+	},
 	Hall = {
 		RusticWalnutTable = {
 			Name = "Rustic Walnut Table",

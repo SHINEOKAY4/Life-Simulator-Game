@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local PlacementUtils = require(script.Parent:WaitForChild("PlacementUtils"))
 local WallConstraints = require(script.Parent:WaitForChild("WallConstraints"))
+local PlotStateStore = require(script.Parent.Parent.Parent.ClientStores.PlotStateStore)
 
 export type Facing = string
 
@@ -22,6 +23,7 @@ export type WallStripSelectionInfo = {
 	SegmentCount: number,
 	Orientation: Orientation,
 	CanPlace: boolean,
+	Level: number?,
 }
 
 export type WallStripUpdateResult = {
@@ -49,6 +51,7 @@ export type UpdateArgs = {
 	currentCellZ: number,
 	facing: Facing,
 	isChunkUnlocked: (number, number) -> boolean,
+	level: number?,
 }
 
 local WallStripPreview = {}
@@ -206,6 +209,7 @@ function WallStripPreview.GetFallbackSummary(): WallStripSelectionInfo?
 		return nil
 	end
 
+	local activeLevel = PlotStateStore.GetActiveLevel()
 	local itemId = anchorItemId
 	local anchorX = anchorCellX
 	local anchorZ = anchorCellZ
@@ -235,6 +239,7 @@ function WallStripPreview.GetFallbackSummary(): WallStripSelectionInfo?
 		SegmentCount = 1,
 		Orientation = finalOrientation,
 		CanPlace = true,
+		Level = activeLevel,
 	}
 end
 
@@ -268,7 +273,8 @@ local function isWallPlacementAllowed(
 	spec: any?,
 	floorMap: { [number]: boolean }?,
 	cellMap: { [number]: boolean }?,
-	isChunkUnlocked: (number, number) -> boolean
+	isChunkUnlocked: (number, number) -> boolean,
+	level: number?
 ): boolean
 	if cellX < 1 or cellX > grid.Columns then
 		return false
@@ -288,7 +294,7 @@ local function isWallPlacementAllowed(
 		return false
 	end
 
-	local key = PlacementKey.ForPlacementType(cellX, cellZ, resolvedFacing :: any, "Wall")
+	local key = PlacementKey.ForPlacementType(cellX, cellZ, resolvedFacing :: any, "Wall", level)
 	local occupant = placed and placed[key]
 	if occupant then
 		return false
@@ -332,6 +338,7 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 	local placed = args.placed
 	local columns = grid.Columns
 	local rows = grid.Rows
+	local resolvedLevel = if typeof(args.level) == "number" then args.level else nil
 
 	local currentCellX = math.clamp(args.currentCellX, 1, columns)
 	local currentCellZ = math.clamp(args.currentCellZ, 1, rows)
@@ -455,10 +462,11 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 
 	local floorMapRef: { [number]: boolean }? = nil
 	if args.spec and args.spec.RequiresFloorOnBothSides == true then
-		floorMapRef = PlacementUtils.PopulateCellMapForType(grid, placed, "Floor", floorSupportMap, nil)
+		floorMapRef = PlacementUtils.PopulateCellMapForType(grid, placed, "Floor", floorSupportMap, nil, resolvedLevel)
 	end
 
-	local cellObjectMapRef = PlacementUtils.PopulateCellMapForType(grid, placed, "CellObject", cellOccupancyMap, nil)
+	local cellObjectMapRef =
+		PlacementUtils.PopulateCellMapForType(grid, placed, "CellObject", cellOccupancyMap, nil, resolvedLevel)
 
 	local highlightCells: { number } = {}
 	local canPlace = true
@@ -476,7 +484,8 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 					args.spec,
 					floorMapRef,
 					cellObjectMapRef,
-					args.isChunkUnlocked
+					args.isChunkUnlocked,
+					resolvedLevel
 				)
 			then
 				canPlace = false
@@ -497,7 +506,8 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 					args.spec,
 					floorMapRef,
 					cellObjectMapRef,
-					args.isChunkUnlocked
+					args.isChunkUnlocked,
+					resolvedLevel
 				)
 			then
 				canPlace = false
@@ -520,7 +530,8 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 					args.spec,
 					floorMapRef,
 					cellObjectMapRef,
-					args.isChunkUnlocked
+					args.isChunkUnlocked,
+					resolvedLevel
 				)
 			then
 				canPlace = false
@@ -542,6 +553,7 @@ function WallStripPreview.Update(args: UpdateArgs): WallStripUpdateResult?
 		SegmentCount = segmentCount,
 		Orientation = orientationValue,
 		CanPlace = canPlace,
+		Level = resolvedLevel or PlotStateStore.GetActiveLevel(),
 	}
 
 	currentHighlightCells = highlightCells

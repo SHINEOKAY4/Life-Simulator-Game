@@ -15,6 +15,7 @@ export type MoveOriginInfo = {
 	PlacementType: string,
 	WidthCells: number?,
 	DepthCells: number?,
+	Level: number?,
 }
 
 local PlacementUtils = {}
@@ -37,13 +38,24 @@ local function resolveDimensions(entry: any, itemSpec: any?): (number?, number?)
 	return width, depth
 end
 
-function PlacementUtils.ResolvePlacementEntry(entry: any): (any?, string, number, number, Facing)
+function PlacementUtils.ResolvePlacementEntry(entry: any): (any?, string, number, number, Facing, number)
 	local itemId = entry.id or entry.Id or entry.ItemId
 	local itemSpec = if itemId then ItemFinder.FindItemById(itemId) else nil
 	local placementType = (itemSpec and (itemSpec.PlacementType or itemSpec.Type)) or "CellObject"
 
 	local width, depth = resolveDimensions(entry, itemSpec)
 	local entryFacing: Facing = entry.facing or entry.Facing or "North"
+	local entryLevelValue = entry.Level or entry.level or entry.LevelIndex or entry.yLevel
+	local entryLevel = 0
+	if entryLevelValue ~= nil then
+		local numericLevel = tonumber(entryLevelValue)
+		if numericLevel then
+			if numericLevel < 0 then
+				numericLevel = 0
+			end
+			entryLevel = math.floor(numericLevel + 0.5)
+		end
+	end
 
 	if placementType == "Floor" then
 		width = width or (itemSpec and (itemSpec.WidthCells or itemSpec.Width)) or 1
@@ -56,7 +68,7 @@ function PlacementUtils.ResolvePlacementEntry(entry: any): (any?, string, number
 		depth = depth or (itemSpec and (itemSpec.DepthCells or itemSpec.Depth)) or 1
 	end
 
-	return itemSpec, placementType, width or 1, depth or 1, entryFacing
+	return itemSpec, placementType, width or 1, depth or 1, entryFacing, entryLevel
 end
 
 local function anyCellOverlap(firstCells: { number }, secondCells: { number }): boolean
@@ -70,7 +82,9 @@ local function anyCellOverlap(firstCells: { number }, secondCells: { number }): 
 	return false
 end
 
-function PlacementUtils.PreviewKindFromItem(itemId: string): "CellObject" | "Floor" | "Wall" | "Roof" | "WallMounted"
+function PlacementUtils.PreviewKindFromItem(
+	itemId: string
+): "CellObject" | "Floor" | "Wall" | "Roof" | "WallMounted" | "SurfaceMounted"
 	local item = ItemFinder.FindItemById(itemId)
 	local itemType = item and item.PlacementType or "CellObject"
 
@@ -82,6 +96,8 @@ function PlacementUtils.PreviewKindFromItem(itemId: string): "CellObject" | "Flo
 		return "Roof"
 	elseif itemType == "WallMounted" then
 		return "WallMounted"
+	elseif itemType == "SurfaceMounted" then
+		return "SurfaceMounted"
 	end
 
 	return "CellObject"
@@ -140,6 +156,18 @@ function PlacementUtils.MatchesIgnorePlacement(
 		return false
 	end
 
+	local entryLevelValue = entry.Level or entry.level or entry.LevelIndex or entry.yLevel
+	local ignoreLevel = ignorePlacement.Level
+	if ignoreLevel ~= nil then
+		local numericLevel = if entryLevelValue ~= nil then tonumber(entryLevelValue) else nil
+		if numericLevel then
+			numericLevel = math.floor(numericLevel + 0.5)
+		end
+		if numericLevel == nil or numericLevel ~= ignoreLevel then
+			return false
+		end
+	end
+
 	local entryId = entry.id or entry.Id or entry.ItemId
 	return entryId == ignorePlacement.ItemId
 end
@@ -149,7 +177,8 @@ function PlacementUtils.PopulateCellMapForType(
 	placed: any,
 	placementType: string,
 	target: { [number]: boolean },
-	ignorePlacement: MoveOriginInfo?
+	ignorePlacement: MoveOriginInfo?,
+	activeLevel: number?
 ): { [number]: boolean }
 	table.clear(target)
 	if not placed then
@@ -157,7 +186,11 @@ function PlacementUtils.PopulateCellMapForType(
 	end
 
 	for _, placedEntry in pairs(placed) do
-		local _, entryPlacementType, width, depth, facingValue = PlacementUtils.ResolvePlacementEntry(placedEntry)
+		local _, entryPlacementType, width, depth, facingValue, entryLevel =
+			PlacementUtils.ResolvePlacementEntry(placedEntry)
+		if activeLevel ~= nil and entryLevel ~= activeLevel then
+			continue
+		end
 		if placementType == entryPlacementType then
 			if
 				not PlacementUtils.MatchesIgnorePlacement(placedEntry, entryPlacementType, facingValue, ignorePlacement)
@@ -185,14 +218,15 @@ end
 
 function PlacementUtils.IsCellOccupiedForPreview(
 	grid: any,
-	previewKind: "CellObject" | "Floor" | "Roof" | "WallMounted",
+	previewKind: "CellObject" | "Floor" | "Roof" | "WallMounted" | "SurfaceMounted",
 	cellX: number,
 	cellZ: number,
 	baseWidthCells: number,
 	baseDepthCells: number,
 	facing: Facing,
 	placed: any,
-	ignorePlacement: MoveOriginInfo?
+	ignorePlacement: MoveOriginInfo?,
+	activeLevel: number?
 ): boolean
 	if not placed or next(placed) == nil then
 		return false
@@ -202,7 +236,11 @@ function PlacementUtils.IsCellOccupiedForPreview(
 	local myCells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, footprintFacing)
 
 	for _, placedEntry in pairs(placed) do
-		local _, placementType, width, depth, facingValue = PlacementUtils.ResolvePlacementEntry(placedEntry)
+		local _, placementType, width, depth, facingValue, entryLevel =
+			PlacementUtils.ResolvePlacementEntry(placedEntry)
+		if activeLevel ~= nil and entryLevel ~= activeLevel then
+			continue
+		end
 		if previewKind == "Floor" then
 			if
 				placementType == "Floor"

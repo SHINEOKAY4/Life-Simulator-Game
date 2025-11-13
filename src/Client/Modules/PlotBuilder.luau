@@ -93,7 +93,8 @@ local function computeFootprintPosition(
 	cellZ: number,
 	widthCells: number,
 	depthCells: number,
-	facing: string
+	facing: string,
+	level: number?
 ): Vector3?
 	local grid = PlotStateStore.GetGrid()
 	if not grid then
@@ -105,10 +106,17 @@ local function computeFootprintPosition(
 	if not ok then
 		return nil
 	end
-	return (cframe :: CFrame).Position
+	local levelHeight = PlotStateStore.GetLevelHeight(level)
+	return (cframe :: CFrame).Position + Vector3.new(0, levelHeight, 0)
 end
 
-local function computeCellObjectPosition(itemId: string?, cellX: number, cellZ: number, facing: string): Vector3?
+local function computeCellObjectPosition(
+	itemId: string?,
+	cellX: number,
+	cellZ: number,
+	facing: string,
+	level: number?
+): Vector3?
 	local widthCells = 1
 	local depthCells = 1
 	if typeof(itemId) == "string" then
@@ -118,7 +126,7 @@ local function computeCellObjectPosition(itemId: string?, cellX: number, cellZ: 
 			depthCells = spec.DepthCells or spec.Depth or depthCells
 		end
 	end
-	return computeFootprintPosition(cellX, cellZ, widthCells, depthCells, facing)
+	return computeFootprintPosition(cellX, cellZ, widthCells, depthCells, facing, level)
 end
 
 local function computeAreaPlacementPosition(
@@ -128,23 +136,25 @@ local function computeAreaPlacementPosition(
 	endCellZ: number,
 	widthCells: number?,
 	depthCells: number?,
-	facing: string?
+	facing: string?,
+	level: number?
 ): Vector3?
 	local anchorCellX = math.min(startCellX, endCellX)
 	local anchorCellZ = math.min(startCellZ, endCellZ)
 	local resolvedWidth = widthCells or math.abs(endCellX - startCellX) + 1
 	local resolvedDepth = depthCells or math.abs(endCellZ - startCellZ) + 1
-	return computeFootprintPosition(anchorCellX, anchorCellZ, resolvedWidth, resolvedDepth, facing or "North")
+	return computeFootprintPosition(anchorCellX, anchorCellZ, resolvedWidth, resolvedDepth, facing or "North", level)
 end
 
-local function computeWallStripPosition(selection: WallStripSelectionInfo): Vector3?
+local function computeWallStripPosition(selection: WallStripSelectionInfo, level: number?): Vector3?
 	local grid = PlotStateStore.GetGrid()
 	if not grid then
 		return nil
 	end
 	local facing = selection.Facing
+	local levelHeight = PlotStateStore.GetLevelHeight(level)
 	local okStart, startCFrame = pcall(function()
-		return grid:CellToWorldEdgeCenterCFrame(selection.StartCellX, selection.StartCellZ, facing)
+		return grid:CellToWorldEdgeCenterCFrame(selection.StartCellX, selection.StartCellZ, facing, levelHeight)
 	end)
 	if not okStart then
 		return nil
@@ -156,7 +166,7 @@ local function computeWallStripPosition(selection: WallStripSelectionInfo): Vect
 	end
 
 	local okEnd, endCFrame = pcall(function()
-		return grid:CellToWorldEdgeCenterCFrame(selection.EndCellX, selection.EndCellZ, facing)
+		return grid:CellToWorldEdgeCenterCFrame(selection.EndCellX, selection.EndCellZ, facing, levelHeight)
 	end)
 	if okEnd then
 		local endPosition = (endCFrame :: CFrame).Position
@@ -305,17 +315,55 @@ function PlotBuilder.PlaceSelectedPreview()
 			PlotBuilder.PlaceRoofSelection(roofSelection)
 			return
 		end
+	elseif pose.Kind == "SurfaceMounted" then
+		local surfacePose = pose.SurfaceMount
+		if not surfacePose or surfacePose.CanPlace ~= true then
+			return
+		end
+		local parentKey = surfacePose.ParentKey
+		if typeof(parentKey) ~= "string" or parentKey == "" then
+			warn("Surface mount parent key missing for placement")
+			return
+		end
+		local localPosition = surfacePose.LocalPosition
+		local success, message = Packets.PlaceSurfaceMountRequest:Fire({
+			ItemId = pose.ItemId,
+			ParentKey = parentKey,
+			LocalPosX = localPosition.X,
+			LocalPosY = localPosition.Y,
+			LocalPosZ = localPosition.Z,
+			LocalRotationY = surfacePose.LocalRotationY,
+			Metadata = nil,
+		})
+		if not success then
+			warn("Surface mount placement failed: " .. (message or "unknown reason"))
+			local failurePosition = surfacePose.WorldPosition
+			PlacementCelebration.ShowFailure(failurePosition, pose.ItemId, message)
+			return
+		end
+		SoundtrackManager.PlayPlacementSuccess()
+		PlacementCelebration.ShowSuccess(surfacePose.WorldPosition, pose.ItemId)
+		return
 	end
 
 	local wallPose = pose.WallMount
+	local windowPose = pose.WindowCutout
+	local cellX = pose.CellX
+	local cellZ = pose.CellZ
+	if typeof(cellX) ~= "number" or typeof(cellZ) ~= "number" then
+		warn("Placement pose is missing cell coordinates for item " .. tostring(pose.ItemId))
+		return
+	end
+	local poseLevel = if typeof(pose.Level) == "number" then pose.Level else PlotStateStore.GetActiveLevel()
 	local success, message = Packets.PlaceRequest:Fire({
 		ItemId = pose.ItemId,
-		CellX = pose.CellX,
-		CellZ = pose.CellZ,
+		CellX = cellX,
+		CellZ = cellZ,
 		Facing = pose.Facing,
+		Level = poseLevel,
 		WallMountEnabled = pose.Kind == "WallMounted" and wallPose ~= nil,
-		WallMountCellX = wallPose and wallPose.ReferenceCellX or pose.CellX,
-		WallMountCellZ = wallPose and wallPose.ReferenceCellZ or pose.CellZ,
+		WallMountCellX = wallPose and wallPose.ReferenceCellX or cellX,
+		WallMountCellZ = wallPose and wallPose.ReferenceCellZ or cellZ,
 		WallMountFacing = wallPose and wallPose.AttachedFacing or pose.Facing,
 		WallMountHeightOffset = wallPose and wallPose.HeightOffset or 0,
 		WallMountPosX = wallPose and wallPose.WorldPosition.X or 0,
@@ -324,19 +372,21 @@ function PlotBuilder.PlaceSelectedPreview()
 		WallMountNormalX = wallPose and wallPose.WallNormal.X or 0,
 		WallMountNormalY = wallPose and wallPose.WallNormal.Y or 0,
 		WallMountNormalZ = wallPose and wallPose.WallNormal.Z or -1,
+		WindowEnabled = pose.Kind == "Wall" and windowPose ~= nil,
+		WindowHeightOffset = windowPose and windowPose.HeightOffset or 0,
 	})
 
 	if not success then
 		warn("Placement failed: " .. (message or "unknown reason"))
 		local failurePosition = if pose.Kind == "WallMounted" and wallPose
 			then wallPose.WorldPosition
-			else computeCellObjectPosition(pose.ItemId, pose.CellX, pose.CellZ, pose.Facing)
+			else computeCellObjectPosition(pose.ItemId, cellX, cellZ, pose.Facing, poseLevel)
 		PlacementCelebration.ShowFailure(failurePosition, pose.ItemId, message)
 		return
 	end
 
 	SoundtrackManager.PlayPlacementSuccess()
-	PlacementCelebration.CellObjectSuccess(pose.ItemId, pose.CellX, pose.CellZ, pose.Facing)
+	PlacementCelebration.CellObjectSuccess(pose.ItemId, cellX, cellZ, pose.Facing, poseLevel)
 	temporarilyHidePreviewForPlacement(pose)
 
 	-- Optional: keep previewing for batch placement; or call RemovePreview()
@@ -382,6 +432,11 @@ function PlotBuilder.PlaceFloorSelection(selection: any)
 		depthCells = maxCellZ - minCellZ + 1
 	end
 
+	local selectionLevelValue = (selection :: any).Level
+	local level = if typeof(selectionLevelValue) == "number"
+		then selectionLevelValue
+		else PlotStateStore.GetActiveLevel()
+
 	local success, message = Packets.PlaceFloorAreaRequest:Fire({
 		ItemId = itemId,
 		StartCellX = startX,
@@ -390,14 +445,16 @@ function PlotBuilder.PlaceFloorSelection(selection: any)
 		EndCellZ = endZ,
 		WidthCells = widthCells,
 		DepthCells = depthCells,
+		Level = level,
 	})
 
-	local placementPosition = computeAreaPlacementPosition(startX, startZ, endX, endZ, widthCells, depthCells, "North")
+	local placementPosition =
+		computeAreaPlacementPosition(startX, startZ, endX, endZ, widthCells, depthCells, "North", level)
 
 	if success then
 		SoundtrackManager.PlayPlacementSuccess()
 		PlacementCelebration.ShowSuccess(placementPosition, itemId)
-		PlacementCelebration.CelebrateFloorArea(itemId, minCellX, minCellZ, widthCells, depthCells)
+		PlacementCelebration.CelebrateFloorArea(itemId, minCellX, minCellZ, widthCells, depthCells, level)
 	else
 		warn("Placement failed: " .. (message or "unknown reason"))
 		PlacementCelebration.ShowFailure(placementPosition, itemId, message)
@@ -467,6 +524,11 @@ function PlotBuilder.PlaceWallStrip(selection: WallStripSelectionInfo)
 		end
 	end
 
+	local selectionLevelValue = (selection :: any).Level
+	local level = if typeof(selectionLevelValue) == "number"
+		then selectionLevelValue
+		else PlotStateStore.GetActiveLevel()
+
 	local success, message = Packets.PlaceWallStripRequest:Fire({
 		ItemId = itemId,
 		Facing = facing,
@@ -475,14 +537,24 @@ function PlotBuilder.PlaceWallStrip(selection: WallStripSelectionInfo)
 		StartCellZ = startCellZ,
 		EndCellX = endCellX,
 		EndCellZ = endCellZ,
+		Level = level,
 	})
 
-	local placementPosition = computeWallStripPosition(selection)
+	local placementPosition = computeWallStripPosition(selection, level)
 
 	if success then
 		SoundtrackManager.PlayPlacementSuccess()
 		PlacementCelebration.ShowSuccess(placementPosition, itemId)
-		PlacementCelebration.CelebrateWallStrip(itemId, startCellX, endCellX, startCellZ, endCellZ, facing, orientation)
+		PlacementCelebration.CelebrateWallStrip(
+			itemId,
+			startCellX,
+			endCellX,
+			startCellZ,
+			endCellZ,
+			facing,
+			orientation,
+			level
+		)
 	else
 		warn("Placement failed: " .. (message or "unknown reason"))
 		PlacementCelebration.ShowFailure(placementPosition, itemId, message)
@@ -513,16 +585,30 @@ function PlotBuilder.PlaceRoofSelection(selection: RoofSelectionInfo)
 		return
 	end
 
+	local selectionLevelValue = (selection :: any).Level
+	local level = if typeof(selectionLevelValue) == "number"
+		then selectionLevelValue
+		else PlotStateStore.GetActiveLevel()
+
 	local success, message = Packets.PlaceRoofAreaRequest:Fire({
 		ItemId = itemId,
 		StartCellX = startX,
 		StartCellZ = startZ,
 		EndCellX = endX,
 		EndCellZ = endZ,
+		Level = level,
 	})
 
-	local placementPosition =
-		computeAreaPlacementPosition(startX, startZ, endX, endZ, selection.WidthCells, selection.DepthCells, "North")
+	local placementPosition = computeAreaPlacementPosition(
+		startX,
+		startZ,
+		endX,
+		endZ,
+		selection.WidthCells,
+		selection.DepthCells,
+		"North",
+		level
+	)
 
 	if not success then
 		warn("Placement failed: " .. (message or "unknown reason"))

@@ -69,14 +69,17 @@ function WallConstraints.Clear()
 	table.clear(BackwardDiagonalWallEdges)
 end
 
-function WallConstraints.Populate(grid: any, placed: any, ignorePlacement: MoveOriginInfo?)
+function WallConstraints.Populate(grid: any, placed: any, ignorePlacement: MoveOriginInfo?, activeLevel: number?)
 	WallConstraints.Clear()
 	if not placed or not grid then
 		return
 	end
 
 	for _, entry in pairs(placed) do
-		local _, placementType, width, depth, facingValue = PlacementUtils.ResolvePlacementEntry(entry)
+		local _, placementType, width, depth, facingValue, entryLevel = PlacementUtils.ResolvePlacementEntry(entry)
+		if activeLevel ~= nil and entryLevel ~= activeLevel then
+			continue
+		end
 		if PlacementUtils.MatchesIgnorePlacement(entry, placementType, facingValue, ignorePlacement) then
 			continue
 		end

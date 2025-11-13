@@ -47,7 +47,24 @@ local Outdoor = {
 	Structures = {},
 	Gardening = {},
 	WaterFeatures = {},
-	PathsAndFencing = {},
+	PathsAndFencing = {
+		FarmsteadFence = {
+			Name = "Farmstead Fence",
+			PlacementType = "CellObject",
+			WidthCells = 1,
+			DepthCells = 3,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 75,
+			Description = "Rustic wooden fence that adds charm and defines your outdoor space.",
+			Tags = { "Basic", "Fence" },
+			ModelPath = { "Furnitures", "FarmsteadFence" },
+			AssetId = 102794549547064,
+			EffectSummary = {
+				"Defines the boundaries of your yard with rustic charm.",
+				"Adds a cozy, farmstead feel to outdoor areas.",
+			},
+		},
+	},
 	Patio = {
 		ParkBench = {
 			Name = "Park Bench",
@@ -63,7 +80,7 @@ local Outdoor = {
 			Rules = { RequiresFloorUnderAllCells = false },
 			Tags = { "Basic", "Seating" },
 			ModelPath = { "Furnitures", "ParkBench" },
-			AssetId = 118765432109876,
+			AssetId = 78161112143828,
 			StationEffects = {
 				RestMode = "Sit",
 			},

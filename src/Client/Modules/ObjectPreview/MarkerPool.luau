@@ -55,7 +55,8 @@ function MarkerPool.RenderFootprintMarkers(
 	surface: BasePart,
 	cells: { number },
 	canPlace: boolean,
-	previewKind: PreviewKind
+	previewKind: PreviewKind,
+	levelHeight: number?
 )
 	local plotModel = surface.Parent
 	if not plotModel or not plotModel:IsA("Model") then
@@ -72,13 +73,15 @@ function MarkerPool.RenderFootprintMarkers(
 	local blockedColor = Color3.fromRGB(219, 136, 136)
 	local markerColor = if canPlace then placeableColor else blockedColor
 
+	local heightOffset = if typeof(levelHeight) == "number" then levelHeight else 0
+
 	for index = 1, #cells do
 		local cellXIndex, cellZIndex = grid:IndexToCell(cells[index])
 		local marker = acquireMarker(cellSize, container)
 
 		local center = grid:CellToWorldCenterCFrame(cellXIndex, cellZIndex)
-		local aligned =
-			CFrame.lookAt(center.Position, center.Position + surface.CFrame.LookVector, surface.CFrame.UpVector)
+		local basePosition = center.Position + Vector3.new(0, heightOffset, 0)
+		local aligned = CFrame.lookAt(basePosition, basePosition + surface.CFrame.LookVector, surface.CFrame.UpVector)
 		local markerYOffset = if previewKind == "Floor" then FLOOR_MARKER_Y else MARKER_Y
 		marker.CFrame = aligned * CFrame.new(0, markerYOffset, 0)
 

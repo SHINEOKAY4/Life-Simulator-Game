@@ -11,9 +11,24 @@ local Helpers = require(ServerScriptService.Server.Services.BuildService.Helpers
 
 type Facing = any
 
+local function removeSurfaceMountsForParent(player: Player, state: any, parentKey: string)
+	if typeof(parentKey) ~= "string" or parentKey == "" then
+		return
+	end
+
+	local mountSnapshot = state:GetSurfaceMountsForParent(parentKey)
+	for mountKey in pairs(mountSnapshot) do
+		local removed = state:RemoveSurfaceMount(mountKey)
+		if removed then
+			WorldPlacer.DespawnSurfaceMount(player, mountKey)
+			Helpers.sendSurfaceMountDelta(player, "Removed", mountKey, removed)
+		end
+	end
+end
+
 local function DestroyAction(
 	player: Player,
-	payload: { ItemId: string, CellX: number, CellZ: number, Facing: string }
+	payload: { ItemId: string, CellX: number, CellZ: number, Facing: string, Level: number? }
 ): (boolean, string)
 	local state = PlotService.GetState(player)
 	if not state then
@@ -25,6 +40,7 @@ local function DestroyAction(
 		return false, "Invalid item ID"
 	end
 	local placementType = spec.PlacementType or spec.Type or "CellObject"
+	local levelHint = if typeof(payload.Level) == "number" then payload.Level else nil
 
 	local payloadFacing = Helpers.coerceFacing(payload.Facing)
 	local keyFacing: Facing
@@ -35,7 +51,7 @@ local function DestroyAction(
 	else
 		keyFacing = "North"
 	end
-	local key = state:PlacementKeyForType(payload.CellX, payload.CellZ, keyFacing, placementType)
+	local key = state:PlacementKeyForType(payload.CellX, payload.CellZ, keyFacing, placementType, levelHint)
 	local saved = state.Save.PlacedObjects[key]
 	if not saved or saved.id ~= resolvedId then
 		if
@@ -44,14 +60,40 @@ local function DestroyAction(
 			and savedFromIdentifier.cellZ == payload.CellZ
 		then
 			local fallbackSaved = savedFromIdentifier
+			local fallbackLevel = if typeof(fallbackSaved.yLevel) == "number" then fallbackSaved.yLevel else levelHint
 			saved = fallbackSaved
 			keyFacing = PlacementKey.NormalizeFacing(fallbackSaved.facing) :: Facing
-			key = state:PlacementKeyForType(fallbackSaved.cellX, fallbackSaved.cellZ, keyFacing, placementType)
+			key = state:PlacementKeyForType(
+				fallbackSaved.cellX,
+				fallbackSaved.cellZ,
+				keyFacing,
+				placementType,
+				fallbackLevel
+			)
+		end
+		if not saved or saved.id ~= resolvedId then
+			for savedKey, entry in pairs(state.Save.PlacedObjects) do
+				if entry.id == resolvedId then
+					local ok, cellX, cellZ, _, parsedType, parsedLevel = pcall(PlacementKey.ParseWithType, savedKey)
+					if ok and parsedType == placementType and cellX == payload.CellX and cellZ == payload.CellZ then
+						saved = entry
+						keyFacing = PlacementKey.NormalizeFacing(entry.facing) :: Facing
+						key = state:PlacementKeyForType(cellX, cellZ, keyFacing, placementType, parsedLevel)
+						break
+					end
+				end
+			end
 		end
 	end
 	if not saved or saved.id ~= resolvedId then
 		return false, "Item not found at location"
 	end
+
+	local anchorX = saved.cellX or payload.CellX
+	local anchorZ = saved.cellZ or payload.CellZ
+	local savedLevel = if typeof(saved.yLevel) == "number" then saved.yLevel else levelHint
+	local level = state:NormalizeLevel(savedLevel)
+	key = state:PlacementKeyForType(anchorX, anchorZ, keyFacing, placementType, level)
 
 	local savedMetadata = saved.Metadata
 	local w = savedMetadata and (savedMetadata.WidthCells or savedMetadata.widthCells)
@@ -68,18 +110,21 @@ local function DestroyAction(
 	local restoredId: string? = nil
 
 	if placementType == "Floor" then
-		state:RemoveFloor(payload.CellX, payload.CellZ)
+		state:RemoveFloor(anchorX, anchorZ, w, d, facing, level)
+		removeSurfaceMountsForParent(player, state, key)
 	elseif placementType == "Wall" then
-		local result = state:RemoveWall(payload.CellX, payload.CellZ, facing)
+		local result = state:RemoveWall(anchorX, anchorZ, facing, level)
 		if not result then
 			return false, "Item not found at location"
 		end
 		removedId = result.removedId
 		restoredId = result.restoredId
+		removeSurfaceMountsForParent(player, state, key)
 	elseif placementType == "Roof" then
-		state:RemoveRoof(payload.CellX, payload.CellZ, w, d, facing)
+		state:RemoveRoof(anchorX, anchorZ, w, d, facing, level)
+		removeSurfaceMountsForParent(player, state, key)
 	elseif placementType == "WallMounted" then
-		local removed = state:RemoveWallMounted(payload.CellX, payload.CellZ, facing)
+		local removed = state:RemoveWallMounted(anchorX, anchorZ, facing, level)
 		if not removed or removed.id ~= resolvedId then
 			return false, "Item not found at location"
 		end
@@ -89,20 +134,21 @@ local function DestroyAction(
 			PlotService.RemoveStationForPlayer(player, spec.StationType, key)
 		end
 	else
-		state:RemoveCellObject(payload.CellX, payload.CellZ, w, d, facing)
+		state:RemoveCellObject(anchorX, anchorZ, w, d, facing, level)
 		if spec.StationType then
 			PlotService.RemoveStationForPlayer(player, spec.StationType, key)
 		end
+		removeSurfaceMountsForParent(player, state, key)
 	end
 
-	WorldPlacer.Despawn(player, removedId, payload.CellX, payload.CellZ, facing)
-	Helpers.sendPlacementDelta(player, "Removed", removedId, payload.CellX, payload.CellZ, facing, savedMetadata)
+	WorldPlacer.Despawn(player, removedId, anchorX, anchorZ, facing, level)
+	Helpers.sendPlacementDelta(player, "Removed", removedId, anchorX, anchorZ, facing, savedMetadata, level)
 
 	if restoredId then
 		local restoredSaved = state.Save.PlacedObjects[key]
 		local restoredMetadata = restoredSaved and restoredSaved.Metadata
-		WorldPlacer.Spawn(player, state.Grid, restoredId, payload.CellX, payload.CellZ, facing)
-		Helpers.sendPlacementDelta(player, "Placed", restoredId, payload.CellX, payload.CellZ, facing, restoredMetadata)
+		WorldPlacer.Spawn(player, state.Grid, restoredId, anchorX, anchorZ, facing, level)
+		Helpers.sendPlacementDelta(player, "Placed", restoredId, anchorX, anchorZ, facing, restoredMetadata, level)
 	end
 
 	return true, "Removed"

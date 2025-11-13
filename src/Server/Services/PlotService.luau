@@ -12,11 +12,21 @@ local GridClass = require(ReplicatedStorage.Shared.Utilities.Grid)
 local PlotState = require(ServerScriptService.Server.Classes.PlotState)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
 type PlotRuntimeState = PlotState.PlotState
 type PlacedObjectMap = PlotState.PlacedObjectMap
+type SurfaceMountedMap = PlotState.SurfaceMountedMap
+type SurfaceMountSnapshot = {
+	key: string,
+	id: string,
+	parentKey: string,
+	LocalPosition: { X: number, Y: number, Z: number },
+	LocalRotationY: number,
+	Metadata: any?,
+}
 type PlacedObjectSnapshot = {
 	id: string,
 	cellX: number,
@@ -25,6 +35,7 @@ type PlacedObjectSnapshot = {
 	WidthCells: number,
 	DepthCells: number,
 	Metadata: any?,
+	Level: number,
 }
 type Facing = PlotState.Facing
 type StationOccupancy = {
@@ -71,7 +82,34 @@ local function cloneMetadata(value: any): any
 	return result
 end
 
-local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapshot }
+local function clonePosition(value: any): { X: number, Y: number, Z: number }
+	if typeof(value) == "table" then
+		local xValue = value.X or value.x
+		local yValue = value.Y or value.y
+		local zValue = value.Z or value.z
+		if typeof(xValue) == "number" and typeof(yValue) == "number" and typeof(zValue) == "number" then
+			return {
+				X = xValue,
+				Y = yValue,
+				Z = zValue,
+			}
+		end
+	elseif typeof(value) == "Vector3" then
+		return {
+			X = value.X,
+			Y = value.Y,
+			Z = value.Z,
+		}
+	end
+
+	return {
+		X = 0,
+		Y = 0,
+		Z = 0,
+	}
+end
+
+local function flattenPlacedObjects(map: PlacedObjectMap, defaultLevel: number): { PlacedObjectSnapshot }
 	local keys = {}
 	for key in pairs(map) do
 		keys[#keys + 1] = key
@@ -95,6 +133,7 @@ local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapsho
 				depthCells = if spec then (spec.DepthCells or spec.Depth or 1) else 1
 			end
 			local facing: string = (saved.facing or "North") :: string
+			local levelValue = if typeof(saved.yLevel) == "number" then saved.yLevel else defaultLevel
 			result[index] = {
 				id = saved.id,
 				cellX = saved.cellX,
@@ -102,6 +141,34 @@ local function flattenPlacedObjects(map: PlacedObjectMap): { PlacedObjectSnapsho
 				facing = facing,
 				WidthCells = widthCells,
 				DepthCells = depthCells,
+				Metadata = metadataClone,
+				Level = levelValue,
+			}
+		end
+	end
+
+	return result
+end
+
+local function flattenSurfaceMounts(map: SurfaceMountedMap): { SurfaceMountSnapshot }
+	local keys = {}
+	for key in pairs(map) do
+		keys[#keys + 1] = key
+	end
+	table.sort(keys)
+
+	local result = table.create(#keys)
+	for index = 1, #keys do
+		local key = keys[index]
+		local saved = map[key]
+		if saved and typeof(saved) == "table" and typeof(saved.id) == "string" then
+			local metadataClone = saved.Metadata and cloneMetadata(saved.Metadata) or nil
+			result[index] = {
+				key = key,
+				id = saved.id,
+				parentKey = saved.parentKey,
+				LocalPosition = clonePosition(saved.LocalPosition),
+				LocalRotationY = typeof(saved.LocalRotationY) == "number" and saved.LocalRotationY or 0,
 				Metadata = metadataClone,
 			}
 		end
@@ -214,7 +281,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 	for uniqueKey, obj in pairs(plotStateData.PlacedObjects) do
 		local facing = obj.facing or "North"
 		local metadataClone = if obj.Metadata ~= nil then cloneMetadata(obj.Metadata) else nil
-		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing, {
+		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing, obj.yLevel, {
 			metadata = metadataClone,
 		})
 
@@ -248,6 +315,17 @@ function PlotService.Load(player: Player, plotModel: Model)
 		end
 	end
 
+	for mountKey, mount in pairs(plotStateData.SurfaceMountedObjects or {}) do
+		if
+			typeof(mount) == "table"
+			and typeof(mount.id) == "string"
+			and typeof(mount.parentKey) == "string"
+			and mount.parentKey ~= ""
+		then
+			WorldPlacer.SpawnSurfaceMount(player, mount.parentKey, mountKey, mount.id, mount)
+		end
+	end
+
 	for currencyName, amount in pairs(currencyStateData or {}) do
 		player:SetAttribute(currencyName, amount)
 	end
@@ -257,10 +335,20 @@ function PlotService.Load(player: Player, plotModel: Model)
 		ChunkSizeInCells = chunkSizeInCells,
 		ChunkColumns = runtimeState.ChunkColumns,
 		ChunkRows = runtimeState.ChunkRows,
+		DefaultLevel = runtimeState.DefaultLevel,
+		MaxLevel = runtimeState.MaxFloorLevel,
+		FloorHeightStuds = runtimeState:GetFloorHeightStuds(),
 	}
 
-	local placedSnapshot = flattenPlacedObjects(plotStateData.PlacedObjects)
-	Packets.PlotStateSync:FireClient(player, chunkInfo, runtimeState.ChunkUnlocked, placedSnapshot)
+	local placedSnapshot = flattenPlacedObjects(plotStateData.PlacedObjects, runtimeState.DefaultLevel)
+	local surfaceMountSnapshot = flattenSurfaceMounts(runtimeState.SurfaceMountedObjects)
+	Packets.PlotStateSync:FireClient(
+		player,
+		chunkInfo,
+		runtimeState.ChunkUnlocked,
+		placedSnapshot,
+		surfaceMountSnapshot
+	)
 
 	EnergyUsageTracker.SyncBaseLoad(player, totalEnergyLoad)
 	local outageActive = player:GetAttribute("BillingPowerOutageActive") == true
@@ -286,14 +374,25 @@ function PlotService.Unclaim(player: Player)
 
 		for _, item in ipairs(containerFolder:GetChildren()) do
 			if item:IsA("Model") then
-				WorldPlacer.Despawn(
-					player,
-					item:GetAttribute("ItemId") :: string,
-					item:GetAttribute("CellX") :: number,
-					item:GetAttribute("CellZ") :: number,
-					(item:GetAttribute("Facing") :: string) :: Facing
-				)
-				item:Destroy()
+				local placementTypeAttr = item:GetAttribute("PlacementType")
+				if placementTypeAttr == "SurfaceMounted" then
+					item:Destroy()
+				else
+					local itemIdAttr = item:GetAttribute("ItemId")
+					local cellXAttr = item:GetAttribute("CellX")
+					local cellZAttr = item:GetAttribute("CellZ")
+					local facingAttr = item:GetAttribute("Facing")
+					if
+						typeof(itemIdAttr) == "string"
+						and typeof(cellXAttr) == "number"
+						and typeof(cellZAttr) == "number"
+					then
+						local facingSource = if typeof(facingAttr) == "string" then facingAttr else "North"
+						local facingValue: Facing = PlacementKey.NormalizeFacing(facingSource :: any) :: Facing
+						WorldPlacer.Despawn(player, itemIdAttr, cellXAttr, cellZAttr, facingValue)
+					end
+					item:Destroy()
+				end
 			end
 		end
 		plotModel:SetAttribute("Claimed", false)

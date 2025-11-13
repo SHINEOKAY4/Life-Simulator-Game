@@ -120,7 +120,20 @@ local function getPlotContainer(): Instance?
 	return plotModel:FindFirstChild("Container")
 end
 
-local function waitForPlacedModel(itemId: OptionalString, cellX: number, cellZ: number, facing: string): Model?
+local function resolveLevel(level: number?): number
+	if typeof(level) == "number" then
+		return level
+	end
+	return PlotStateStore.GetActiveLevel()
+end
+
+local function waitForPlacedModel(
+	itemId: OptionalString,
+	cellX: number,
+	cellZ: number,
+	facing: string,
+	level: number?
+): Model?
 	if typeof(itemId) ~= "string" or itemId == "" then
 		return nil
 	end
@@ -129,13 +142,14 @@ local function waitForPlacedModel(itemId: OptionalString, cellX: number, cellZ: 
 	local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
 	local normalizedFacing: "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest" =
 		PlacementKey.NormalizeFacing(facing :: any)
+	local resolvedLevel = resolveLevel(level)
 
 	local container = getPlotContainer()
 	if not container then
 		return nil
 	end
 
-	local key = PlacementKey.ForPlacementType(cellX, cellZ, normalizedFacing, placementType)
+	local key = PlacementKey.ForPlacementType(cellX, cellZ, normalizedFacing, placementType, resolvedLevel)
 	local model = container:FindFirstChild(key)
 	if model then
 		return model :: Model
@@ -249,9 +263,15 @@ local function animateModelWithBurst(model: Model): Vector3
 	return pivotPosition
 end
 
-function PlacementCelebration.CellObjectSuccess(itemId: OptionalString, cellX: number, cellZ: number, facing: string)
+function PlacementCelebration.CellObjectSuccess(
+	itemId: OptionalString,
+	cellX: number,
+	cellZ: number,
+	facing: string,
+	level: number?
+)
 	task.spawn(function()
-		local model = waitForPlacedModel(itemId, cellX, cellZ, facing)
+		local model = waitForPlacedModel(itemId, cellX, cellZ, facing, level)
 		local position: Vector3? = nil
 		if model then
 			position = animateModelWithBurst(model)
@@ -265,14 +285,15 @@ function PlacementCelebration.CelebrateFloorArea(
 	anchorCellX: number,
 	anchorCellZ: number,
 	_widthCells: number,
-	_depthCells: number
+	_depthCells: number,
+	level: number?
 )
 	if typeof(itemId) ~= "string" or itemId == "" then
 		return
 	end
 
 	task.spawn(function()
-		local model = waitForPlacedModel(itemId, anchorCellX, anchorCellZ, "North")
+		local model = waitForPlacedModel(itemId, anchorCellX, anchorCellZ, "North", level)
 		if not model then
 			return
 		end
@@ -287,7 +308,8 @@ function PlacementCelebration.CelebrateWallStrip(
 	startCellZ: number,
 	endCellZ: number,
 	facing: string,
-	orientation: string
+	orientation: string,
+	level: number?
 )
 	if typeof(itemId) ~= "string" or itemId == "" then
 		return
@@ -313,7 +335,7 @@ function PlacementCelebration.CelebrateWallStrip(
 			index += 1
 			local delaySeconds = (index - 1) * 0.05
 			task.delay(delaySeconds, function()
-				local model = waitForPlacedModel(itemId, cellX, cellZ, facing)
+				local model = waitForPlacedModel(itemId, cellX, cellZ, facing, level)
 				if not model then
 					return
 				end

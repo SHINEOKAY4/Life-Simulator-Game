@@ -4,11 +4,13 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local PlotBuilder = require(script.Parent.Parent.Modules.PlotBuilder)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local Tooltip = require(script.Parent:WaitForChild("Tooltip"))
+local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -20,12 +22,24 @@ assert(
 )
 local PlotBuilderGui = plotBuilderGuiInstance :: ScreenGui
 
+local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
+local PreviewContext = InputContextsFolder:WaitForChild("PreviewContext")
+local CancelPreviewAction = PreviewContext:FindFirstChild("CancelPreview")
+
 local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
 local InterfacesTemplatesFolder = AssetsFolder:WaitForChild("InterfacesTemplates")
 local ItemButtonTemplate = InterfacesTemplatesFolder:WaitForChild("ItemButtonTemplate") :: ImageButton
+local CancelButtonTemplate = InterfacesTemplatesFolder:WaitForChild("CancelButton") :: TextButton
 
 local MainFrame = PlotBuilderGui:WaitForChild("Main") :: Frame
 local RightFrame = MainFrame:WaitForChild("Right") :: Frame
+local LeftFrame = MainFrame:WaitForChild("Left") :: Frame
+local UpFrame = LeftFrame:WaitForChild("UpFrame") :: Frame
+local UpButton = UpFrame:WaitForChild("UpButton") :: GuiButton
+local UpTextLabel = UpFrame:FindFirstChildWhichIsA("TextLabel")
+local DownFrame = LeftFrame:WaitForChild("DownFrame") :: Frame
+local DownButton = DownFrame:WaitForChild("DownButton") :: GuiButton
+local DownTextLabel = DownFrame:FindFirstChildWhichIsA("TextLabel")
 local Header = RightFrame:FindFirstChild("Header") :: Frame
 local SearchFrame = Header and Header:FindFirstChild("SearchFrame")
 local LeftDockFrame = RightFrame:WaitForChild("LeftDock") :: Frame
@@ -100,6 +114,74 @@ local ItemLayout = ScrollingFrame:FindFirstChildWhichIsA("UIGridLayout")
 local EmptyStateLabel: TextLabel? = nil
 local CategoryButtonMetrics: { [GuiButton]: ButtonMetrics } = {}
 local CategoryButtonTweens: { [GuiButton]: Tween? } = {}
+local PreviewControlsFrame: Frame? = nil
+local CancelPreviewButton: TextButton? = nil
+local CancelActionPressedConnection: RBXScriptConnection? = nil
+local CancelRKeyConnection: RBXScriptConnection? = nil
+local ActiveLevelChangedConnection: RBXScriptConnection? = nil
+
+local function formatLevelDisplay(level: number): string
+	local defaultLevel = PlotStateStore.GetDefaultLevel()
+	local displayIndex = level - defaultLevel + 1
+	if displayIndex < 1 then
+		displayIndex = 1
+	end
+	return string.format("Level %d", displayIndex)
+end
+
+local function refreshLevelControls()
+	local currentLevel = PlotStateStore.GetActiveLevel()
+	local defaultLevel = PlotStateStore.GetDefaultLevel()
+	local maxLevel = PlotStateStore.GetMaxLevel()
+	local canGoUp = currentLevel < maxLevel
+	local canGoDown = currentLevel > defaultLevel
+
+	if UpButton then
+		UpButton.Active = canGoUp
+		if UpButton:IsA("ImageButton") then
+			UpButton.AutoButtonColor = canGoUp
+		end
+	end
+	if DownButton then
+		DownButton.Active = canGoDown
+		if DownButton:IsA("ImageButton") then
+			DownButton.AutoButtonColor = canGoDown
+		end
+	end
+
+	if UpTextLabel and UpTextLabel:IsA("TextLabel") then
+		if canGoUp then
+			UpTextLabel.Text = formatLevelDisplay(currentLevel + 1)
+		else
+			UpTextLabel.Text = "Top Level"
+		end
+	end
+
+	if DownTextLabel and DownTextLabel:IsA("TextLabel") then
+		if canGoDown then
+			DownTextLabel.Text = formatLevelDisplay(currentLevel - 1)
+		else
+			DownTextLabel.Text = "Ground Level"
+		end
+	end
+end
+
+local function changeActiveLevel(delta: number)
+	local currentLevel = PlotStateStore.GetActiveLevel()
+	PlotStateStore.SetActiveLevel(currentLevel + delta)
+end
+
+local function bindLevelButton(button: GuiButton?, delta: number)
+	if not button then
+		return
+	end
+	button.Activated:Connect(function()
+		if not button.Active then
+			return
+		end
+		changeActiveLevel(delta)
+	end)
+end
 
 local selectCategory: (string) -> ()
 local populateCategoryItems: (string, string?) -> ()
@@ -168,12 +250,12 @@ local function boolValueTrue(value: BoolValue?): boolean
 	return value ~= nil and value.Value == true
 end
 
+local function isPreviewActive(): boolean
+	return boolValueTrue(ObjectPreviewEnabledValue)
+end
+
 local function shouldShowMainFrame(): boolean
 	if PlotBuilderEnabledValue and not boolValueTrue(PlotBuilderEnabledValue) then
-		return false
-	end
-
-	if ObjectPreviewEnabledValue and boolValueTrue(ObjectPreviewEnabledValue) then
 		return false
 	end
 
@@ -188,8 +270,40 @@ local function shouldShowMainFrame(): boolean
 	return true
 end
 
+local function updateCancelButtonState()
+	if not CancelPreviewButton then
+		return
+	end
+
+	local previewActive = boolValueTrue(ObjectPreviewEnabledValue) and boolValueTrue(PlotBuilderEnabledValue)
+
+	-- Only show the button when preview is actually active
+	if PreviewControlsFrame then
+		PreviewControlsFrame.Visible = previewActive
+	end
+
+	CancelPreviewButton.Active = previewActive
+	CancelPreviewButton.AutoButtonColor = previewActive
+	CancelPreviewButton.Selectable = previewActive
+	CancelPreviewButton.Visible = previewActive
+	CancelPreviewButton:SetAttribute("PreviewActive", previewActive)
+
+	local keyHint = CancelPreviewButton:FindFirstChild("KeyHint")
+	if keyHint and keyHint:IsA("TextLabel") then
+		keyHint.Visible = previewActive
+	end
+end
+
 local function syncVisibility()
-	MainFrame.Visible = shouldShowMainFrame()
+	local builderVisible = shouldShowMainFrame()
+	local previewActive = isPreviewActive()
+	MainFrame.Visible = builderVisible
+	if LeftFrame then
+		LeftFrame.Visible = builderVisible
+	end
+	if RightFrame then
+		RightFrame.Visible = builderVisible and not previewActive
+	end
 end
 
 local function ensureItemLayout()
@@ -388,8 +502,15 @@ bindCategoryHoverEffect = function(button: GuiButton)
 	refreshCategoryButtonVisual(button, true)
 end
 
+local function clearActiveSelection()
+	if ActiveItemButton then
+		ActiveItemButton:SetAttribute("Selected", false)
+		ActiveItemButton = nil
+	end
+end
+
 local function clearItemButtons()
-	ActiveItemButton = nil
+	clearActiveSelection()
 	for _, child in ipairs(ScrollingFrame:GetChildren()) do
 		if child:IsA("GuiButton") then
 			child:Destroy()
@@ -670,6 +791,139 @@ local function selectItemButton(button: GuiButton, entry: ItemEntry)
 	end
 
 	PlotBuilder.PreviewSelected(entry.Id, initialFacing)
+end
+
+local function ensurePreviewControlsFrame(): Frame
+	if PreviewControlsFrame and PreviewControlsFrame.Parent then
+		return PreviewControlsFrame
+	end
+
+	local existing = PlotBuilderGui:FindFirstChild("PreviewControls")
+	if existing and existing:IsA("Frame") then
+		PreviewControlsFrame = existing
+		return existing
+	end
+
+	local legacy = MainFrame:FindFirstChild("PreviewControls")
+	if legacy and legacy:IsA("Frame") then
+		legacy.Parent = PlotBuilderGui
+		legacy.ZIndex = 100
+		legacy.Visible = false
+		PreviewControlsFrame = legacy
+		return legacy
+	end
+
+	local container = Instance.new("Frame")
+	container.Name = "PreviewControls"
+	container.AnchorPoint = Vector2.new(1, 1)
+	container.Position = UDim2.new(1, -24, 1, -24)
+	container.Size = UDim2.fromOffset(260, 64)
+	container.BackgroundTransparency = 1
+	container.BorderSizePixel = 0
+	container.ZIndex = 100
+	container.Visible = false
+	container.Parent = PlotBuilderGui
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Padding = UDim.new(0, 12)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = container
+
+	PreviewControlsFrame = container
+	return container
+end
+
+local function ensureCancelPreviewButton(): TextButton
+	local frame = ensurePreviewControlsFrame()
+	local existing = frame:FindFirstChild("CancelPreviewButton")
+	if existing and existing:IsA("TextButton") then
+		CancelPreviewButton = existing
+		return existing
+	end
+
+	local clonedButton = CancelButtonTemplate:Clone()
+	clonedButton.Name = "CancelPreviewButton"
+	clonedButton.LayoutOrder = 100
+	clonedButton.ZIndex = frame.ZIndex + 1
+	clonedButton.Parent = frame
+
+	local keyHint = clonedButton:FindFirstChild("KeyHint")
+	if keyHint and keyHint:IsA("TextLabel") then
+		keyHint.ZIndex = clonedButton.ZIndex + 1
+	end
+
+	CancelPreviewButton = clonedButton
+	return clonedButton
+end
+
+local function handlePreviewCancelled()
+	clearActiveSelection()
+	updateCancelButtonState()
+end
+
+local function bindCancelPreviewButton()
+	local button = ensureCancelPreviewButton()
+	if button:GetAttribute("CancelHandlerBound") ~= true then
+		button:SetAttribute("CancelHandlerBound", true)
+		button.Activated:Connect(function()
+			if not boolValueTrue(ObjectPreviewEnabledValue) then
+				return
+			end
+			handlePreviewCancelled()
+			PlotBuilder.RemovePreview()
+		end)
+	end
+
+	updateCancelButtonState()
+
+	if CancelPreviewAction and CancelPreviewAction:IsA("InputAction") then
+		local binding = (CancelPreviewAction :: any).InputBinding
+		if binding then
+			(binding :: any).UIButton = button
+		end
+
+		local keyHint = button:FindFirstChild("KeyHint")
+		if keyHint and keyHint:IsA("TextLabel") then
+			local resolvedHint = keyHint.Text ~= "" and keyHint.Text or "Esc"
+			local attributeCandidates = { "KeyboardHint", "KeyHint", "DisplayLabel" }
+			for _, attributeName in ipairs(attributeCandidates) do
+				local hintValue = CancelPreviewAction:GetAttribute(attributeName)
+				if typeof(hintValue) == "string" and hintValue ~= "" then
+					resolvedHint = hintValue
+					break
+				end
+			end
+			keyHint.Text = resolvedHint
+		end
+
+		if not CancelActionPressedConnection then
+			CancelActionPressedConnection = CancelPreviewAction.Pressed:Connect(function()
+				handlePreviewCancelled()
+			end)
+		end
+	end
+
+	if not CancelRKeyConnection then
+		CancelRKeyConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+			if gameProcessed then
+				return
+			end
+			if input.KeyCode ~= Enum.KeyCode.R then
+				return
+			end
+			if UserInputService:GetFocusedTextBox() then
+				return
+			end
+			if not (boolValueTrue(ObjectPreviewEnabledValue) and boolValueTrue(PlotBuilderEnabledValue)) then
+				return
+			end
+			handlePreviewCancelled()
+			PlotBuilder.RemovePreview()
+		end)
+	end
 end
 
 local function createItemButton(entry: ItemEntry, layoutOrder: number, categoryName: string?): GuiButton
@@ -1298,10 +1552,19 @@ end
 
 local function initializeVisibilityObservers()
 	if PlotBuilderEnabledValue then
-		PlotBuilderEnabledValue.Changed:Connect(syncVisibility)
+		PlotBuilderEnabledValue.Changed:Connect(function()
+			syncVisibility()
+			updateCancelButtonState()
+			if not boolValueTrue(PlotBuilderEnabledValue) then
+				clearActiveSelection()
+			end
+		end)
 	end
 	if ObjectPreviewEnabledValue then
-		ObjectPreviewEnabledValue.Changed:Connect(syncVisibility)
+		ObjectPreviewEnabledValue.Changed:Connect(function()
+			syncVisibility()
+			updateCancelButtonState()
+		end)
 	end
 	if PlotExpansionEnabledValue then
 		PlotExpansionEnabledValue.Changed:Connect(syncVisibility)
@@ -1345,8 +1608,19 @@ function PlotBuilderUI:Init()
 	bindSearchBox()
 	bindExitControls()
 	initializeVisibilityObservers()
+	bindCancelPreviewButton()
+	bindLevelButton(UpButton, 1)
+	bindLevelButton(DownButton, -1)
+	if ActiveLevelChangedConnection then
+		ActiveLevelChangedConnection:Disconnect()
+	end
+	ActiveLevelChangedConnection = PlotStateStore.OnActiveLevelChanged(function()
+		refreshLevelControls()
+	end)
+	refreshLevelControls()
 	selectInitialCategory()
 	syncVisibility()
+	updateCancelButtonState()
 end
 
 function PlotBuilderUI.Show()

@@ -19,15 +19,65 @@ type Payload = {
 	StartCellZ: number,
 	EndCellX: number,
 	EndCellZ: number,
+	Level: number?,
 }
 
 type PlannedSegment = { cellX: number, cellZ: number }
+
+local function isDiagonalFacing(facing: Facing): boolean
+	return facing == "NorthEast" or facing == "NorthWest" or facing == "SouthEast" or facing == "SouthWest"
+end
+
+local function resolveWallDimensionsFromSpec(spec: { [string]: any }?): (number, number, number, number, number)
+	local defaultWidth = 4
+	local defaultHeight = 12
+	local defaultThickness = 0.5
+	local defaultDiagonalMultiplier = math.sqrt(2)
+	local defaultMinFrame = 0.2
+
+	if typeof(spec) ~= "table" then
+		return defaultWidth, defaultHeight, defaultThickness, defaultDiagonalMultiplier, defaultMinFrame
+	end
+
+	local dims = spec.WallDimensions
+	if typeof(dims) ~= "table" then
+		return defaultWidth, defaultHeight, defaultThickness, defaultDiagonalMultiplier, defaultMinFrame
+	end
+
+	local width = typeof(dims.NominalWidth) == "number" and dims.NominalWidth or defaultWidth
+	local height = typeof(dims.NominalHeight) == "number" and dims.NominalHeight or defaultHeight
+	local thickness = typeof(dims.NominalThickness) == "number" and dims.NominalThickness or defaultThickness
+	local diagonalMultiplier = typeof(dims.DiagonalLengthMultiplier) == "number" and dims.DiagonalLengthMultiplier
+		or defaultDiagonalMultiplier
+	local minFrame = typeof(dims.MinFrameThickness) == "number" and dims.MinFrameThickness or defaultMinFrame
+
+	return width, height, thickness, diagonalMultiplier, minFrame
+end
+
+local function buildWallMetadata(spec: { [string]: any }?, facing: Facing): { [string]: any }
+	local width, height, thickness, diagonalMultiplier, minFrame = resolveWallDimensionsFromSpec(spec)
+	local effectiveWidth = width
+	if isDiagonalFacing(facing) then
+		effectiveWidth *= diagonalMultiplier
+	end
+
+	return {
+		WallSizeX = width,
+		WallSizeY = height,
+		WallSizeZ = thickness,
+		EffectiveWallWidth = effectiveWidth,
+		DiagonalLengthMultiplier = diagonalMultiplier,
+		MinFrameThickness = minFrame,
+	}
+end
 
 local function PlaceWallStrip(player: Player, payload: Payload): (boolean, string)
 	local state = PlotService.GetState(player)
 	if not state then
 		return false, "No plot runtime state"
 	end
+
+	local level = state:NormalizeLevel(payload.Level)
 
 	if type(payload) ~= "table" then
 		return false, "Invalid payload"
@@ -108,11 +158,11 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 		local count = maxX - minX + 1
 		plannedSegments = table.create(count) :: { PlannedSegment }
 		for cellX = minX, maxX do
-			if not state:CanPlaceWall(cellX, cellZ, facing, requiresFloorOnBothSides) then
+			if not state:CanPlaceWall(cellX, cellZ, facing, requiresFloorOnBothSides, level) then
 				return false, ("Wall blocked at (%d, %d)"):format(cellX, cellZ)
 			end
 
-			local key = state:PlacementKeyForType(cellX, cellZ, facing, "Wall")
+			local key = state:PlacementKeyForType(cellX, cellZ, facing, "Wall", level)
 			if state.Save.PlacedObjects[key] then
 				return false, "A wall already occupies part of that strip"
 			end
@@ -136,11 +186,11 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 		plannedSegments = table.create(count) :: { PlannedSegment }
 
 		for cellZ = minZ, maxZ do
-			if not state:CanPlaceWall(cellX, cellZ, facing, requiresFloorOnBothSides) then
+			if not state:CanPlaceWall(cellX, cellZ, facing, requiresFloorOnBothSides, level) then
 				return false, ("Wall blocked at (%d, %d)"):format(cellX, cellZ)
 			end
 
-			local key = state:PlacementKeyForType(cellX, cellZ, facing, "Wall")
+			local key = state:PlacementKeyForType(cellX, cellZ, facing, "Wall", level)
 			if state.Save.PlacedObjects[key] then
 				return false, "A wall already occupies part of that strip"
 			end
@@ -173,11 +223,11 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 			if cellX < 1 or cellX > grid.Columns or cellZ < 1 or cellZ > grid.Rows then
 				return false, "Strip outside plot bounds"
 			end
-			if not state:CanPlaceWall(cellX, cellZ, facing, false) then
+			if not state:CanPlaceWall(cellX, cellZ, facing, false, level) then
 				return false, ("Wall blocked at (%d, %d)"):format(cellX, cellZ)
 			end
 
-			local key = state:PlacementKeyForType(cellX, cellZ, facing, "Wall")
+			local key = state:PlacementKeyForType(cellX, cellZ, facing, "Wall", level)
 			if state.Save.PlacedObjects[key] then
 				return false, "A wall already occupies part of that strip"
 			end
@@ -196,14 +246,37 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 		return false, failureReason or "Not enough cash"
 	end
 
+	local segmentMetadata = buildWallMetadata(spec, facing)
+
 	for _, segment in plannedSegments do
-		local placed = state:PlaceWall(itemId, segment.cellX, segment.cellZ, 1, 1, facing, requiresFloorOnBothSides)
+		local placed = state:PlaceWall(
+			itemId,
+			segment.cellX,
+			segment.cellZ,
+			1,
+			1,
+			facing,
+			requiresFloorOnBothSides,
+			segmentMetadata,
+			level
+		)
 		if not placed then
 			return false, "Failed to place wall strip"
 		end
 
-		WorldPlacer.Spawn(player, grid, itemId, segment.cellX, segment.cellZ, facing)
-		Helpers.sendPlacementDelta(player, "Placed", itemId, segment.cellX, segment.cellZ, facing, nil)
+		WorldPlacer.Spawn(player, grid, itemId, segment.cellX, segment.cellZ, facing, level, {
+			metadata = segmentMetadata,
+		})
+		Helpers.sendPlacementDelta(
+			player,
+			"Placed",
+			itemId,
+			segment.cellX,
+			segment.cellZ,
+			facing,
+			segmentMetadata,
+			level
+		)
 	end
 
 	Helpers.deductPlacementCost(player, currencyState, totalCost)

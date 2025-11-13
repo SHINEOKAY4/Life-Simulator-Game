@@ -18,6 +18,7 @@ type Payload = {
 	StartCellZ: number,
 	EndCellX: number,
 	EndCellZ: number,
+	Level: number?,
 }
 
 local function PlaceRoofArea(player: Player, payload: Payload): (boolean, string)
@@ -25,6 +26,8 @@ local function PlaceRoofArea(player: Player, payload: Payload): (boolean, string
 	if not state then
 		return false, "No plot runtime state"
 	end
+
+	local level = state:NormalizeLevel(payload.Level)
 
 	local itemId = payload.ItemId
 	local itemData = itemId and ItemFinder.FindItemById(itemId) or nil
@@ -70,12 +73,12 @@ local function PlaceRoofArea(player: Player, payload: Payload): (boolean, string
 		return false, "Selection too large"
 	end
 
-	if not state:CanPlaceRoof(minCellX, minCellZ, widthCells, depthCells, facing) then
+	if not state:CanPlaceRoof(minCellX, minCellZ, widthCells, depthCells, facing, level) then
 		return false, "Selection blocked"
 	end
 
 	if itemData.Rules and itemData.Rules.RequiresFloorUnderAllCells then
-		if not state:HasFloorUnderFootprint(minCellX, minCellZ, widthCells, depthCells, facing) then
+		if not state:HasFloorUnderFootprint(minCellX, minCellZ, widthCells, depthCells, facing, level) then
 			return false, "Floor required under roof"
 		end
 	end
@@ -86,7 +89,7 @@ local function PlaceRoofArea(player: Player, payload: Payload): (boolean, string
 		return false, failureReason or "Not enough cash"
 	end
 
-	local success = state:PlaceRoof(itemId, minCellX, minCellZ, widthCells, depthCells, facing)
+	local success = state:PlaceRoof(itemId, minCellX, minCellZ, widthCells, depthCells, facing, level)
 	if not success then
 		return false, "Failed to place roof"
 	end
@@ -96,12 +99,12 @@ local function PlaceRoofArea(player: Player, payload: Payload): (boolean, string
 		DepthCells = depthCells,
 	}
 
-	WorldPlacer.Spawn(player, grid, itemId, minCellX, minCellZ, facing, {
+	WorldPlacer.Spawn(player, grid, itemId, minCellX, minCellZ, facing, level, {
 		metadata = metadata,
 		sizeCells = metadata,
 	})
 
-	Helpers.sendPlacementDelta(player, "Placed", itemId, minCellX, minCellZ, facing, metadata)
+	Helpers.sendPlacementDelta(player, "Placed", itemId, minCellX, minCellZ, facing, metadata, level)
 	Helpers.deductPlacementCost(player, currencyState, totalCost)
 
 	return true, "Roof placed"

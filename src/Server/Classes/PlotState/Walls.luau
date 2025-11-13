@@ -62,8 +62,16 @@ function Walls.attach(PlotState)
 		cellX: number,
 		cellZ: number,
 		facing: Facing,
-		requiresFloorOnBothSides: boolean?
+		requiresFloorOnBothSides: boolean?,
+		yLevel: number?
 	): boolean
+		local level = self:NormalizeLevel(yLevel)
+		local horizontalEdges = self:GetEdgeFreeHorizontalForLevel(level)
+		local verticalEdges = self:GetEdgeFreeVerticalForLevel(level)
+		local diagForwardEdges = self:GetEdgeFreeDiagonalForwardForLevel(level)
+		local diagBackwardEdges = self:GetEdgeFreeDiagonalBackwardForLevel(level)
+		local occupancy = self:GetCellFreeForLevel(level)
+		local floorFilled = self:GetFloorFilledForLevel(level)
 		local minChunkX, minChunkZ, maxChunkX, maxChunkZ =
 			self.Grid:FootprintChunkRange(cellX, cellZ, 1, 1, facing, self.ChunkSizeInCells)
 
@@ -78,26 +86,26 @@ function Walls.attach(PlotState)
 		local alignment, edgeX, edgeZ = edgeOfCell(facing, cellX, cellZ)
 
 		if alignment == "Horizontal" then
-			if not self.EdgeFreeHorizontal[self:HorizontalEdgeIndex(edgeX, edgeZ)] then
+			if not horizontalEdges[self:HorizontalEdgeIndex(edgeX, edgeZ)] then
 				return false
 			end
 			if requiresFloorOnBothSides then
-				if edgeZ >= 2 and not self.FloorFilled[self.Grid:CellToIndex(edgeX, edgeZ - 1)] then
+				if edgeZ >= 2 and not floorFilled[self.Grid:CellToIndex(edgeX, edgeZ - 1)] then
 					return false
 				end
-				if edgeZ <= self.Grid.Rows and not self.FloorFilled[self.Grid:CellToIndex(edgeX, edgeZ)] then
+				if edgeZ <= self.Grid.Rows and not floorFilled[self.Grid:CellToIndex(edgeX, edgeZ)] then
 					return false
 				end
 			end
 		elseif alignment == "Vertical" then
-			if not self.EdgeFreeVertical[self:VerticalEdgeIndex(edgeX, edgeZ)] then
+			if not verticalEdges[self:VerticalEdgeIndex(edgeX, edgeZ)] then
 				return false
 			end
 			if requiresFloorOnBothSides then
-				if edgeX >= 2 and not self.FloorFilled[self.Grid:CellToIndex(edgeX - 1, edgeZ)] then
+				if edgeX >= 2 and not floorFilled[self.Grid:CellToIndex(edgeX - 1, edgeZ)] then
 					return false
 				end
-				if edgeX <= self.Grid.Columns and not self.FloorFilled[self.Grid:CellToIndex(edgeX, edgeZ)] then
+				if edgeX <= self.Grid.Columns and not floorFilled[self.Grid:CellToIndex(edgeX, edgeZ)] then
 					return false
 				end
 			end
@@ -109,10 +117,10 @@ function Walls.attach(PlotState)
 				return false
 			end
 			local cellIndex = self.Grid:CellToIndex(cellX, cellZ)
-			if not self.CellFree[cellIndex] then
+			if not occupancy[cellIndex] then
 				return false
 			end
-			if not self.EdgeFreeDiagonalForward[self:DiagonalForwardEdgeIndex(edgeX, edgeZ)] then
+			if not diagForwardEdges[self:DiagonalForwardEdgeIndex(edgeX, edgeZ)] then
 				return false
 			end
 			if requiresFloorOnBothSides then
@@ -126,10 +134,10 @@ function Walls.attach(PlotState)
 				return false
 			end
 			local cellIndex = self.Grid:CellToIndex(cellX, cellZ)
-			if not self.CellFree[cellIndex] then
+			if not occupancy[cellIndex] then
 				return false
 			end
-			if not self.EdgeFreeDiagonalBackward[self:DiagonalBackwardEdgeIndex(edgeX, edgeZ)] then
+			if not diagBackwardEdges[self:DiagonalBackwardEdgeIndex(edgeX, edgeZ)] then
 				return false
 			end
 			if requiresFloorOnBothSides then
@@ -147,46 +155,59 @@ function Walls.attach(PlotState)
 		_widthCells: number,
 		_depthCells: number,
 		facing: Facing,
-		requiresFloorOnBothSides: boolean?
+		requiresFloorOnBothSides: boolean?,
+		metadata: { [string]: any }?,
+		yLevel: number?
 	): boolean
 		local resolvedFacing = PlacementKey.NormalizeFacing(facing)
-		if not self:CanPlaceWall(cellX, cellZ, resolvedFacing, requiresFloorOnBothSides) then
+		local level = self:NormalizeLevel(yLevel)
+		if not self:CanPlaceWall(cellX, cellZ, resolvedFacing, requiresFloorOnBothSides, level) then
 			return false
 		end
 
 		local alignment, edgeX, edgeZ = edgeOfCell(resolvedFacing, cellX, cellZ)
+		local horizontalEdges = self:GetEdgeFreeHorizontalForLevel(level)
+		local verticalEdges = self:GetEdgeFreeVerticalForLevel(level)
+		local diagForwardEdges = self:GetEdgeFreeDiagonalForwardForLevel(level)
+		local diagBackwardEdges = self:GetEdgeFreeDiagonalBackwardForLevel(level)
+		local occupancy = self:GetCellFreeForLevel(level)
 		if alignment == "Horizontal" then
-			self.EdgeFreeHorizontal[self:HorizontalEdgeIndex(edgeX, edgeZ)] = false
+			horizontalEdges[self:HorizontalEdgeIndex(edgeX, edgeZ)] = false
 		elseif alignment == "Vertical" then
-			self.EdgeFreeVertical[self:VerticalEdgeIndex(edgeX, edgeZ)] = false
+			verticalEdges[self:VerticalEdgeIndex(edgeX, edgeZ)] = false
 		elseif alignment == "DiagonalForward" then
-			self.EdgeFreeDiagonalForward[self:DiagonalForwardEdgeIndex(edgeX, edgeZ)] = false
+			diagForwardEdges[self:DiagonalForwardEdgeIndex(edgeX, edgeZ)] = false
 		elseif alignment == "DiagonalBackward" then
-			self.EdgeFreeDiagonalBackward[self:DiagonalBackwardEdgeIndex(edgeX, edgeZ)] = false
+			diagBackwardEdges[self:DiagonalBackwardEdgeIndex(edgeX, edgeZ)] = false
 		end
 
 		if alignment == "DiagonalForward" or alignment == "DiagonalBackward" then
-			self.CellFree[self.Grid:CellToIndex(cellX, cellZ)] = false
+			occupancy[self.Grid:CellToIndex(cellX, cellZ)] = false
 		end
 
-		local key = self:PlacementKeyForType(cellX, cellZ, resolvedFacing, "Wall")
+		local key = self:PlacementKeyForType(cellX, cellZ, resolvedFacing, "Wall", level)
 		if self.Save.PlacedObjects[key] then
 			if alignment == "Horizontal" then
-				self.EdgeFreeHorizontal[self:HorizontalEdgeIndex(edgeX, edgeZ)] = true
+				horizontalEdges[self:HorizontalEdgeIndex(edgeX, edgeZ)] = true
 			elseif alignment == "Vertical" then
-				self.EdgeFreeVertical[self:VerticalEdgeIndex(edgeX, edgeZ)] = true
+				verticalEdges[self:VerticalEdgeIndex(edgeX, edgeZ)] = true
 			elseif alignment == "DiagonalForward" then
-				self.EdgeFreeDiagonalForward[self:DiagonalForwardEdgeIndex(edgeX, edgeZ)] = true
-				self.CellFree[self.Grid:CellToIndex(cellX, cellZ)] = true
+				diagForwardEdges[self:DiagonalForwardEdgeIndex(edgeX, edgeZ)] = true
+				occupancy[self.Grid:CellToIndex(cellX, cellZ)] = true
 			elseif alignment == "DiagonalBackward" then
-				self.EdgeFreeDiagonalBackward[self:DiagonalBackwardEdgeIndex(edgeX, edgeZ)] = true
-				self.CellFree[self.Grid:CellToIndex(cellX, cellZ)] = true
+				diagBackwardEdges[self:DiagonalBackwardEdgeIndex(edgeX, edgeZ)] = true
+				occupancy[self.Grid:CellToIndex(cellX, cellZ)] = true
 			end
 
 			if alignment == "DiagonalForward" or alignment == "DiagonalBackward" then
-				self.CellFree[self.Grid:CellToIndex(cellX, cellZ)] = true
+				occupancy[self.Grid:CellToIndex(cellX, cellZ)] = true
 			end
 			return false
+		end
+
+		local metadataCopy = nil
+		if typeof(metadata) == "table" then
+			metadataCopy = table.clone(metadata)
 		end
 
 		self.Save.PlacedObjects[key] = {
@@ -194,23 +215,31 @@ function Walls.attach(PlotState)
 			cellX = cellX,
 			cellZ = cellZ,
 			facing = resolvedFacing,
+			yLevel = level,
+			Metadata = metadataCopy,
 		}
 		return true
 	end
 
-	local function validateFloorRequirement(self, alignment: "Horizontal" | "Vertical", edgeX: number, edgeZ: number)
+	local function validateFloorRequirement(
+		self,
+		alignment: "Horizontal" | "Vertical",
+		edgeX: number,
+		edgeZ: number,
+		floorFilled: { [number]: boolean }
+	)
 		if alignment == "Horizontal" then
-			if edgeZ >= 2 and not self.FloorFilled[self.Grid:CellToIndex(edgeX, edgeZ - 1)] then
+			if edgeZ >= 2 and not floorFilled[self.Grid:CellToIndex(edgeX, edgeZ - 1)] then
 				return false
 			end
-			if edgeZ <= self.Grid.Rows and not self.FloorFilled[self.Grid:CellToIndex(edgeX, edgeZ)] then
+			if edgeZ <= self.Grid.Rows and not floorFilled[self.Grid:CellToIndex(edgeX, edgeZ)] then
 				return false
 			end
 		else
-			if edgeX >= 2 and not self.FloorFilled[self.Grid:CellToIndex(edgeX - 1, edgeZ)] then
+			if edgeX >= 2 and not floorFilled[self.Grid:CellToIndex(edgeX - 1, edgeZ)] then
 				return false
 			end
-			if edgeX <= self.Grid.Columns and not self.FloorFilled[self.Grid:CellToIndex(edgeX, edgeZ)] then
+			if edgeX <= self.Grid.Columns and not floorFilled[self.Grid:CellToIndex(edgeX, edgeZ)] then
 				return false
 			end
 		end
@@ -223,10 +252,12 @@ function Walls.attach(PlotState)
 		cellZ: number,
 		facing: Facing,
 		requiresFloorOnBothSides: boolean?,
-		replaceableTag: string?
+		replaceableTag: string?,
+		yLevel: number?
 	): (string?, string?)
 		local resolvedFacing = PlacementKey.NormalizeFacing(facing)
-		local key = self:PlacementKeyForType(cellX, cellZ, resolvedFacing, "Wall")
+		local level = self:NormalizeLevel(yLevel)
+		local key = self:PlacementKeyForType(cellX, cellZ, resolvedFacing, "Wall", level)
 		local saved = self.Save.PlacedObjects[key]
 		if not saved then
 			return nil, "No existing wall to replace"
@@ -244,11 +275,13 @@ function Walls.attach(PlotState)
 		if requiresFloorOnBothSides then
 			local alignment, edgeX, edgeZ = edgeOfCell(resolvedFacing, cellX, cellZ)
 			if alignment == "Horizontal" then
-				if not validateFloorRequirement(self, "Horizontal", edgeX, edgeZ) then
+				local floors = self:GetFloorFilledForLevel(level)
+				if not validateFloorRequirement(self, "Horizontal", edgeX, edgeZ, floors) then
 					return nil, "Requires floor on both sides"
 				end
 			elseif alignment == "Vertical" then
-				if not validateFloorRequirement(self, "Vertical", edgeX, edgeZ) then
+				local floors = self:GetFloorFilledForLevel(level)
+				if not validateFloorRequirement(self, "Vertical", edgeX, edgeZ, floors) then
 					return nil, "Requires floor on both sides"
 				end
 			else
@@ -262,6 +295,7 @@ function Walls.attach(PlotState)
 		saved.Metadata.PreviousId = previousId
 		saved.Metadata.ReplaceableTag = replaceableTag
 		saved.Metadata.RequiresFloorOnBothSides = requiresFloorOnBothSides == true
+		saved.yLevel = level
 		self.Save.PlacedObjects[key] = saved
 		return previousId, nil
 	end
@@ -269,9 +303,11 @@ function Walls.attach(PlotState)
 	function PlotState:RemoveWall(
 		cellX: number,
 		cellZ: number,
-		facing: Facing
+		facing: Facing,
+		yLevel: number?
 	): { removedId: string, restoredId: string? }?
-		local key = self:PlacementKeyForType(cellX, cellZ, facing, "Wall")
+		local level = self:NormalizeLevel(yLevel)
+		local key = self:PlacementKeyForType(cellX, cellZ, facing, "Wall", level)
 		local saved = self.Save.PlacedObjects[key]
 		if not saved then
 			return nil
@@ -284,6 +320,7 @@ function Walls.attach(PlotState)
 			saved.id = metadata.PreviousId
 			local savedMutable: any = saved
 			savedMutable.Metadata = nil
+			savedMutable.yLevel = level
 			self.Save.PlacedObjects[key] = saved
 			return {
 				removedId = removedId,
@@ -292,17 +329,25 @@ function Walls.attach(PlotState)
 		end
 
 		local alignment, edgeX, edgeZ = edgeOfCell(resolvedFacing, cellX, cellZ)
+		local horizontalEdges = self:GetEdgeFreeHorizontalForLevel(level)
+		local verticalEdges = self:GetEdgeFreeVerticalForLevel(level)
+		local diagForwardEdges = self:GetEdgeFreeDiagonalForwardForLevel(level)
+		local diagBackwardEdges = self:GetEdgeFreeDiagonalBackwardForLevel(level)
+		local occupancy = self:GetCellFreeForLevel(level)
 		if alignment == "Horizontal" then
-			self.EdgeFreeHorizontal[self:HorizontalEdgeIndex(edgeX, edgeZ)] = true
+			horizontalEdges[self:HorizontalEdgeIndex(edgeX, edgeZ)] = true
 		elseif alignment == "Vertical" then
-			self.EdgeFreeVertical[self:VerticalEdgeIndex(edgeX, edgeZ)] = true
+			verticalEdges[self:VerticalEdgeIndex(edgeX, edgeZ)] = true
 		elseif alignment == "DiagonalForward" then
-			self.EdgeFreeDiagonalForward[self:DiagonalForwardEdgeIndex(edgeX, edgeZ)] = true
+			diagForwardEdges[self:DiagonalForwardEdgeIndex(edgeX, edgeZ)] = true
 		elseif alignment == "DiagonalBackward" then
-			self.EdgeFreeDiagonalBackward[self:DiagonalBackwardEdgeIndex(edgeX, edgeZ)] = true
+			diagBackwardEdges[self:DiagonalBackwardEdgeIndex(edgeX, edgeZ)] = true
 		end
 
 		self.Save.PlacedObjects[key] = nil
+		if alignment == "DiagonalForward" or alignment == "DiagonalBackward" then
+			occupancy[self.Grid:CellToIndex(cellX, cellZ)] = true
+		end
 		return {
 			removedId = removedId,
 		}
@@ -315,7 +360,9 @@ function Walls.attach(PlotState)
 		fromF: Facing,
 		toX: number,
 		toZ: number,
-		toF: Facing
+		toF: Facing,
+		fromLevel: number?,
+		toLevel: number?
 	): (boolean, string?)
 		local spec = ItemFinder.FindItemById(itemId)
 		if not spec then
@@ -335,14 +382,16 @@ function Walls.attach(PlotState)
 
 		local resolvedFromFacing = PlacementKey.NormalizeFacing(fromF)
 		local resolvedToFacing = PlacementKey.NormalizeFacing(toF)
+		local resolvedFromLevel = self:NormalizeLevel(fromLevel)
+		local resolvedToLevel = self:NormalizeLevel(toLevel)
 
-		local fromKey = self:PlacementKeyForType(fromX, fromZ, resolvedFromFacing, "Wall")
+		local fromKey = self:PlacementKeyForType(fromX, fromZ, resolvedFromFacing, "Wall", resolvedFromLevel)
 		local saved = self.Save.PlacedObjects[fromKey]
 		if not saved or saved.id ~= itemId then
 			return false, ("Wall '%s' not found at (%d, %d) facing %s"):format(itemId, fromX, fromZ, tostring(fromF))
 		end
 
-		local toKey = self:PlacementKeyForType(toX, toZ, resolvedToFacing, "Wall")
+		local toKey = self:PlacementKeyForType(toX, toZ, resolvedToFacing, "Wall", resolvedToLevel)
 		if fromKey == toKey then
 			return true, nil
 		end
@@ -372,14 +421,19 @@ function Walls.attach(PlotState)
 		end
 
 		local toAlignment, toEdgeX, toEdgeZ = edgeOfCell(resolvedToFacing, toX, toZ)
+		local toHorizontalEdges = self:GetEdgeFreeHorizontalForLevel(resolvedToLevel)
+		local toVerticalEdges = self:GetEdgeFreeVerticalForLevel(resolvedToLevel)
+		local toDiagForwardEdges = self:GetEdgeFreeDiagonalForwardForLevel(resolvedToLevel)
+		local toDiagBackwardEdges = self:GetEdgeFreeDiagonalBackwardForLevel(resolvedToLevel)
+		local toOccupancy = self:GetCellFreeForLevel(resolvedToLevel)
 		local toIndex: number
 		local targetEdgeFree: boolean
 		if toAlignment == "Horizontal" then
 			toIndex = self:HorizontalEdgeIndex(toEdgeX, toEdgeZ)
-			targetEdgeFree = self.EdgeFreeHorizontal[toIndex]
+			targetEdgeFree = toHorizontalEdges[toIndex]
 		elseif toAlignment == "Vertical" then
 			toIndex = self:VerticalEdgeIndex(toEdgeX, toEdgeZ)
-			targetEdgeFree = self.EdgeFreeVertical[toIndex]
+			targetEdgeFree = toVerticalEdges[toIndex]
 		elseif toAlignment == "DiagonalForward" then
 			if toEdgeX < 1 or toEdgeX > self.DiagonalForwardEdgeColumns then
 				return false, "Destination diagonal outside bounds"
@@ -388,8 +442,8 @@ function Walls.attach(PlotState)
 				return false, "Destination diagonal outside bounds"
 			end
 			toIndex = self:DiagonalForwardEdgeIndex(toEdgeX, toEdgeZ)
-			targetEdgeFree = self.EdgeFreeDiagonalForward[toIndex]
-			if not self.CellFree[self.Grid:CellToIndex(toX, toZ)] then
+			targetEdgeFree = toDiagForwardEdges[toIndex]
+			if not toOccupancy[self.Grid:CellToIndex(toX, toZ)] then
 				return false, "Destination cell is occupied"
 			end
 		else -- DiagonalBackward
@@ -400,25 +454,26 @@ function Walls.attach(PlotState)
 				return false, "Destination diagonal outside bounds"
 			end
 			toIndex = self:DiagonalBackwardEdgeIndex(toEdgeX, toEdgeZ)
-			targetEdgeFree = self.EdgeFreeDiagonalBackward[toIndex]
-			if not self.CellFree[self.Grid:CellToIndex(toX, toZ)] then
+			targetEdgeFree = toDiagBackwardEdges[toIndex]
+			if not toOccupancy[self.Grid:CellToIndex(toX, toZ)] then
 				return false, "Destination cell is occupied"
 			end
 		end
 
 		if requiresFloor then
+			local toFloors = self:GetFloorFilledForLevel(resolvedToLevel)
 			if toAlignment == "Horizontal" then
-				if toEdgeZ >= 2 and not self.FloorFilled[self.Grid:CellToIndex(toEdgeX, toEdgeZ - 1)] then
+				if toEdgeZ >= 2 and not toFloors[self.Grid:CellToIndex(toEdgeX, toEdgeZ - 1)] then
 					return false, "Requires floor on both sides of wall"
 				end
-				if toEdgeZ <= self.Grid.Rows and not self.FloorFilled[self.Grid:CellToIndex(toEdgeX, toEdgeZ)] then
+				if toEdgeZ <= self.Grid.Rows and not toFloors[self.Grid:CellToIndex(toEdgeX, toEdgeZ)] then
 					return false, "Requires floor on both sides of wall"
 				end
 			elseif toAlignment == "Vertical" then
-				if toEdgeX >= 2 and not self.FloorFilled[self.Grid:CellToIndex(toEdgeX - 1, toEdgeZ)] then
+				if toEdgeX >= 2 and not toFloors[self.Grid:CellToIndex(toEdgeX - 1, toEdgeZ)] then
 					return false, "Requires floor on both sides of wall"
 				end
-				if toEdgeX <= self.Grid.Columns and not self.FloorFilled[self.Grid:CellToIndex(toEdgeX, toEdgeZ)] then
+				if toEdgeX <= self.Grid.Columns and not toFloors[self.Grid:CellToIndex(toEdgeX, toEdgeZ)] then
 					return false, "Requires floor on both sides of wall"
 				end
 			else
@@ -431,34 +486,40 @@ function Walls.attach(PlotState)
 		end
 
 		local fromAlignment, fromEdgeX, fromEdgeZ = edgeOfCell(resolvedFromFacing, fromX, fromZ)
+		local fromHorizontalEdges = self:GetEdgeFreeHorizontalForLevel(resolvedFromLevel)
+		local fromVerticalEdges = self:GetEdgeFreeVerticalForLevel(resolvedFromLevel)
+		local fromDiagForwardEdges = self:GetEdgeFreeDiagonalForwardForLevel(resolvedFromLevel)
+		local fromDiagBackwardEdges = self:GetEdgeFreeDiagonalBackwardForLevel(resolvedFromLevel)
+		local fromOccupancy = self:GetCellFreeForLevel(resolvedFromLevel)
 		if fromAlignment == "Horizontal" then
-			self.EdgeFreeHorizontal[self:HorizontalEdgeIndex(fromEdgeX, fromEdgeZ)] = true
+			fromHorizontalEdges[self:HorizontalEdgeIndex(fromEdgeX, fromEdgeZ)] = true
 		elseif fromAlignment == "Vertical" then
-			self.EdgeFreeVertical[self:VerticalEdgeIndex(fromEdgeX, fromEdgeZ)] = true
+			fromVerticalEdges[self:VerticalEdgeIndex(fromEdgeX, fromEdgeZ)] = true
 		elseif fromAlignment == "DiagonalForward" then
-			self.EdgeFreeDiagonalForward[self:DiagonalForwardEdgeIndex(fromEdgeX, fromEdgeZ)] = true
-			self.CellFree[self.Grid:CellToIndex(fromX, fromZ)] = true
+			fromDiagForwardEdges[self:DiagonalForwardEdgeIndex(fromEdgeX, fromEdgeZ)] = true
+			fromOccupancy[self.Grid:CellToIndex(fromX, fromZ)] = true
 		elseif fromAlignment == "DiagonalBackward" then
-			self.EdgeFreeDiagonalBackward[self:DiagonalBackwardEdgeIndex(fromEdgeX, fromEdgeZ)] = true
-			self.CellFree[self.Grid:CellToIndex(fromX, fromZ)] = true
+			fromDiagBackwardEdges[self:DiagonalBackwardEdgeIndex(fromEdgeX, fromEdgeZ)] = true
+			fromOccupancy[self.Grid:CellToIndex(fromX, fromZ)] = true
 		end
 
 		if toAlignment == "Horizontal" then
-			self.EdgeFreeHorizontal[toIndex] = false
+			toHorizontalEdges[toIndex] = false
 		elseif toAlignment == "Vertical" then
-			self.EdgeFreeVertical[toIndex] = false
+			toVerticalEdges[toIndex] = false
 		elseif toAlignment == "DiagonalForward" then
-			self.EdgeFreeDiagonalForward[toIndex] = false
-			self.CellFree[self.Grid:CellToIndex(toX, toZ)] = false
+			toDiagForwardEdges[toIndex] = false
+			toOccupancy[self.Grid:CellToIndex(toX, toZ)] = false
 		elseif toAlignment == "DiagonalBackward" then
-			self.EdgeFreeDiagonalBackward[toIndex] = false
-			self.CellFree[self.Grid:CellToIndex(toX, toZ)] = false
+			toDiagBackwardEdges[toIndex] = false
+			toOccupancy[self.Grid:CellToIndex(toX, toZ)] = false
 		end
 
 		self.Save.PlacedObjects[fromKey] = nil
 		saved.cellX = toX
 		saved.cellZ = toZ
 		saved.facing = resolvedToFacing
+		saved.yLevel = resolvedToLevel
 		self.Save.PlacedObjects[toKey] = saved
 
 		return true, nil
@@ -466,7 +527,8 @@ function Walls.attach(PlotState)
 
 	function PlotState:RotateWall(itemId: string, fromKey: string, toFacing: Facing): (boolean, string?)
 		local desiredFacing: Facing = PlacementKey.NormalizeFacing(toFacing)
-		local parseOk, parsedCellX, parsedCellZ, parsedFacing, parsedType = pcall(PlacementKey.ParseWithType, fromKey)
+		local parseOk, parsedCellX, parsedCellZ, parsedFacing, parsedType, parsedLevel =
+			pcall(PlacementKey.ParseWithType, fromKey)
 		if not parseOk then
 			local parseErr = parsedCellX
 			return false, ("Invalid placement key '%s': %s"):format(fromKey, tostring(parseErr))
@@ -476,6 +538,7 @@ function Walls.attach(PlotState)
 		local cellZ = parsedCellZ :: number
 		local currentFacing = PlacementKey.NormalizeFacing(parsedFacing :: Facing)
 		local keyType = parsedType or "Wall"
+		local level = if typeof(parsedLevel) == "number" then parsedLevel else self.DefaultLevel
 
 		if keyType ~= "Wall" then
 			return false, ("Placement key type '%s' does not match Wall rotation"):format(tostring(parsedType))
@@ -508,7 +571,7 @@ function Walls.attach(PlotState)
 			return false, "Invalid facing for this item"
 		end
 
-		return self:MoveWall(itemId, cellX, cellZ, currentFacing, cellX, cellZ, desiredFacing)
+		return self:MoveWall(itemId, cellX, cellZ, currentFacing, cellX, cellZ, desiredFacing, level, level)
 	end
 end
 

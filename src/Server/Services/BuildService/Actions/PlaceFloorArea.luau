@@ -18,6 +18,7 @@ type Payload = {
 	StartCellZ: number,
 	EndCellX: number,
 	EndCellZ: number,
+	Level: number?,
 }
 
 local function PlaceFloorArea(player: Player, payload: Payload): (boolean, string)
@@ -25,6 +26,8 @@ local function PlaceFloorArea(player: Player, payload: Payload): (boolean, strin
 	if not state then
 		return false, "No plot runtime state"
 	end
+
+	local level = state:NormalizeLevel(payload.Level)
 
 	local itemId = payload.ItemId
 	local itemData = itemId and ItemFinder.FindItemById(itemId) or nil
@@ -70,7 +73,7 @@ local function PlaceFloorArea(player: Player, payload: Payload): (boolean, strin
 		return false, "Selection too large"
 	end
 
-	if not state:CanPlaceFloor(minCellX, minCellZ, widthCells, depthCells, facing) then
+	if not state:CanPlaceFloor(minCellX, minCellZ, widthCells, depthCells, facing, level) then
 		return false, "Selection blocked"
 	end
 
@@ -80,7 +83,7 @@ local function PlaceFloorArea(player: Player, payload: Payload): (boolean, strin
 		return false, failureReason or "Not enough cash"
 	end
 
-	local success = state:PlaceFloor(itemId, minCellX, minCellZ, widthCells, depthCells, facing)
+	local success = state:PlaceFloor(itemId, minCellX, minCellZ, widthCells, depthCells, facing, level)
 	if not success then
 		return false, "Failed to place floor"
 	end
@@ -90,12 +93,12 @@ local function PlaceFloorArea(player: Player, payload: Payload): (boolean, strin
 		DepthCells = depthCells,
 	}
 
-	WorldPlacer.Spawn(player, grid, itemId, minCellX, minCellZ, facing, {
+	WorldPlacer.Spawn(player, grid, itemId, minCellX, minCellZ, facing, level, {
 		metadata = metadata,
 		sizeCells = metadata,
 	})
 
-	Helpers.sendPlacementDelta(player, "Placed", itemId, minCellX, minCellZ, facing, metadata)
+	Helpers.sendPlacementDelta(player, "Placed", itemId, minCellX, minCellZ, facing, metadata, level)
 	Helpers.deductPlacementCost(player, currencyState, totalCost)
 
 	return true, "Floors placed"
