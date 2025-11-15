@@ -31,6 +31,25 @@ function Floors.attach(PlotState)
 		return true
 	end
 
+	function PlotState:AnyFloorInFootprint(
+		cellX: number,
+		cellZ: number,
+		widthCells: number,
+		depthCells: number,
+		facing: Facing?,
+		yLevel: number?
+	): boolean
+		local level = self:NormalizeLevel(yLevel)
+		local indices = self.Grid:FootprintCells(cellX, cellZ, widthCells, depthCells, defaultFacing(facing))
+		local levelFloors = self:GetFloorFilledForLevel(level)
+		for i = 1, #indices do
+			if levelFloors[indices[i]] then
+				return true
+			end
+		end
+		return false
+	end
+
 	function PlotState:CanPlaceFloor(
 		cellX: number,
 		cellZ: number,
@@ -66,8 +85,10 @@ function Floors.attach(PlotState)
 
 		local indices = self.Grid:FootprintCells(cellX, cellZ, w, d, f)
 		local levelFloors = self:GetFloorFilledForLevel(level)
+		local levelRoofs = self:GetRoofFilledForLevel(level)
 		for i = 1, #indices do
-			if levelFloors[indices[i]] then
+			local index = indices[i]
+			if levelFloors[index] or levelRoofs[index] then
 				return false
 			end
 		end
@@ -82,7 +103,8 @@ function Floors.attach(PlotState)
 		widthCells: number?,
 		depthCells: number?,
 		facing: Facing?,
-		yLevel: number?
+		yLevel: number?,
+		metadataOverride: { [string]: any }?
 	): boolean
 		local w = widthCells or 1
 		local d = depthCells or 1
@@ -107,16 +129,26 @@ function Floors.attach(PlotState)
 			return false
 		end
 
+		local metadata: { [string]: any }
+		if typeof(metadataOverride) == "table" then
+			metadata = table.clone(metadataOverride)
+		else
+			metadata = {}
+		end
+		if typeof(metadata.WidthCells) ~= "number" then
+			metadata.WidthCells = w
+		end
+		if typeof(metadata.DepthCells) ~= "number" then
+			metadata.DepthCells = d
+		end
+
 		self.Save.PlacedObjects[key] = {
 			id = id,
 			cellX = cellX,
 			cellZ = cellZ,
 			facing = f,
 			yLevel = level,
-			Metadata = {
-				WidthCells = w,
-				DepthCells = d,
-			},
+			Metadata = metadata,
 		}
 		return true
 	end

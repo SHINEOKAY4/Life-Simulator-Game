@@ -9,6 +9,7 @@ local PlotStateModule = require(ServerScriptService.Server.Classes.PlotState)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local SurfacePalette = require(ReplicatedStorage.Shared.Configurations.Build.SurfacePalette)
 
 type Facing = PlotStateModule.Facing
 type PlotRuntimeState = PlotStateModule.PlotState
@@ -21,6 +22,16 @@ local PRIMARY_CURRENCY_NAME = "Cash"
 type Metadata = { [string]: any }
 
 local Helpers = {}
+
+local function sanitizeSurfaceId(value: any): string?
+	if typeof(value) ~= "string" then
+		return nil
+	end
+	if value == "" then
+		return nil
+	end
+	return value
+end
 
 local function cloneMetadata(value: any): any
 	if typeof(value) ~= "table" then
@@ -104,6 +115,10 @@ function Helpers.sendPlacementDelta(
 			Level = level,
 		},
 	})
+end
+
+function Helpers.resolveSurfaceId(itemSpec: { [string]: any }?, requestedSurfaceId: string?): string?
+	return SurfacePalette.ResolveForPlacement(itemSpec, sanitizeSurfaceId(requestedSurfaceId))
 end
 
 function Helpers.sendSurfaceMountDelta(

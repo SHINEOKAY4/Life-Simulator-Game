@@ -54,6 +54,7 @@ PlacementPackets.PlaceRequest = Packet("PlaceRequest", {
 	CellZ = Packet.NumberU8,
 	Facing = Packet.String,
 	Level = Packet.NumberU8,
+	SurfaceId = Packet.String,
 	WallMountEnabled = Packet.Boolean8,
 	WallMountCellX = Packet.NumberU16,
 	WallMountCellZ = Packet.NumberU16,
@@ -78,6 +79,7 @@ PlacementPackets.PlaceFloorAreaRequest = Packet("PlaceFloorAreaRequest", {
 	WidthCells = Packet.NumberU16,
 	DepthCells = Packet.NumberU16,
 	Level = Packet.NumberU8,
+	SurfaceId = Packet.String,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
 PlacementPackets.PlaceWallStripRequest = Packet("PlaceWallStripRequest", {
@@ -89,6 +91,7 @@ PlacementPackets.PlaceWallStripRequest = Packet("PlaceWallStripRequest", {
 	EndCellX = Packet.NumberU16,
 	EndCellZ = Packet.NumberU16,
 	Level = Packet.NumberU8,
+	SurfaceId = Packet.String,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
 PlacementPackets.PlaceRoofAreaRequest = Packet("PlaceRoofAreaRequest", {

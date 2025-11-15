@@ -19,6 +19,7 @@ type Payload = {
 	EndCellX: number,
 	EndCellZ: number,
 	Level: number?,
+	SurfaceId: string?,
 }
 
 local function PlaceFloorArea(player: Player, payload: Payload): (boolean, string)
@@ -73,6 +74,10 @@ local function PlaceFloorArea(player: Player, payload: Payload): (boolean, strin
 		return false, "Selection too large"
 	end
 
+	if state:AnyRoofInFootprint(minCellX, minCellZ, widthCells, depthCells, facing, level) then
+		return false, "Remove the roof covering this area before placing a floor"
+	end
+
 	if not state:CanPlaceFloor(minCellX, minCellZ, widthCells, depthCells, facing, level) then
 		return false, "Selection blocked"
 	end
@@ -83,19 +88,27 @@ local function PlaceFloorArea(player: Player, payload: Payload): (boolean, strin
 		return false, failureReason or "Not enough cash"
 	end
 
-	local success = state:PlaceFloor(itemId, minCellX, minCellZ, widthCells, depthCells, facing, level)
+	local surfaceId = Helpers.resolveSurfaceId(itemData, payload.SurfaceId)
+	local metadata = {
+		WidthCells = widthCells,
+		DepthCells = depthCells,
+	}
+	if surfaceId then
+		metadata.SurfaceId = surfaceId
+	end
+	local success = state:PlaceFloor(itemId, minCellX, minCellZ, widthCells, depthCells, facing, level, metadata)
 	if not success then
 		return false, "Failed to place floor"
 	end
 
-	local metadata = {
+	local footprintSize = {
 		WidthCells = widthCells,
 		DepthCells = depthCells,
 	}
 
 	WorldPlacer.Spawn(player, grid, itemId, minCellX, minCellZ, facing, level, {
 		metadata = metadata,
-		sizeCells = metadata,
+		sizeCells = footprintSize,
 	})
 
 	Helpers.sendPlacementDelta(player, "Placed", itemId, minCellX, minCellZ, facing, metadata, level)

@@ -12,6 +12,8 @@ local SoundtrackManager = require(script.Parent.SoundtrackManager)
 local PlacementCelebration = require(script.Parent.PlacementCelebration)
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local SurfacePalette = require(ReplicatedStorage.Shared.Configurations.Build.SurfacePalette)
+local CutawayViewController = require(script.Parent.CutawayViewController)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -20,6 +22,7 @@ local PlotBuilderMain = PlotBuilderGui.Main
 
 local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
 local BuildContext = InputContextsFolder:WaitForChild("BuildContext")
+local FloorContext = InputContextsFolder:WaitForChild("FloorContext")
 local ToggleBuildModeAction = BuildContext.ToggleBuildMode
 local PlacePreviewAction = BuildContext.PlacePreview
 
@@ -37,8 +40,43 @@ type PreviewPose = ObjectPreview.PreviewPose
 local PlotBuilder = {}
 local INPUT_DEBOUNCE_SECONDS = 0.25
 local PREVIEW_RESTORE_DELAY = 0.6
+local DEFAULT_BUILD_CONTEXT_PRIORITY = BuildContext.Priority or 0
+local PREVIEW_SUPPRESSED_PRIORITY = DEFAULT_BUILD_CONTEXT_PRIORITY - 1
+local DEFAULT_FLOOR_CONTEXT_PRIORITY = FloorContext.Priority or (DEFAULT_BUILD_CONTEXT_PRIORITY + 1)
+local FLOOR_INPUT_SUPPRESS_SECONDS = 0.12
+local BUILDER_CUTAWAY_SOURCE = "PlotBuilder"
 
 local previewRestoreToken = 0
+local floorInputSuppressUntil = 0
+
+local function syncInputContextPriorities()
+	if not ObjectPreviewEnabled then
+		return
+	end
+
+	local previewActive = ObjectPreviewEnabled.Value == true
+	if previewActive then
+		BuildContext.Priority = PREVIEW_SUPPRESSED_PRIORITY
+		FloorContext.Priority = math.max(DEFAULT_FLOOR_CONTEXT_PRIORITY, PREVIEW_SUPPRESSED_PRIORITY + 1)
+	else
+		BuildContext.Priority = DEFAULT_BUILD_CONTEXT_PRIORITY
+		FloorContext.Priority = DEFAULT_FLOOR_CONTEXT_PRIORITY
+	end
+end
+
+local function refreshCutawayForBuilder()
+	if not PlotBuilderEnabled then
+		return
+	end
+	if PlotBuilderEnabled.Value then
+		CutawayViewController.Request(BUILDER_CUTAWAY_SOURCE, {
+			Priority = 20,
+			TargetLevel = PlotStateStore.GetActiveLevel(),
+		})
+	else
+		CutawayViewController.Release(BUILDER_CUTAWAY_SOURCE)
+	end
+end
 
 local function cancelPendingPreviewRestore()
 	previewRestoreToken += 1
@@ -108,6 +146,21 @@ local function computeFootprintPosition(
 	end
 	local levelHeight = PlotStateStore.GetLevelHeight(level)
 	return (cframe :: CFrame).Position + Vector3.new(0, levelHeight, 0)
+end
+
+local function resolveDefaultSurfaceId(itemId: string?): string
+	if typeof(itemId) ~= "string" or itemId == "" then
+		return ""
+	end
+	local spec = ItemFinder.FindItemById(itemId :: string)
+	if not spec then
+		return ""
+	end
+	local resolved = SurfacePalette.ResolveForPlacement(spec, nil)
+	if typeof(resolved) == "string" then
+		return resolved
+	end
+	return ""
 end
 
 local function computeCellObjectPosition(
@@ -182,6 +235,16 @@ local function runDebounced(actionName: string, callback: () -> ()): ()
 end
 
 function PlotBuilder.Init()
+	if PlotBuilderEnabled then
+		PlotBuilderEnabled.Changed:Connect(refreshCutawayForBuilder)
+	end
+
+	PlotStateStore.OnActiveLevelChanged(function()
+		if PlotBuilderEnabled and PlotBuilderEnabled.Value then
+			refreshCutawayForBuilder()
+		end
+	end)
+
 	PlotExpansionEnabled.Changed:Connect(function()
 		if PlotExpansionEnabled.Value and PlotBuilderEnabled.Value then
 			PlotBuilder.Hide()
@@ -207,6 +270,7 @@ function PlotBuilder.Init()
 	end)
 
 	ObjectPreviewEnabled.Changed:Connect(function()
+		syncInputContextPriorities()
 		-- if objectpreview is cancelled and plotbuilder is active, re-show plotbuilder and disable placing preview control
 		if not ObjectPreviewEnabled.Value and PlotBuilderEnabled.Value then
 			PlacePreviewAction.Enabled = false
@@ -233,6 +297,9 @@ function PlotBuilder.Init()
 
 	PlacePreviewAction.Pressed:Connect(function()
 		runDebounced("PlacePreview", function()
+			if floorInputSuppressUntil > os.clock() then
+				return
+			end
 			if ObjectPreview.TryBeginFloorDrag() then
 				return
 			end
@@ -252,18 +319,23 @@ function PlotBuilder.Init()
 			PlotBuilder.Hide()
 		end
 	end)
+
+	syncInputContextPriorities()
+	refreshCutawayForBuilder()
 end
 
 function PlotBuilder.Show()
 	PlotBuilderEnabled.Value = true
 	PlotBuilderMain.Visible = true
 	PlotFinder.StartTracking(Player)
+	refreshCutawayForBuilder()
 end
 
 function PlotBuilder.Hide()
 	PlotBuilderEnabled.Value = false
 	PlotBuilderMain.Visible = false
 	PlotBuilder.RemovePreview()
+	refreshCutawayForBuilder()
 end
 
 function PlotBuilder.PreviewSelected(itemId: string, initialFacing: string?)
@@ -280,6 +352,10 @@ end
 
 function PlotBuilder.PlaceSelectedPreview()
 	-- Packets.PlaceRequest:Fire(itemId, cellX, cellZ, facing):Response(boolean, string long) -- shape of payload
+
+	if floorInputSuppressUntil > os.clock() then
+		return
+	end
 
 	local pose = ObjectPreview.GetCurrentPose()
 	if not pose then
@@ -361,6 +437,7 @@ function PlotBuilder.PlaceSelectedPreview()
 		CellZ = cellZ,
 		Facing = pose.Facing,
 		Level = poseLevel,
+		SurfaceId = resolveDefaultSurfaceId(pose.ItemId),
 		WallMountEnabled = pose.Kind == "WallMounted" and wallPose ~= nil,
 		WallMountCellX = wallPose and wallPose.ReferenceCellX or cellX,
 		WallMountCellZ = wallPose and wallPose.ReferenceCellZ or cellZ,
@@ -390,6 +467,10 @@ function PlotBuilder.PlaceSelectedPreview()
 	temporarilyHidePreviewForPlacement(pose)
 
 	-- Optional: keep previewing for batch placement; or call RemovePreview()
+end
+
+function PlotBuilder.RegisterFloorInput()
+	floorInputSuppressUntil = os.clock() + FLOOR_INPUT_SUPPRESS_SECONDS
 end
 
 function PlotBuilder.PlaceFloorSelection(selection: any)
@@ -446,6 +527,7 @@ function PlotBuilder.PlaceFloorSelection(selection: any)
 		WidthCells = widthCells,
 		DepthCells = depthCells,
 		Level = level,
+		SurfaceId = resolveDefaultSurfaceId(itemId),
 	})
 
 	local placementPosition =
@@ -538,6 +620,7 @@ function PlotBuilder.PlaceWallStrip(selection: WallStripSelectionInfo)
 		EndCellX = endCellX,
 		EndCellZ = endCellZ,
 		Level = level,
+		SurfaceId = resolveDefaultSurfaceId(itemId),
 	})
 
 	local placementPosition = computeWallStripPosition(selection, level)

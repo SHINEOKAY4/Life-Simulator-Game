@@ -5,6 +5,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local SurfacePalette = require(ReplicatedStorage.Shared.Configurations.Build.SurfacePalette)
 
 export type DoorSpec = {
 	RequiresExistingWall: boolean?,
@@ -70,6 +71,49 @@ local function getWallVisualInfo(wallId: string): WallVisualInfo?
 	return info
 end
 
+local function resolveSurfaceIdFromMetadata(metadata: { [string]: any }?): string?
+	if typeof(metadata) ~= "table" then
+		return nil
+	end
+
+	local surfaceId = metadata.SurfaceId
+	if typeof(surfaceId) == "string" and surfaceId ~= "" then
+		return surfaceId
+	end
+
+	local original = metadata.OriginalWallMetadata
+	if typeof(original) == "table" then
+		local originalSurfaceId = original.SurfaceId
+		if typeof(originalSurfaceId) == "string" and originalSurfaceId ~= "" then
+			return originalSurfaceId
+		end
+	end
+
+	return nil
+end
+
+local function applySurfacePaletteOverride(info: WallVisualInfo?, surfaceId: string?): WallVisualInfo?
+	if not info then
+		return nil
+	end
+	if typeof(surfaceId) ~= "string" or surfaceId == "" then
+		return info
+	end
+
+	local definition = SurfacePalette.GetSurface(surfaceId)
+	if not definition then
+		return info
+	end
+
+	return {
+		Size = info.Size,
+		Material = definition.Material,
+		Color = definition.Color,
+		Transparency = info.Transparency,
+		Reflectance = info.Reflectance,
+	}
+end
+
 local function ensureDoorAttributes(model: Model)
 	if model:GetAttribute("DoorWallFillCenterOffsetX") then
 		return
@@ -121,6 +165,7 @@ function DoorWallFill.Apply(model: Model, spec: DoorSpec?, options: ApplyOptions
 	ensureDoorAttributes(model)
 
 	local metadata = options and options.metadata or nil
+	local metadataSurfaceId = resolveSurfaceIdFromMetadata(metadata)
 	local previousWallId = options and options.previousWallId or nil
 	if not previousWallId and metadata then
 		local metaPrev = metadata.PreviousId
@@ -140,7 +185,7 @@ function DoorWallFill.Apply(model: Model, spec: DoorSpec?, options: ApplyOptions
 		return
 	end
 
-	local info = getWallVisualInfo(previousWallId)
+	local info = applySurfacePaletteOverride(getWallVisualInfo(previousWallId), metadataSurfaceId)
 	if not info then
 		removeExistingFill(model :: Model)
 		return

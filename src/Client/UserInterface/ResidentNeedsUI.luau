@@ -11,6 +11,8 @@ local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local ResidentUIEnabled = ActiveQueryFolder:FindFirstChild("ResidentUIEnabled") :: BoolValue
 
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
+local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
+local CutawayViewController = require(script.Parent.Parent.Modules.CutawayViewController)
 
 local ResidentGui = PlayerGui:WaitForChild("ResidentGui") :: ScreenGui
 local ResidentNeedsFrame = ResidentGui:WaitForChild("ResidentNeedsFrame") :: Frame
@@ -28,6 +30,27 @@ local ResidentUI = {
 }
 local Connections = {} :: { RBXScriptConnection }
 local CurrentSelected = nil :: Model?
+local CutawayLevelConnection: RBXScriptConnection? = nil
+
+local CUTAWAY_SOURCE = "ResidentSelection"
+
+local function updateResidentCutaway()
+	if not CurrentSelected then
+		return
+	end
+	CutawayViewController.Request(CUTAWAY_SOURCE, {
+		Priority = 8,
+		TargetLevel = PlotStateStore.GetActiveLevel(),
+	})
+end
+
+local function releaseResidentCutaway()
+	if CutawayLevelConnection then
+		CutawayLevelConnection:Disconnect()
+		CutawayLevelConnection = nil
+	end
+	CutawayViewController.Release(CUTAWAY_SOURCE)
+end
 
 local workingResidents: { [string]: boolean } = {}
 
@@ -44,6 +67,16 @@ function ResidentUI.Show(residentModel: Model)
 	ResidentGui.Enabled = true
 	ResidentUIEnabled.Value = true
 	ResidentSelectionChangedSignal:Fire(residentModel)
+	if CutawayLevelConnection then
+		CutawayLevelConnection:Disconnect()
+		CutawayLevelConnection = nil
+	end
+	updateResidentCutaway()
+	CutawayLevelConnection = PlotStateStore.OnActiveLevelChanged(function()
+		if CurrentSelected then
+			updateResidentCutaway()
+		end
+	end)
 	-- Update all bars initially
 	local hunger = residentModel:GetAttribute("Hunger") :: number
 	local energy = residentModel:GetAttribute("Energy") :: number
@@ -129,6 +162,7 @@ function ResidentUI.Hide(isOnlyUI: boolean?)
 		ResidentUIEnabled.Value = false
 		return
 	end
+	releaseResidentCutaway()
 	ResidentNeedsFrame.Visible = false
 	ResidentUIEnabled.Value = false
 	CurrentSelected = nil

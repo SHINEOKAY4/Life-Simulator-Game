@@ -234,7 +234,8 @@ export type PlotState = {
 		widthCells: number?,
 		depthCells: number?,
 		facing: Facing?,
-		yLevel: number?
+		yLevel: number?,
+		metadataOverride: { [string]: any }?
 	) -> boolean,
 	RemoveFloor: (
 		self: PlotState,

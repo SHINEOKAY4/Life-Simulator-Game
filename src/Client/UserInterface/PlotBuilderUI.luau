@@ -25,6 +25,9 @@ local PlotBuilderGui = plotBuilderGuiInstance :: ScreenGui
 local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
 local PreviewContext = InputContextsFolder:WaitForChild("PreviewContext")
 local CancelPreviewAction = PreviewContext:FindFirstChild("CancelPreview")
+local FloorContext = InputContextsFolder:WaitForChild("FloorContext")
+local FloorUpAction = FloorContext:WaitForChild("UpButton")
+local FloorDownAction = FloorContext:WaitForChild("DownButton")
 
 local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
 local InterfacesTemplatesFolder = AssetsFolder:WaitForChild("InterfacesTemplates")
@@ -168,19 +171,8 @@ end
 
 local function changeActiveLevel(delta: number)
 	local currentLevel = PlotStateStore.GetActiveLevel()
+	PlotBuilder.RegisterFloorInput()
 	PlotStateStore.SetActiveLevel(currentLevel + delta)
-end
-
-local function bindLevelButton(button: GuiButton?, delta: number)
-	if not button then
-		return
-	end
-	button.Activated:Connect(function()
-		if not button.Active then
-			return
-		end
-		changeActiveLevel(delta)
-	end)
 end
 
 local selectCategory: (string) -> ()
@@ -202,6 +194,16 @@ local function connectDebounced(action: Instance?, actionName: string, callback:
 			callback,
 			Player.UserId
 		)
+	end)
+end
+
+local function bindFloorLevelActions()
+	connectDebounced(FloorUpAction, "FloorLevelUp", function()
+		changeActiveLevel(1)
+	end)
+
+	connectDebounced(FloorDownAction, "FloorLevelDown", function()
+		changeActiveLevel(-1)
 	end)
 end
 
@@ -1609,8 +1611,7 @@ function PlotBuilderUI:Init()
 	bindExitControls()
 	initializeVisibilityObservers()
 	bindCancelPreviewButton()
-	bindLevelButton(UpButton, 1)
-	bindLevelButton(DownButton, -1)
+	bindFloorLevelActions()
 	if ActiveLevelChangedConnection then
 		ActiveLevelChangedConnection:Disconnect()
 	end

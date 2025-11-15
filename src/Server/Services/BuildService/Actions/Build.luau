@@ -17,6 +17,7 @@ type Payload = {
 	CellZ: number,
 	Facing: string,
 	Level: number?,
+	SurfaceId: string?,
 	WallMountEnabled: boolean?,
 	WallMountCellX: number?,
 	WallMountCellZ: number?,
@@ -188,25 +189,40 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		local depthCells = itemData.DepthCells or itemData.Depth or 1
 		local floorFacing: Facing = "North"
 		local totalCells = widthCells * depthCells
+		local floorSurfaceId = Helpers.resolveSurfaceId(itemData, payload.SurfaceId)
 
 		local canAfford, failureReason, totalCost, currencyState =
 			Helpers.ensurePlacementFunds(player, itemData, totalCells)
 		if not canAfford then
 			return false, failureReason or "Not enough cash"
 		end
-		local success =
-			state:PlaceFloor(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, floorFacing, level)
-		if not success then
-			return false, "Failed to place floor"
-		end
-
 		local metadata = {
 			WidthCells = widthCells,
 			DepthCells = depthCells,
 		}
+		if floorSurfaceId then
+			metadata.SurfaceId = floorSurfaceId
+		end
+		local footprintSize = {
+			WidthCells = widthCells,
+			DepthCells = depthCells,
+		}
+		local success = state:PlaceFloor(
+			payload.ItemId,
+			payload.CellX,
+			payload.CellZ,
+			widthCells,
+			depthCells,
+			floorFacing,
+			level,
+			metadata
+		)
+		if not success then
+			return false, "Failed to place floor"
+		end
 		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, floorFacing, level, {
 			metadata = metadata,
-			sizeCells = metadata,
+			sizeCells = footprintSize,
 		})
 
 		Helpers.sendPlacementDelta(
@@ -348,6 +364,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		return true, "Cell object placed"
 	elseif itemData.PlacementType == "Wall" then
 		local requiresFloorOnBothSides = itemData.RequiresFloorOnBothSides or false
+		local wallSurfaceId = Helpers.resolveSurfaceId(itemData, payload.SurfaceId)
 		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1)
 		if not canAfford then
 			return false, failureReason or "Not enough cash"
@@ -400,6 +417,10 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			else
 				metadata = {}
 				savedWall.Metadata = metadata
+			end
+
+			if wallSurfaceId then
+				metadata.SurfaceId = wallSurfaceId
 			end
 
 			if isWindowVariant and windowConfig then
@@ -593,6 +614,9 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		end
 
 		local wallMetadata = buildWallMetadata(itemData, facing)
+		if wallSurfaceId then
+			wallMetadata.SurfaceId = wallSurfaceId
+		end
 		local success = state:PlaceWall(
 			payload.ItemId,
 			payload.CellX,

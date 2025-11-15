@@ -20,6 +20,7 @@ type Payload = {
 	EndCellX: number,
 	EndCellZ: number,
 	Level: number?,
+	SurfaceId: string?,
 }
 
 type PlannedSegment = { cellX: number, cellZ: number }
@@ -247,6 +248,10 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 	end
 
 	local segmentMetadata = buildWallMetadata(spec, facing)
+	local wallSurfaceId = Helpers.resolveSurfaceId(spec, payload.SurfaceId)
+	if wallSurfaceId then
+		segmentMetadata.SurfaceId = wallSurfaceId
+	end
 
 	for _, segment in plannedSegments do
 		local placed = state:PlaceWall(

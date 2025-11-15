@@ -1,6 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local SurfacePalette = require(ReplicatedStorage.Shared.Configurations.Build.SurfacePalette)
 
 export type WindowSpec = {
 	WallVariant: string?,
@@ -85,6 +86,49 @@ local function getWallVisualInfo(wallId: string): VisualInfo?
 	wallModel:Destroy()
 	WallVisualCache[wallId] = info
 	return info
+end
+
+local function resolveSurfaceIdFromMetadata(metadata: { [string]: any }?): string?
+	if typeof(metadata) ~= "table" then
+		return nil
+	end
+
+	local surfaceId = metadata.SurfaceId
+	if typeof(surfaceId) == "string" and surfaceId ~= "" then
+		return surfaceId
+	end
+
+	local original = metadata.OriginalWallMetadata
+	if typeof(original) == "table" then
+		local originalSurfaceId = original.SurfaceId
+		if typeof(originalSurfaceId) == "string" and originalSurfaceId ~= "" then
+			return originalSurfaceId
+		end
+	end
+
+	return nil
+end
+
+local function createVisualOverride(baseInfo: VisualInfo?, surfaceId: string?): VisualInfo?
+	if not baseInfo then
+		return nil
+	end
+	if typeof(surfaceId) ~= "string" or surfaceId == "" then
+		return baseInfo
+	end
+
+	local definition = SurfacePalette.GetSurface(surfaceId)
+	if not definition then
+		return baseInfo
+	end
+
+	return {
+		Size = baseInfo.Size,
+		Material = definition.Material,
+		Color = definition.Color,
+		Transparency = baseInfo.Transparency,
+		Reflectance = baseInfo.Reflectance,
+	}
 end
 
 local function buildSegment(parent: Instance, visual: VisualInfo, size: Vector3, cf: CFrame)
@@ -326,7 +370,9 @@ function WindowWallFill.Apply(model: Model, spec: WindowSpec?, options: ApplyOpt
 		return
 	end
 
-	local solution = WindowWallFill.ComputeSegments(model, windowData, previousWallId, nil)
+	local surfaceId = resolveSurfaceIdFromMetadata(metadata)
+	local visualOverride = createVisualOverride(getWallVisualInfo(previousWallId), surfaceId)
+	local solution = WindowWallFill.ComputeSegments(model, windowData, previousWallId, visualOverride)
 	if not solution then
 		WindowWallFill.Remove(model)
 		return

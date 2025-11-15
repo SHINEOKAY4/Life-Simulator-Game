@@ -13,6 +13,25 @@ local function normalize(value: number?): number
 end
 
 function Roofs.attach(PlotState)
+	function PlotState:AnyRoofInFootprint(
+		cellX: number,
+		cellZ: number,
+		widthCells: number,
+		depthCells: number,
+		facing: Facing,
+		yLevel: number?
+	): boolean
+		local level = self:NormalizeLevel(yLevel)
+		local indices = self.Grid:FootprintCells(cellX, cellZ, widthCells, depthCells, facing)
+		local levelRoofs = self:GetRoofFilledForLevel(level)
+		for i = 1, #indices do
+			if levelRoofs[indices[i]] then
+				return true
+			end
+		end
+		return false
+	end
+
 	function PlotState:CanPlaceRoof(
 		cellX: number,
 		cellZ: number,
@@ -34,8 +53,10 @@ function Roofs.attach(PlotState)
 
 		local indices = self.Grid:FootprintCells(cellX, cellZ, widthCells, depthCells, facing)
 		local levelRoofs = self:GetRoofFilledForLevel(level)
+		local levelFloors = self:GetFloorFilledForLevel(level)
 		for i = 1, #indices do
-			if levelRoofs[indices[i]] then
+			local index = indices[i]
+			if levelRoofs[index] or levelFloors[index] then
 				return false
 			end
 		end

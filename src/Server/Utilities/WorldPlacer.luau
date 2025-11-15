@@ -11,6 +11,7 @@ local PlacementHelpers = require(ReplicatedStorage.Shared.Utilities.PlacementHel
 local DoorWallFill = require(ReplicatedStorage.Shared.Utilities.DoorWallFill)
 local WindowWallFill = require(ReplicatedStorage.Shared.Utilities.WindowWallFill)
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
+local SurfacePalette = require(ReplicatedStorage.Shared.Configurations.Build.SurfacePalette)
 
 export type Facing = PlacementHelpers.Facing
 
@@ -24,6 +25,10 @@ local GetPivotRotation = PlacementHelpers.GetPivotRotation
 local GetLiftAlongDirection = PlacementHelpers.GetLiftAlongDirection
 
 type PlotContainer = Model | Folder
+local SURFACE_PLACEMENT_TARGETS: { [string]: boolean } = {
+	Floor = true,
+	Wall = true,
+}
 
 local function getPlotContainer(player: Player): PlotContainer?
 	local plotIndexValue = player:GetAttribute("OwnedPlotIndex")
@@ -133,6 +138,100 @@ local function resolveWallMountMetadata(metadata: { [string]: any }?): { [string
 	}
 
 	return resolved
+end
+
+local function readSurfaceId(metadata: { [string]: any }?): string?
+	if typeof(metadata) ~= "table" then
+		return nil
+	end
+
+	local surfaceId = metadata.SurfaceId
+	if typeof(surfaceId) == "string" and surfaceId ~= "" then
+		return surfaceId
+	end
+
+	local original = metadata.OriginalWallMetadata
+	if typeof(original) == "table" then
+		local originalSurfaceId = original.SurfaceId
+		if typeof(originalSurfaceId) == "string" and originalSurfaceId ~= "" then
+			return originalSurfaceId
+		end
+	end
+
+	return nil
+end
+
+local function applySurfacePaletteToModel(
+	model: Model,
+	placementType: string,
+	spec: { [string]: any }?,
+	metadata: { [string]: any }?
+)
+	local resolvedSurfaceId = readSurfaceId(metadata)
+	if not resolvedSurfaceId and typeof(spec) == "table" then
+		local defaultSurfaceId = spec.DefaultSurfaceId
+		if typeof(defaultSurfaceId) == "string" and defaultSurfaceId ~= "" then
+			resolvedSurfaceId = defaultSurfaceId
+		end
+	end
+
+	if typeof(resolvedSurfaceId) ~= "string" or resolvedSurfaceId == "" then
+		model:SetAttribute("SurfaceId", nil)
+		model:SetAttribute("SurfaceKind", nil)
+		model:SetAttribute("SurfaceColor", nil)
+		model:SetAttribute("SurfaceMaterial", nil)
+		model:SetAttribute("SurfaceRoughness", nil)
+		model:SetAttribute("SurfaceMetalness", nil)
+		return
+	end
+
+	model:SetAttribute("SurfaceId", resolvedSurfaceId)
+	local definition = SurfacePalette.GetSurface(resolvedSurfaceId)
+	if not definition then
+		return
+	end
+
+	model:SetAttribute("SurfaceKind", definition.Kind)
+	model:SetAttribute("SurfaceColor", definition.Color)
+	model:SetAttribute("SurfaceMaterial", definition.Material.Name)
+	if typeof(definition.Roughness) == "number" then
+		model:SetAttribute("SurfaceRoughness", definition.Roughness)
+	else
+		model:SetAttribute("SurfaceRoughness", nil)
+	end
+	if typeof(definition.Metalness) == "number" then
+		model:SetAttribute("SurfaceMetalness", definition.Metalness)
+	else
+		model:SetAttribute("SurfaceMetalness", nil)
+	end
+
+	if not SURFACE_PLACEMENT_TARGETS[placementType] then
+		return
+	end
+	if placementType == "Wall" and typeof(spec) == "table" and spec.RequiresExistingWall == true then
+		return
+	end
+
+	local function paintPart(part: BasePart)
+		if part:GetAttribute("SurfacePaletteLocked") == true then
+			return
+		end
+		if part.Transparency >= 1 then
+			return
+		end
+		part.Material = definition.Material
+		part.Color = definition.Color
+	end
+
+	local primaryPart = model.PrimaryPart
+	if primaryPart then
+		paintPart(primaryPart)
+	end
+	for _, descendant in model:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			paintPart(descendant)
+		end
+	end
 end
 
 local function applyWallModelScaling(model: Model, facing: Facing, cellSize: number)
@@ -267,6 +366,8 @@ function WorldPlacer.Spawn(
 			end
 		end
 	end
+
+	applySurfacePaletteToModel(model, placementType, spec, metadata)
 
 	if placementType == "Floor" then
 		local floorPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)

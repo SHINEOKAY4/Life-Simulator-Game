@@ -1,4 +1,18 @@
---!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SurfacePalette = require(ReplicatedStorage.Shared.Configurations.Build.SurfacePalette)
+
+local DEFAULT_WALL_SURFACE = SurfacePalette.GetDefaultForKind("Wall") or "wall:plaster-warm"
+local DEFAULT_FLOOR_SURFACE = SurfacePalette.GetDefaultForKind("Floor") or "floor:oak-herringbone"
+local WALL_SURFACE_OPTIONS = table.freeze({
+	"wall:plaster-warm",
+	"wall:plaster-cool",
+	"wall:brick-russet",
+})
+local FLOOR_SURFACE_OPTIONS = table.freeze({
+	"floor:oak-herringbone",
+	"floor:walnut-panel",
+	"floor:stone-slate",
+})
 
 local Build = {
 
@@ -112,6 +126,8 @@ local Build = {
 				"Closes off a side of the room for a finished look.",
 				"Sturdy enough to hold doors, windows, and wall decor.",
 			},
+			DefaultSurfaceId = DEFAULT_WALL_SURFACE,
+			AllowedSurfaceIds = WALL_SURFACE_OPTIONS,
 		},
 	},
 	Floors = {
@@ -130,6 +146,8 @@ local Build = {
 				"Gives residents a polished surface to walk on.",
 				"Keeps furniture level and looking tidy.",
 			},
+			DefaultSurfaceId = DEFAULT_FLOOR_SURFACE,
+			AllowedSurfaceIds = FLOOR_SURFACE_OPTIONS,
 		},
 	},
 	Arches = {},

@@ -18,6 +18,22 @@ preloadPacketModules(NetworkFolder)
 
 local LocalPlayer = Players.LocalPlayer
 local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local ActiveQueryFolder = PlayerGui:WaitForChild("ActiveQuery")
+
+local function ensureActiveQueryBool(name: string, defaultValue: boolean): BoolValue
+	local existing = ActiveQueryFolder:FindFirstChild(name)
+	if existing and existing:IsA("BoolValue") then
+		return existing
+	end
+	local value = Instance.new("BoolValue")
+	value.Name = name
+	value.Value = defaultValue
+	value.Parent = ActiveQueryFolder
+	return value
+end
+
+ensureActiveQueryBool("CutawayVisible", false)
 
 local ModulesFolder = script.Parent.Modules
 
@@ -26,6 +42,7 @@ local DayAndNight = require(ModulesFolder.DayAndNight)
 local PlotSelector = require(ModulesFolder.PlotSelector)
 local PlotGrid = require(ModulesFolder.PlotGridOverlay)
 local PlotExpansion = require(ModulesFolder.PlotExpansion)
+local RoomDebugOverlay = require(ModulesFolder.RoomDebugOverlay)
 local PlotStateStore = require(script.Parent.ClientStores.PlotStateStore)
 local KitchenStateStore = require(script.Parent.ClientStores.KitchenStateStore)
 local ButtonSoundController = require(ModulesFolder.ButtonSoundController)
@@ -34,6 +51,7 @@ local ObjectPreview = require(ModulesFolder.ObjectPreview)
 local ObjectSelector = require(ModulesFolder.ObjectSelector)
 local ResidentSelector = require(ModulesFolder.ResidentMover)
 local ResidentController = require(ModulesFolder.ResidentController)
+local CutawayViewController = require(ModulesFolder.CutawayViewController)
 local ObjectAction = require(ModulesFolder.ObjectAction)
 local WorldEventController = require(ModulesFolder.WorldEventController)
 local MiningInteractionController = require(ModulesFolder.MiningInteractionController)
@@ -59,6 +77,8 @@ DayAndNight.Init()
 PlotGrid.Init()
 PlotExpansion.Init()
 PlotStateStore.Init()
+RoomDebugOverlay.Init()
+CutawayViewController.Init()
 KitchenStateStore.Init()
 TimeUI.Init()
 ButtonSoundController.Init()
@@ -88,7 +108,7 @@ WoodcuttingInteractionController.Init()
 local ResidentsStore = require(script.Parent.ClientStores.ResidentsStore) :: any
 
 ResidentsStore.Init()
-
+--RoomDebugOverlay.SetEnabled(true)
 local function SetCollisionGroup(character: Model)
 	for _, descendant in ipairs(character:GetDescendants()) do
 		if descendant:IsA("BasePart") then
