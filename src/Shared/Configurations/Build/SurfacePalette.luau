@@ -12,10 +12,15 @@ export type SurfaceDefinition = {
 	Color: Color3,
 	Roughness: number?,
 	Metalness: number?,
+	Transparency: number?,
 	Tags: { string }?,
 }
 
 local SurfacePalette = {}
+local DYNAMIC_PREFIX = "enum"
+local MATERIAL_TRANSPARENCY: { [Enum.Material]: number } = {
+	[Enum.Material.Glass] = 0.35,
+}
 
 local SURFACE_DEFINITIONS: { [string]: SurfaceDefinition } = {
 	["wall:plaster-warm"] = {
@@ -41,6 +46,14 @@ local SURFACE_DEFINITIONS: { [string]: SurfaceDefinition } = {
 		Material = Enum.Material.Brick,
 		Color = Color3.fromRGB(169, 88, 73),
 		Tags = { "textured", "brick" },
+	},
+	["floor:plaster-warm"] = {
+		Id = "floor:plaster-warm",
+		Kind = "Floor",
+		DisplayName = "Matte Plaster",
+		Material = Enum.Material.SmoothPlastic,
+		Color = Color3.fromRGB(244, 237, 226),
+		Tags = { "neutral", "matte" },
 	},
 	["floor:oak-herringbone"] = {
 		Id = "floor:oak-herringbone",
@@ -68,9 +81,71 @@ local SURFACE_DEFINITIONS: { [string]: SurfaceDefinition } = {
 	},
 }
 
+local function toLower(str: string): string
+	return string.lower(str)
+end
+
+local MATERIAL_LOOKUP: { [string]: Enum.Material } = {}
+for _, material in ipairs(Enum.Material:GetEnumItems()) do
+	MATERIAL_LOOKUP[toLower(material.Name)] = material
+end
+
+local function resolveEnumMaterial(candidate: string?): Enum.Material?
+	if typeof(candidate) ~= "string" then
+		return nil
+	end
+	local normalized = toLower(candidate)
+	return MATERIAL_LOOKUP[normalized]
+end
+
+local function makeDynamicSurfaceId(kind: SurfaceKind, material: Enum.Material): string
+	return string.format("%s:%s:%s", DYNAMIC_PREFIX, kind, material.Name)
+end
+
+local function ensureDynamicDefinition(kind: SurfaceKind, material: Enum.Material): SurfaceDefinition
+	local surfaceId = makeDynamicSurfaceId(kind, material)
+	local existing = SURFACE_DEFINITIONS[surfaceId]
+	if existing then
+		return existing
+	end
+	local defaultTransparency = MATERIAL_TRANSPARENCY[material]
+	local definition: SurfaceDefinition = {
+		Id = surfaceId,
+		Kind = kind,
+		DisplayName = material.Name,
+		Material = material,
+		Color = Color3.new(1, 1, 1),
+		Transparency = defaultTransparency,
+	}
+	SURFACE_DEFINITIONS[surfaceId] = definition
+	return definition
+end
+
+local function parseDynamicSurfaceId(surfaceId: string?): (SurfaceKind?, string?)
+	if typeof(surfaceId) ~= "string" then
+		return nil, nil
+	end
+	if not string.find(surfaceId, DYNAMIC_PREFIX .. ":", 1, true) then
+		return nil, nil
+	end
+	local kindToken, materialName = string.match(surfaceId, "^" .. DYNAMIC_PREFIX .. ":([^:]+):(.+)$")
+	if not kindToken or not materialName then
+		return nil, nil
+	end
+	if kindToken ~= "Wall" and kindToken ~= "Floor" then
+		return nil, nil
+	end
+	return kindToken :: SurfaceKind, materialName
+end
+
+local function isDynamicSurfaceId(surfaceId: string?): boolean
+	local kindToken = select(1, parseDynamicSurfaceId(surfaceId))
+	return kindToken ~= nil
+end
+
 local DEFAULT_SURFACE_BY_KIND: { [SurfaceKind]: string } = {
 	Wall = "wall:plaster-warm",
-	Floor = "floor:oak-herringbone",
+	Floor = "floor:plaster-warm",
 }
 
 local function getPlacementKind(placementType: string?): SurfaceKind?
@@ -94,11 +169,52 @@ local function contains(list: { string }?, value: string): boolean
 	return false
 end
 
+local function resolveDynamicSurfaceId(kind: SurfaceKind?, candidate: string?): string?
+	if not candidate or candidate == "" then
+		return nil
+	end
+	local parsedKind, parsedMaterial = parseDynamicSurfaceId(candidate)
+	if parsedKind and parsedMaterial then
+		local material = resolveEnumMaterial(parsedMaterial)
+		if material then
+			local dynamicKind: SurfaceKind = if parsedKind == "Wall" then "Wall" else "Floor"
+			return ensureDynamicDefinition(dynamicKind, material).Id
+		end
+		return nil
+	end
+	if kind ~= "Wall" and kind ~= "Floor" then
+		return nil
+	end
+	local material = resolveEnumMaterial(candidate)
+	if not material then
+		return nil
+	end
+	return ensureDynamicDefinition(kind, material).Id
+end
+
 function SurfacePalette.GetSurface(surfaceId: string?): SurfaceDefinition?
 	if typeof(surfaceId) ~= "string" then
 		return nil
 	end
-	return SURFACE_DEFINITIONS[surfaceId]
+	local definition = SURFACE_DEFINITIONS[surfaceId]
+	if definition then
+		if definition.Transparency == nil then
+			local fallback = MATERIAL_TRANSPARENCY[definition.Material]
+			if fallback ~= nil then
+				definition.Transparency = fallback
+			end
+		end
+		return definition
+	end
+	local kind, materialName = parseDynamicSurfaceId(surfaceId)
+	if kind and materialName then
+		local material = resolveEnumMaterial(materialName)
+		if material then
+			local dynamicKind: SurfaceKind = if kind == "Wall" then "Wall" else "Floor"
+			return ensureDynamicDefinition(dynamicKind, material)
+		end
+	end
+	return nil
 end
 
 function SurfacePalette.GetDefaultForKind(kind: SurfaceKind?): string?
@@ -131,7 +247,15 @@ function SurfacePalette.IsSurfaceAllowedForItem(surfaceId: string?, itemSpec: { 
 		return true
 	end
 
-	return contains(allowed :: { string }, surfaceId)
+	if contains(allowed :: { string }, surfaceId) then
+		return true
+	end
+
+	if isDynamicSurfaceId(surfaceId) then
+		return true
+	end
+
+	return false
 end
 
 function SurfacePalette.ResolveForPlacement(itemSpec: { [string]: any }?, requestedSurfaceId: string?): string?
@@ -144,6 +268,12 @@ function SurfacePalette.ResolveForPlacement(itemSpec: { [string]: any }?, reques
 	local candidateId = requestedSurfaceId
 	if typeof(candidateId) == "string" and SurfacePalette.IsSurfaceAllowedForItem(candidateId, itemSpec) then
 		return candidateId
+	end
+	if inferredKind and typeof(candidateId) == "string" and candidateId ~= "" then
+		local dynamicId = resolveDynamicSurfaceId(inferredKind, candidateId)
+		if dynamicId and SurfacePalette.IsSurfaceAllowedForItem(dynamicId, itemSpec) then
+			return dynamicId
+		end
 	end
 
 	local defaultId = if typeof(itemSpec.DefaultSurfaceId) == "string" then itemSpec.DefaultSurfaceId else nil
@@ -188,6 +318,7 @@ function SurfacePalette.Serialize(definition: SurfaceDefinition?): { [string]: a
 		DisplayName = definition.DisplayName,
 		Material = definition.Material,
 		Color = definition.Color,
+		Transparency = definition.Transparency,
 	}
 end
 

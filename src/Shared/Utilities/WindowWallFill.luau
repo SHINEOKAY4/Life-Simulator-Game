@@ -109,26 +109,55 @@ local function resolveSurfaceIdFromMetadata(metadata: { [string]: any }?): strin
 	return nil
 end
 
-local function createVisualOverride(baseInfo: VisualInfo?, surfaceId: string?): VisualInfo?
+local function resolvePaintColorFromMetadata(metadata: { [string]: any }?): Color3?
+	if typeof(metadata) ~= "table" then
+		return nil
+	end
+
+	local record = metadata.PaintColor
+	if typeof(record) ~= "table" then
+		return nil
+	end
+	local r = tonumber(record.R or record.r)
+	local g = tonumber(record.G or record.g)
+	local b = tonumber(record.B or record.b)
+	if typeof(r) ~= "number" or typeof(g) ~= "number" or typeof(b) ~= "number" then
+		return nil
+	end
+	return Color3.new(math.clamp(r, 0, 1), math.clamp(g, 0, 1), math.clamp(b, 0, 1))
+end
+
+local function createVisualOverride(baseInfo: VisualInfo?, surfaceId: string?, paintColor: Color3?): VisualInfo?
 	if not baseInfo then
 		return nil
 	end
-	if typeof(surfaceId) ~= "string" or surfaceId == "" then
-		return baseInfo
-	end
 
-	local definition = SurfacePalette.GetSurface(surfaceId)
-	if not definition then
-		return baseInfo
-	end
-
-	return {
+	local visual: VisualInfo = {
 		Size = baseInfo.Size,
-		Material = definition.Material,
-		Color = definition.Color,
+		Material = baseInfo.Material,
+		Color = baseInfo.Color,
 		Transparency = baseInfo.Transparency,
 		Reflectance = baseInfo.Reflectance,
 	}
+
+	if typeof(surfaceId) == "string" and surfaceId ~= "" then
+		local definition = SurfacePalette.GetSurface(surfaceId)
+		if definition then
+			visual.Material = definition.Material
+			if not paintColor then
+				visual.Color = definition.Color
+			end
+			if typeof(definition.Transparency) == "number" then
+				visual.Transparency = math.clamp(definition.Transparency, 0, 1)
+			end
+		end
+	end
+
+	if paintColor then
+		visual.Color = paintColor
+	end
+
+	return visual
 end
 
 local function buildSegment(parent: Instance, visual: VisualInfo, size: Vector3, cf: CFrame)
@@ -371,7 +400,8 @@ function WindowWallFill.Apply(model: Model, spec: WindowSpec?, options: ApplyOpt
 	end
 
 	local surfaceId = resolveSurfaceIdFromMetadata(metadata)
-	local visualOverride = createVisualOverride(getWallVisualInfo(previousWallId), surfaceId)
+	local paintColor = resolvePaintColorFromMetadata(metadata)
+	local visualOverride = createVisualOverride(getWallVisualInfo(previousWallId), surfaceId, paintColor)
 	local solution = WindowWallFill.ComputeSegments(model, windowData, previousWallId, visualOverride)
 	if not solution then
 		WindowWallFill.Remove(model)

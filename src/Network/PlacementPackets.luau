@@ -147,6 +147,18 @@ PlacementPackets.DestroySurfaceMountRequest = Packet("DestroySurfaceMountRequest
 	MountKey = Packet.String,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
+PlacementPackets.PaintSurfaceRequest = Packet("PaintSurfaceRequest", {
+	PlacementKey = Packet.String,
+	SurfaceId = Packet.String,
+	PaintColor = Packet.Any,
+}):Response(Packet.Boolean8, Packet.StringLong)
+
+PlacementPackets.PaintSurfaceBatchRequest = Packet("PaintSurfaceBatchRequest", {
+	PlacementKeys = { Packet.String },
+	SurfaceId = Packet.String,
+	PaintColor = Packet.Any,
+}):Response(Packet.Boolean8, Packet.StringLong)
+
 PlacementPackets.DestroyRequest = Packet("DestroyRequest", {
 	ItemId = Packet.String,
 	CellX = Packet.NumberU8,

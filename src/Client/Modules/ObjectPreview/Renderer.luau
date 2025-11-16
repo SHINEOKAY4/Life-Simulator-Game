@@ -447,8 +447,16 @@ function Renderer.PreviewWindowOnWall(
 	wallPart.LocalTransparencyModifier = 1
 
 	local segments: { BasePart } = {}
-	for _, segment in solution.Segments do
-		segments[#segments + 1] = createPreviewSegment(segmentContainer, segment.Size, segment.CFrame, wallPart)
+	local ok, err = pcall(function()
+		for _, segment in solution.Segments do
+			segments[#segments + 1] = createPreviewSegment(segmentContainer, segment.Size, segment.CFrame, wallPart)
+		end
+	end)
+	if not ok then
+		wallPart.LocalTransparencyModifier = originalModifier
+		segmentContainer:Destroy()
+		warn("[ObjectPreview] Failed to build window preview segments: " .. tostring(err))
+		return nil
 	end
 
 	Renderer.PreviewWallMounted(windowModel, pose.WorldPosition, pose.WallNormal, upVector, pivotRotation)

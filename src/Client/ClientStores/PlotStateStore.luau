@@ -944,7 +944,7 @@ function PlotStateStore.Init()
 			return
 		end
 
-		if delta.Action ~= "Placed" then
+		if delta.Action ~= "Placed" and delta.Action ~= "Updated" then
 			return
 		end
 

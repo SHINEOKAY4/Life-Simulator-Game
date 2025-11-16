@@ -2,13 +2,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SurfacePalette = require(ReplicatedStorage.Shared.Configurations.Build.SurfacePalette)
 
 local DEFAULT_WALL_SURFACE = SurfacePalette.GetDefaultForKind("Wall") or "wall:plaster-warm"
-local DEFAULT_FLOOR_SURFACE = SurfacePalette.GetDefaultForKind("Floor") or "floor:oak-herringbone"
+local DEFAULT_FLOOR_SURFACE = SurfacePalette.GetDefaultForKind("Floor") or "floor:plaster-warm"
 local WALL_SURFACE_OPTIONS = table.freeze({
 	"wall:plaster-warm",
 	"wall:plaster-cool",
 	"wall:brick-russet",
 })
 local FLOOR_SURFACE_OPTIONS = table.freeze({
+	"floor:plaster-warm",
 	"floor:oak-herringbone",
 	"floor:walnut-panel",
 	"floor:stone-slate",

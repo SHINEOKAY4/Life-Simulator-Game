@@ -364,7 +364,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		return true, "Cell object placed"
 	elseif itemData.PlacementType == "Wall" then
 		local requiresFloorOnBothSides = itemData.RequiresFloorOnBothSides or false
-		local wallSurfaceId = Helpers.resolveSurfaceId(itemData, payload.SurfaceId)
+		local incomingSurfaceId = Helpers.resolveSurfaceId(itemData, payload.SurfaceId)
 		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1)
 		if not canAfford then
 			return false, failureReason or "Not enough cash"
@@ -419,8 +419,14 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 				savedWall.Metadata = metadata
 			end
 
-			if wallSurfaceId then
-				metadata.SurfaceId = wallSurfaceId
+			local replacedSpec = ItemFinder.FindItemById(replacedId)
+			local preservedSurfaceId = if typeof(metadata.SurfaceId) == "string" and metadata.SurfaceId ~= ""
+				then metadata.SurfaceId
+				else nil
+			local replacementSpecSurface = Helpers.resolveSurfaceId(replacedSpec, payload.SurfaceId)
+			local effectiveSurfaceId = preservedSurfaceId or replacementSpecSurface or incomingSurfaceId
+			if effectiveSurfaceId then
+				metadata.SurfaceId = effectiveSurfaceId
 			end
 
 			if isWindowVariant and windowConfig then
@@ -428,7 +434,6 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 					metadata.OriginalWallMetadata = snapshotWallMetadata(metadata)
 				end
 
-				local replacedSpec = ItemFinder.FindItemById(replacedId)
 				local specWidth, specHeight, specThickness, specDiagonalMultiplier, specMinFrame =
 					resolveWallDimensionsFromSpec(replacedSpec)
 
@@ -543,8 +548,16 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 
 				local offsetFromWall = typeof(windowConfig.OffsetFromWall) == "number" and windowConfig.OffsetFromWall
 					or 0
-				local edgeCF = state.Grid
-					and state.Grid:CellToWorldEdgeCenterCFrame(payload.CellX, payload.CellZ, facing)
+				local grid = state.Grid
+				local levelHeight = 0
+				if grid then
+					local floorHeight = state:GetFloorHeightStuds()
+					if typeof(floorHeight) == "number" then
+						levelHeight = level * floorHeight
+					end
+				end
+				local edgeCF = grid
+					and grid:CellToWorldEdgeCenterCFrame(payload.CellX, payload.CellZ, facing, levelHeight)
 
 				local function serializeVector(vec: Vector3?): { [string]: number }?
 					if typeof(vec) ~= "Vector3" then
@@ -614,8 +627,8 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		end
 
 		local wallMetadata = buildWallMetadata(itemData, facing)
-		if wallSurfaceId then
-			wallMetadata.SurfaceId = wallSurfaceId
+		if incomingSurfaceId then
+			wallMetadata.SurfaceId = incomingSurfaceId
 		end
 		local success = state:PlaceWall(
 			payload.ItemId,

@@ -122,6 +122,9 @@ local CancelPreviewButton: TextButton? = nil
 local CancelActionPressedConnection: RBXScriptConnection? = nil
 local CancelRKeyConnection: RBXScriptConnection? = nil
 local ActiveLevelChangedConnection: RBXScriptConnection? = nil
+local ExternalCancelSource: string? = nil
+local ExternalCancelHandler: (() -> ())? = nil
+local EXIT_BUTTON_BOUND_ATTRIBUTE = "PlotBuilderExitBound"
 
 local function formatLevelDisplay(level: number): string
 	local defaultLevel = PlotStateStore.GetDefaultLevel()
@@ -278,21 +281,22 @@ local function updateCancelButtonState()
 	end
 
 	local previewActive = boolValueTrue(ObjectPreviewEnabledValue) and boolValueTrue(PlotBuilderEnabledValue)
+	local externalActive = ExternalCancelSource ~= nil
+	local buttonVisible = previewActive or externalActive
 
-	-- Only show the button when preview is actually active
 	if PreviewControlsFrame then
-		PreviewControlsFrame.Visible = previewActive
+		PreviewControlsFrame.Visible = buttonVisible
 	end
 
-	CancelPreviewButton.Active = previewActive
-	CancelPreviewButton.AutoButtonColor = previewActive
-	CancelPreviewButton.Selectable = previewActive
-	CancelPreviewButton.Visible = previewActive
+	CancelPreviewButton.Active = buttonVisible
+	CancelPreviewButton.AutoButtonColor = buttonVisible
+	CancelPreviewButton.Selectable = buttonVisible
+	CancelPreviewButton.Visible = buttonVisible
 	CancelPreviewButton:SetAttribute("PreviewActive", previewActive)
 
 	local keyHint = CancelPreviewButton:FindFirstChild("KeyHint")
 	if keyHint and keyHint:IsA("TextLabel") then
-		keyHint.Visible = previewActive
+		keyHint.Visible = buttonVisible
 	end
 end
 
@@ -871,11 +875,15 @@ local function bindCancelPreviewButton()
 	if button:GetAttribute("CancelHandlerBound") ~= true then
 		button:SetAttribute("CancelHandlerBound", true)
 		button.Activated:Connect(function()
-			if not boolValueTrue(ObjectPreviewEnabledValue) then
+			local previewActive = boolValueTrue(ObjectPreviewEnabledValue) and boolValueTrue(PlotBuilderEnabledValue)
+			if previewActive then
+				handlePreviewCancelled()
+				PlotBuilder.RemovePreview()
 				return
 			end
-			handlePreviewCancelled()
-			PlotBuilder.RemovePreview()
+			if ExternalCancelHandler then
+				ExternalCancelHandler()
+			end
 		end)
 	end
 
@@ -1522,6 +1530,29 @@ local function bindSearchBox()
 	end
 end
 
+local function bindExitButton(button: GuiButton)
+	if button:GetAttribute(EXIT_BUTTON_BOUND_ATTRIBUTE) == true then
+		return
+	end
+	button:SetAttribute(EXIT_BUTTON_BOUND_ATTRIBUTE, true)
+	button.Activated:Connect(function()
+		PlotBuilder.Hide()
+	end)
+end
+
+local function bindExitButtonsInFolder(folder: Instance)
+	for _, descendant in ipairs(folder:GetDescendants()) do
+		if descendant:IsA("GuiButton") then
+			bindExitButton(descendant)
+		end
+	end
+	folder.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("GuiButton") then
+			bindExitButton(descendant)
+		end
+	end)
+end
+
 local function bindExitControls()
 	if ExitAction then
 		if ExitAction:IsA("InputAction") then
@@ -1529,26 +1560,17 @@ local function bindExitControls()
 				PlotBuilder.Hide()
 			end)
 		elseif ExitAction:IsA("GuiButton") then
-			ExitAction.Activated:Connect(function()
-				PlotBuilder.Hide()
-			end)
+			bindExitButton(ExitAction)
 		end
 	end
 
 	if ExitButtonContextFolder then
-		local buttonCandidate = ExitButtonContextFolder:FindFirstChildWhichIsA("GuiButton")
-		if buttonCandidate then
-			buttonCandidate.Activated:Connect(function()
-				PlotBuilder.Hide()
-			end)
-		end
+		bindExitButtonsInFolder(ExitButtonContextFolder)
 	end
 
 	local headerClose = Header and Header:FindFirstChild("CloseButton")
 	if headerClose and headerClose:IsA("GuiButton") then
-		headerClose.Activated:Connect(function()
-			PlotBuilder.Hide()
-		end)
+		bindExitButton(headerClose)
 	end
 end
 
@@ -1630,6 +1652,39 @@ end
 
 function PlotBuilderUI.Hide()
 	MainFrame.Visible = false
+end
+
+function PlotBuilderUI.AcquireCancelButton(sourceId: string, handler: (() -> ())?)
+	if typeof(sourceId) ~= "string" or sourceId == "" then
+		error("PlotBuilderUI.AcquireCancelButton requires a non-empty source identifier")
+	end
+	if handler ~= nil and typeof(handler) ~= "function" then
+		error("PlotBuilderUI.AcquireCancelButton handler must be a function or nil")
+	end
+	if ExternalCancelSource and ExternalCancelSource ~= sourceId then
+		warn(
+			string.format(
+				"PlotBuilderUI cancel button already claimed by '%s'; overriding with '%s'",
+				ExternalCancelSource,
+				sourceId
+			)
+		)
+	end
+	ExternalCancelSource = sourceId
+	ExternalCancelHandler = handler
+	updateCancelButtonState()
+end
+
+function PlotBuilderUI.ReleaseCancelButton(sourceId: string)
+	if typeof(sourceId) ~= "string" or sourceId == "" then
+		return
+	end
+	if ExternalCancelSource ~= sourceId then
+		return
+	end
+	ExternalCancelSource = nil
+	ExternalCancelHandler = nil
+	updateCancelButtonState()
 end
 
 return PlotBuilderUI

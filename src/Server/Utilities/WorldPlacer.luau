@@ -161,6 +161,23 @@ local function readSurfaceId(metadata: { [string]: any }?): string?
 	return nil
 end
 
+local function readPaintColor(metadata: { [string]: any }?): Color3?
+	if typeof(metadata) ~= "table" then
+		return nil
+	end
+	local record = metadata.PaintColor
+	if typeof(record) ~= "table" then
+		return nil
+	end
+	local r = tonumber(record.R or record.r)
+	local g = tonumber(record.G or record.g)
+	local b = tonumber(record.B or record.b)
+	if typeof(r) ~= "number" or typeof(g) ~= "number" or typeof(b) ~= "number" then
+		return nil
+	end
+	return Color3.new(math.clamp(r, 0, 1), math.clamp(g, 0, 1), math.clamp(b, 0, 1))
+end
+
 local function applySurfacePaletteToModel(
 	model: Model,
 	placementType: string,
@@ -192,8 +209,20 @@ local function applySurfacePaletteToModel(
 	end
 
 	model:SetAttribute("SurfaceKind", definition.Kind)
-	model:SetAttribute("SurfaceColor", definition.Color)
+	local paintColor = readPaintColor(metadata)
+	local finalColor = paintColor or definition.Color
+	model:SetAttribute("SurfaceColor", finalColor)
+	if paintColor then
+		model:SetAttribute("SurfaceColorOverride", finalColor)
+	else
+		model:SetAttribute("SurfaceColorOverride", nil)
+	end
 	model:SetAttribute("SurfaceMaterial", definition.Material.Name)
+	local surfaceTransparency: number? = nil
+	if typeof(definition.Transparency) == "number" then
+		surfaceTransparency = math.clamp(definition.Transparency, 0, 1)
+	end
+	model:SetAttribute("SurfaceTransparency", surfaceTransparency)
 	if typeof(definition.Roughness) == "number" then
 		model:SetAttribute("SurfaceRoughness", definition.Roughness)
 	else
@@ -205,10 +234,28 @@ local function applySurfacePaletteToModel(
 		model:SetAttribute("SurfaceMetalness", nil)
 	end
 
-	if not SURFACE_PLACEMENT_TARGETS[placementType] then
-		return
+	local shouldRecolor = SURFACE_PLACEMENT_TARGETS[placementType] == true
+	if shouldRecolor and placementType == "Wall" and typeof(spec) == "table" and spec.RequiresExistingWall == true then
+		shouldRecolor = false
 	end
-	if placementType == "Wall" and typeof(spec) == "table" and spec.RequiresExistingWall == true then
+
+	local function refreshWallVariantFill()
+		if placementType ~= "Wall" or typeof(spec) ~= "table" or spec.RequiresExistingWall ~= true then
+			return
+		end
+		local fillOptions = nil
+		if metadata then
+			fillOptions = { metadata = metadata }
+		end
+		if spec.WallVariant == "Window" then
+			WindowWallFill.Apply(model, spec, fillOptions)
+		else
+			DoorWallFill.Apply(model, spec, fillOptions)
+		end
+	end
+
+	refreshWallVariantFill()
+	if not shouldRecolor then
 		return
 	end
 
@@ -220,7 +267,12 @@ local function applySurfacePaletteToModel(
 			return
 		end
 		part.Material = definition.Material
-		part.Color = definition.Color
+		part.Color = finalColor
+		if surfaceTransparency ~= nil then
+			part.Transparency = surfaceTransparency
+		else
+			part.Transparency = 0
+		end
 	end
 
 	local primaryPart = model.PrimaryPart
@@ -366,8 +418,6 @@ function WorldPlacer.Spawn(
 			end
 		end
 	end
-
-	applySurfacePaletteToModel(model, placementType, spec, metadata)
 
 	if placementType == "Floor" then
 		local floorPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
@@ -621,13 +671,7 @@ function WorldPlacer.Spawn(
 		model:PivotTo(base * CFrame.new(0, GetLiftFromPivotToBottom(model), 0))
 	end
 
-	if placementType == "Wall" and spec.RequiresExistingWall == true then
-		if spec.WallVariant == "Window" then
-			WindowWallFill.Apply(model, spec, options)
-		else
-			DoorWallFill.Apply(model, spec, options)
-		end
-	end
+	applySurfacePaletteToModel(model, placementType, spec, metadata)
 
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") then
@@ -773,6 +817,28 @@ function WorldPlacer.GetPlacementModel(player: Player, placementKey: string): Mo
 	end
 
 	return nil
+end
+
+function WorldPlacer.ApplySurfaceUpdate(
+	player: Player,
+	placementKey: string,
+	itemSpec: { [string]: any }?,
+	metadata: { [string]: any }?
+)
+	local model = WorldPlacer.GetPlacementModel(player, placementKey)
+	if not model then
+		return
+	end
+	local placementType = "CellObject"
+	if typeof(itemSpec) == "table" and typeof(itemSpec.PlacementType) == "string" then
+		placementType = itemSpec.PlacementType
+	else
+		local attr = model:GetAttribute("PlacementType")
+		if typeof(attr) == "string" then
+			placementType = attr
+		end
+	end
+	applySurfacePaletteToModel(model, placementType, itemSpec, metadata)
 end
 
 return WorldPlacer

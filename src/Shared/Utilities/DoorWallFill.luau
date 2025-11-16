@@ -92,26 +92,59 @@ local function resolveSurfaceIdFromMetadata(metadata: { [string]: any }?): strin
 	return nil
 end
 
-local function applySurfacePaletteOverride(info: WallVisualInfo?, surfaceId: string?): WallVisualInfo?
+local function resolvePaintColorFromMetadata(metadata: { [string]: any }?): Color3?
+	if typeof(metadata) ~= "table" then
+		return nil
+	end
+
+	local record = metadata.PaintColor
+	if typeof(record) ~= "table" then
+		return nil
+	end
+	local r = tonumber(record.R or record.r)
+	local g = tonumber(record.G or record.g)
+	local b = tonumber(record.B or record.b)
+	if typeof(r) ~= "number" or typeof(g) ~= "number" or typeof(b) ~= "number" then
+		return nil
+	end
+	return Color3.new(math.clamp(r, 0, 1), math.clamp(g, 0, 1), math.clamp(b, 0, 1))
+end
+
+local function applySurfacePaletteOverride(
+	info: WallVisualInfo?,
+	surfaceId: string?,
+	paintColor: Color3?
+): WallVisualInfo?
 	if not info then
 		return nil
 	end
-	if typeof(surfaceId) ~= "string" or surfaceId == "" then
-		return info
-	end
 
-	local definition = SurfacePalette.GetSurface(surfaceId)
-	if not definition then
-		return info
-	end
-
-	return {
+	local result: WallVisualInfo = {
 		Size = info.Size,
-		Material = definition.Material,
-		Color = definition.Color,
+		Material = info.Material,
+		Color = info.Color,
 		Transparency = info.Transparency,
 		Reflectance = info.Reflectance,
 	}
+
+	if typeof(surfaceId) == "string" and surfaceId ~= "" then
+		local definition = SurfacePalette.GetSurface(surfaceId)
+		if definition then
+			result.Material = definition.Material
+			if not paintColor then
+				result.Color = definition.Color
+			end
+			if typeof(definition.Transparency) == "number" then
+				result.Transparency = math.clamp(definition.Transparency, 0, 1)
+			end
+		end
+	end
+
+	if paintColor then
+		result.Color = paintColor
+	end
+
+	return result
 end
 
 local function ensureDoorAttributes(model: Model)
@@ -166,6 +199,7 @@ function DoorWallFill.Apply(model: Model, spec: DoorSpec?, options: ApplyOptions
 
 	local metadata = options and options.metadata or nil
 	local metadataSurfaceId = resolveSurfaceIdFromMetadata(metadata)
+	local metadataPaintColor = resolvePaintColorFromMetadata(metadata)
 	local previousWallId = options and options.previousWallId or nil
 	if not previousWallId and metadata then
 		local metaPrev = metadata.PreviousId
@@ -185,7 +219,7 @@ function DoorWallFill.Apply(model: Model, spec: DoorSpec?, options: ApplyOptions
 		return
 	end
 
-	local info = applySurfacePaletteOverride(getWallVisualInfo(previousWallId), metadataSurfaceId)
+	local info = applySurfacePaletteOverride(getWallVisualInfo(previousWallId), metadataSurfaceId, metadataPaintColor)
 	if not info then
 		removeExistingFill(model :: Model)
 		return
