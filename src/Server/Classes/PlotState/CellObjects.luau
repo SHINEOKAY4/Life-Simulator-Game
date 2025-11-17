@@ -6,6 +6,12 @@ type Facing = "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
+
+type PlacementOptions = {
+	PlacementType: string?,
+	IgnoreOccupancy: boolean?,
+}
 
 local CellObjects = {}
 
@@ -89,8 +95,10 @@ function CellObjects.attach(PlotState)
 		widthCells: number,
 		depthCells: number,
 		facing: Facing,
-		yLevel: number?
+		yLevel: number?,
+		options: PlacementOptions?
 	): boolean
+		local ignoreOccupancy = options ~= nil and options.IgnoreOccupancy == true
 		local level = self:NormalizeLevel(yLevel)
 		local minChunkX, minChunkZ, maxChunkX, maxChunkZ =
 			self.Grid:FootprintChunkRange(anchorX, anchorZ, widthCells, depthCells, facing, self.ChunkSizeInCells)
@@ -105,40 +113,42 @@ function CellObjects.attach(PlotState)
 		local cellIndices = self.Grid:FootprintCells(anchorX, anchorZ, widthCells, depthCells, facing)
 		local occupancy = self:GetCellFreeForLevel(level)
 		for i = 1, #cellIndices do
-			if not occupancy[cellIndices[i]] then
+			if not occupancy[cellIndices[i]] and not ignoreOccupancy then
 				return false
 			end
 		end
 
 		local minCellX: number, minCellZ: number, maxCellX: number, maxCellZ: number =
 			self.Grid:FootprintBounds(anchorX, anchorZ, widthCells, depthCells, facing)
-		local rotatedWidth = maxCellX - minCellX + 1
-		local rotatedDepth = maxCellZ - minCellZ + 1
-		local verticalEdges = self:GetEdgeFreeVerticalForLevel(level)
-		local horizontalEdges = self:GetEdgeFreeHorizontalForLevel(level)
+		if not ignoreOccupancy then
+			local rotatedWidth = maxCellX - minCellX + 1
+			local rotatedDepth = maxCellZ - minCellZ + 1
+			local verticalEdges = self:GetEdgeFreeVerticalForLevel(level)
+			local horizontalEdges = self:GetEdgeFreeHorizontalForLevel(level)
 
-		if rotatedWidth > 1 then
-			for cellZ = minCellZ, maxCellZ do
-				for cellX = minCellX, maxCellX - 1 do
-					local alignment, edgeX, edgeZ = self:EdgeOfCell(cellX, cellZ, "East")
-					if alignment == "Vertical" then
-						local edgeIndex = self:VerticalEdgeIndex(edgeX, edgeZ)
-						if not verticalEdges[edgeIndex] then
-							return false
+			if rotatedWidth > 1 then
+				for cellZ = minCellZ, maxCellZ do
+					for cellX = minCellX, maxCellX - 1 do
+						local alignment, edgeX, edgeZ = self:EdgeOfCell(cellX, cellZ, "East")
+						if alignment == "Vertical" then
+							local edgeIndex = self:VerticalEdgeIndex(edgeX, edgeZ)
+							if not verticalEdges[edgeIndex] then
+								return false
+							end
 						end
 					end
 				end
 			end
-		end
 
-		if rotatedDepth > 1 then
-			for cellZ = minCellZ, maxCellZ - 1 do
-				for cellX = minCellX, maxCellX do
-					local alignment, edgeX, edgeZ = self:EdgeOfCell(cellX, cellZ, "South")
-					if alignment == "Horizontal" then
-						local edgeIndex = self:HorizontalEdgeIndex(edgeX, edgeZ)
-						if not horizontalEdges[edgeIndex] then
-							return false
+			if rotatedDepth > 1 then
+				for cellZ = minCellZ, maxCellZ - 1 do
+					for cellX = minCellX, maxCellX do
+						local alignment, edgeX, edgeZ = self:EdgeOfCell(cellX, cellZ, "South")
+						if alignment == "Horizontal" then
+							local edgeIndex = self:HorizontalEdgeIndex(edgeX, edgeZ)
+							if not horizontalEdges[edgeIndex] then
+								return false
+							end
 						end
 					end
 				end
@@ -154,10 +164,16 @@ function CellObjects.attach(PlotState)
 		widthCells: number,
 		depthCells: number,
 		facing: Facing,
-		yLevel: number?
+		yLevel: number?,
+		options: PlacementOptions?
 	): boolean
-		if not self:CanPlace(anchorX, anchorZ, widthCells, depthCells, facing, yLevel) then
+		if not self:CanPlace(anchorX, anchorZ, widthCells, depthCells, facing, yLevel, options) then
 			return false
+		end
+
+		local ignoreOccupancy = options ~= nil and options.IgnoreOccupancy == true
+		if ignoreOccupancy then
+			return true
 		end
 
 		local level = self:NormalizeLevel(yLevel)
@@ -178,8 +194,13 @@ function CellObjects.attach(PlotState)
 		widthCells: number,
 		depthCells: number,
 		facing: Facing,
-		yLevel: number?
+		yLevel: number?,
+		options: PlacementOptions?
 	)
+		local ignoreOccupancy = options ~= nil and options.IgnoreOccupancy == true
+		if ignoreOccupancy then
+			return
+		end
 		local cellIndices = self.Grid:FootprintCells(anchorX, anchorZ, widthCells, depthCells, facing)
 		local level = self:NormalizeLevel(yLevel)
 		local occupancy = self:GetCellFreeForLevel(level)
@@ -197,16 +218,20 @@ function CellObjects.attach(PlotState)
 		widthCells: number,
 		depthCells: number,
 		facing: Facing,
-		yLevel: number?
+		yLevel: number?,
+		options: PlacementOptions?
 	): boolean
 		local level = self:NormalizeLevel(yLevel)
-		if not self:ReserveFootprint(anchorX, anchorZ, widthCells, depthCells, facing, level) then
+		if not self:ReserveFootprint(anchorX, anchorZ, widthCells, depthCells, facing, level, options) then
 			return false
 		end
 
-		local key = self:PlacementKeyForType(anchorX, anchorZ, facing, "CellObject", level)
+		local placementType = if options ~= nil and typeof(options.PlacementType) == "string"
+			then options.PlacementType :: string
+			else "CellObject"
+		local key = self:PlacementKeyForType(anchorX, anchorZ, facing, placementType, level)
 		if self.Save.PlacedObjects[key] then
-			self:FreeFootprint(anchorX, anchorZ, widthCells, depthCells, facing, level)
+			self:FreeFootprint(anchorX, anchorZ, widthCells, depthCells, facing, level, options)
 			return false
 		end
 
@@ -216,6 +241,7 @@ function CellObjects.attach(PlotState)
 			cellZ = anchorZ,
 			facing = facing,
 			yLevel = level,
+			placementType = placementType,
 		}
 		return true, key
 	end
@@ -226,29 +252,37 @@ function CellObjects.attach(PlotState)
 		width: number,
 		depth: number,
 		facing: Facing,
-		yLevel: number?
+		yLevel: number?,
+		options: PlacementOptions?
 	)
+		local placementType = if options ~= nil and typeof(options.PlacementType) == "string"
+			then options.PlacementType :: string
+			else "CellObject"
+		local ignoreOccupancy = options ~= nil and options.IgnoreOccupancy == true
 		local normalizedWidth = normalizeDimension(width)
 		local normalizedDepth = normalizeDimension(depth)
-		local indices = self.Grid:FootprintCells(cellX, cellZ, normalizedWidth, normalizedDepth, facing)
-		local level = self:NormalizeLevel(yLevel)
-		local occupancy = self:GetCellFreeForLevel(level)
-		for i = 1, #indices do
-			occupancy[indices[i]] = true
+		if not ignoreOccupancy then
+			local indices = self.Grid:FootprintCells(cellX, cellZ, normalizedWidth, normalizedDepth, facing)
+			local level = self:NormalizeLevel(yLevel)
+			local occupancy = self:GetCellFreeForLevel(level)
+			for i = 1, #indices do
+				occupancy[indices[i]] = true
+			end
+			self:SetFootprintInteriorEdgesFree(cellX, cellZ, normalizedWidth, normalizedDepth, facing, true, level)
 		end
-		self:SetFootprintInteriorEdgesFree(cellX, cellZ, normalizedWidth, normalizedDepth, facing, true, level)
 
-		local key = self:PlacementKeyForType(cellX, cellZ, facing, "CellObject", level)
+		local level = self:NormalizeLevel(yLevel)
+		local key = self:PlacementKeyForType(cellX, cellZ, facing, placementType, level)
 		local saved = self.Save.PlacedObjects[key]
 		if saved then
 			local spec = ItemFinder.FindItemById(saved.id)
 			assert(spec, ("Unknown catalog item '%s'"):format(saved.id))
-			local placementType = spec.PlacementType
+			local specPlacementType = spec.PlacementType or spec.Type or "CellObject"
 			local specWidth = spec.WidthCells
 			local specDepth = spec.DepthCells
 			local objFacing = saved.facing or "North"
 			if
-				placementType == "CellObject"
+				specPlacementType == "CellObject"
 				and saved.cellX == cellX
 				and saved.cellZ == cellZ
 				and specWidth == normalizedWidth
@@ -283,7 +317,9 @@ function CellObjects.attach(PlotState)
 
 		local resolvedFromLevel = self:NormalizeLevel(fromLevel)
 		local resolvedToLevel = self:NormalizeLevel(toLevel)
-		local fromKey = self:PlacementKeyForType(fromX, fromZ, fromF, "CellObject", resolvedFromLevel)
+		local placementKeyType = PlacementBehavior.getPlacementKeyLabel(spec)
+		local ignoreOccupancy = PlacementBehavior.allowsStacking(spec)
+		local fromKey = self:PlacementKeyForType(fromX, fromZ, fromF, placementKeyType, resolvedFromLevel)
 		local saved = self.Save.PlacedObjects[fromKey]
 		if not saved then
 			return false, ("No item '%s' found at source (%d, %d) facing %s"):format(itemId, fromX, fromZ, fromF)
@@ -338,21 +374,29 @@ function CellObjects.attach(PlotState)
 
 		local toOccupancy = self:GetCellFreeForLevel(resolvedToLevel)
 		for _, index in toCellsArray do
-			if not toOccupancy[index] and not fromCellSet[index] then
+			if not ignoreOccupancy and not toOccupancy[index] and not fromCellSet[index] then
 				local blockX, blockZ = self.Grid:IndexToCell(index)
 				return false, ("Cell (%d, %d) is already occupied"):format(blockX, blockZ)
 			end
 		end
 
-		local toKey = self:PlacementKeyForType(toX, toZ, toF, "CellObject", resolvedToLevel)
+		local toKey = self:PlacementKeyForType(toX, toZ, toF, placementKeyType, resolvedToLevel)
 		local existing = self.Save.PlacedObjects[toKey]
 		if existing and existing ~= saved then
 			return false, ("Destination already has item '%s' at (%d, %d) facing %s"):format(existing.id, toX, toZ, toF)
 		end
 
-		self:FreeFootprint(fromX, fromZ, width, depth, fromF, resolvedFromLevel)
-		if not self:ReserveFootprint(toX, toZ, width, depth, toF, resolvedToLevel) then
-			self:ReserveFootprint(fromX, fromZ, width, depth, fromF, resolvedFromLevel)
+		self:FreeFootprint(fromX, fromZ, width, depth, fromF, resolvedFromLevel, {
+			IgnoreOccupancy = ignoreOccupancy,
+		})
+		if
+			not self:ReserveFootprint(toX, toZ, width, depth, toF, resolvedToLevel, {
+				IgnoreOccupancy = ignoreOccupancy,
+			})
+		then
+			self:ReserveFootprint(fromX, fromZ, width, depth, fromF, resolvedFromLevel, {
+				IgnoreOccupancy = ignoreOccupancy,
+			})
 			return false, "Failed to reserve destination footprint"
 		end
 
@@ -361,6 +405,7 @@ function CellObjects.attach(PlotState)
 		saved.cellZ = toZ
 		saved.facing = toF
 		saved.yLevel = resolvedToLevel
+		toKey = self:PlacementKeyForType(toX, toZ, toF, placementKeyType, resolvedToLevel)
 		self.Save.PlacedObjects[toKey] = saved
 		return true, nil
 	end
@@ -380,7 +425,7 @@ function CellObjects.attach(PlotState)
 		local keyType = parsedType or "CellObject"
 		local level = if typeof(parsedLevel) == "number" then parsedLevel else self.DefaultLevel
 
-		if keyType ~= "CellObject" then
+		if keyType ~= "CellObject" and keyType ~= "Overlay" then
 			return false, ("Placement key type '%s' does not match CellObject rotation"):format(tostring(parsedType))
 		end
 

@@ -10,6 +10,7 @@ local PlotBuilder = require(script.Parent.PlotBuilder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementHelpers = require(ReplicatedStorage.Shared.Utilities.PlacementHelpers)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
@@ -334,6 +335,7 @@ function ObjectAction.Rotate(object: Model, rotation: Vector3)
 	end
 
 	local placementType = spec.PlacementType or spec.Type or "CellObject"
+	local placementKeyType = PlacementBehavior.getPlacementKeyLabel(spec)
 	if placementType == "Floor" then
 		warn("Floors cannot be rotated.")
 		return
@@ -369,7 +371,7 @@ function ObjectAction.Rotate(object: Model, rotation: Vector3)
 
 	local normalizedFacing = PlacementKey.NormalizeFacing(currentFacing :: any)
 	local fromKey =
-		PlacementKey.ForPlacementType(cellXAttr, cellZAttr, normalizedFacing :: any, placementType, rotateLevel)
+		PlacementKey.ForPlacementType(cellXAttr, cellZAttr, normalizedFacing :: any, placementKeyType, rotateLevel)
 
 	local success, message = Packets.RotateRequest:Fire({
 		ItemId = itemId,

@@ -100,6 +100,7 @@ local function Move(player: Player, payload: Payload): (boolean, string)
 	end
 
 	local placementType = spec.PlacementType or spec.Type or "CellObject"
+	local placementKeyType = Helpers.getPlacementKeyLabel(spec)
 	local fromFacingValue = Helpers.coerceFacing(payload.FromFacing)
 	local fromF: Facing = (fromFacingValue or "North") :: Facing
 	local toFacingValue = Helpers.coerceFacing(payload.ToFacing)
@@ -122,8 +123,8 @@ local function Move(player: Player, payload: Payload): (boolean, string)
 	local moveError: string?
 	local removedFacing: Facing = fromF
 	local placedFacing: Facing = toF
-	local fromKey = state:PlacementKeyForType(payload.FromCellX, payload.FromCellZ, fromF, placementType, fromLevel)
-	local toKey = state:PlacementKeyForType(payload.ToCellX, payload.ToCellZ, toF, placementType, toLevel)
+	local fromKey = state:PlacementKeyForType(payload.FromCellX, payload.FromCellZ, fromF, placementKeyType, fromLevel)
+	local toKey = state:PlacementKeyForType(payload.ToCellX, payload.ToCellZ, toF, placementKeyType, toLevel)
 	local sourceSaved = state.Save.PlacedObjects[fromKey]
 	local sourceMetadata = sourceSaved and sourceSaved.Metadata
 
@@ -239,7 +240,8 @@ local function Move(player: Player, payload: Payload): (boolean, string)
 		payload.FromCellZ,
 		removedFacing,
 		sourceMetadata,
-		fromLevel
+		fromLevel,
+		fromKey
 	)
 	Helpers.sendPlacementDelta(
 		player,
@@ -249,7 +251,8 @@ local function Move(player: Player, payload: Payload): (boolean, string)
 		payload.ToCellZ,
 		placedFacing,
 		destMetadata,
-		toLevel
+		toLevel,
+		toKey
 	)
 
 	return true, "Moved"

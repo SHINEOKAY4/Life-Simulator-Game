@@ -25,6 +25,7 @@ local UNIT_LABELS = {
 	Wall = { singular = "segment", plural = "segments" },
 	WallMounted = { singular = "installation", plural = "installations" },
 	SurfaceMounted = { singular = "placement", plural = "placements" },
+	Ceiling = { singular = "fixture", plural = "fixtures" },
 }
 
 local TEXT_COLORS = {
@@ -284,6 +285,19 @@ function PlacementCostDisplay.UpdateSurfaceMounted(
 		return
 	end
 	updateCostDisplay("SurfaceMounted", itemId, math.max(placementCount, 0), canPlace, worldPosition)
+end
+
+function PlacementCostDisplay.UpdateCeiling(
+	itemId: string?,
+	fixtureCount: number,
+	canPlace: boolean,
+	worldPosition: Vector3?
+)
+	if typeof(fixtureCount) ~= "number" then
+		PlacementCostDisplay.Hide()
+		return
+	end
+	updateCostDisplay("Ceiling", itemId, math.max(fixtureCount, 0), canPlace, worldPosition)
 end
 
 function PlacementCostDisplay.Hide()

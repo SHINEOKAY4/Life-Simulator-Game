@@ -9,6 +9,7 @@ local BillboardText = require(script.Parent.Parent.UserInterface.BillboardText)
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
 
 local SUCCESS_COLOR = Color3.fromRGB(120, 244, 198)
 local FAILURE_COLOR = Color3.fromRGB(255, 118, 118)
@@ -139,7 +140,7 @@ local function waitForPlacedModel(
 	end
 
 	local spec = ItemFinder.FindItemById(itemId)
-	local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
+	local placementKeyType = PlacementBehavior.getPlacementKeyLabel(spec)
 	local normalizedFacing: "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest" =
 		PlacementKey.NormalizeFacing(facing :: any)
 	local resolvedLevel = resolveLevel(level)
@@ -149,7 +150,7 @@ local function waitForPlacedModel(
 		return nil
 	end
 
-	local key = PlacementKey.ForPlacementType(cellX, cellZ, normalizedFacing, placementType, resolvedLevel)
+	local key = PlacementKey.ForPlacementType(cellX, cellZ, normalizedFacing, placementKeyType, resolvedLevel)
 	local model = container:FindFirstChild(key)
 	if model then
 		return model :: Model

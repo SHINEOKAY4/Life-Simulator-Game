@@ -10,11 +10,123 @@ type Facing = string
 
 local Renderer = {}
 
+local DEFAULT_FRAME_DELTA = 1 / 60
+local SMOOTH_SNAP_SPEED = 18
+local MIN_BLEND_ALPHA = 0.12
+local POSITION_SNAP_EPSILON = 1e-3
+local ORIENTATION_SNAP_EPSILON = 1e-3
+
+local lastFrameDelta = DEFAULT_FRAME_DELTA
+
+type SmoothEntry = {
+	current: CFrame,
+	target: CFrame,
+}
+
+local smoothEntries = setmetatable({}, { __mode = "k" }) :: { [Model]: SmoothEntry }
+
+local function computeBlendAlpha(): number
+	local dt = lastFrameDelta
+	if dt <= 0 then
+		dt = DEFAULT_FRAME_DELTA
+	end
+	local alpha = 1 - math.exp(-SMOOTH_SNAP_SPEED * dt)
+	if alpha < MIN_BLEND_ALPHA then
+		alpha = MIN_BLEND_ALPHA
+	elseif alpha > 1 then
+		alpha = 1
+	end
+	return alpha
+end
+
+local function getSmoothEntry(model: Model, default: CFrame?): SmoothEntry
+	local entry = smoothEntries[model]
+	if entry then
+		return entry
+	end
+	local initial = default or model:GetPivot()
+	entry = {
+		current = initial,
+		target = initial,
+	}
+	smoothEntries[model] = entry
+	return entry
+end
+
+local function isOrientationClose(a: CFrame, b: CFrame): boolean
+	local dot = (a.RightVector:Dot(b.RightVector) + a.UpVector:Dot(b.UpVector) + a.LookVector:Dot(b.LookVector)) / 3
+	return (1 - dot) <= ORIENTATION_SNAP_EPSILON
+end
+
+local function isPoseClose(a: CFrame, b: CFrame): boolean
+	if (a.Position - b.Position).Magnitude > POSITION_SNAP_EPSILON then
+		return false
+	end
+	return isOrientationClose(a, b)
+end
+
+local function blendToward(model: Model, entry: SmoothEntry, target: CFrame)
+	local blended = entry.current:Lerp(target, computeBlendAlpha())
+	if isPoseClose(blended, target) then
+		blended = target
+	end
+	entry.current = blended
+	entry.target = target
+	model:PivotTo(blended)
+end
+
+local function applySmoothPivot(model: Model, target: CFrame)
+	local entry = getSmoothEntry(model, target)
+	if isPoseClose(entry.current, target) then
+		entry.current = target
+		entry.target = target
+		model:PivotTo(target)
+		return
+	end
+	blendToward(model, entry, target)
+end
+
+function Renderer.StepModel(model: Model)
+	local entry = smoothEntries[model]
+	if not entry then
+		return
+	end
+	local target = entry.target
+	local current = entry.current
+	if not target or not current then
+		return
+	end
+	if isPoseClose(current, target) then
+		if current ~= target then
+			entry.current = target
+			model:PivotTo(target)
+		end
+		return
+	end
+	blendToward(model, entry, target)
+end
+
+function Renderer.ClearModel(model: Model?)
+	if not model then
+		return
+	end
+	smoothEntries[model] = nil
+end
+
+function Renderer.SetFrameDelta(deltaTime: number?)
+	if typeof(deltaTime) == "number" and deltaTime > 0 then
+		lastFrameDelta = deltaTime
+	else
+		lastFrameDelta = DEFAULT_FRAME_DELTA
+	end
+end
+
 local YawFromFacing = PlacementHelpers.GetYawFromFacing
 local GetFlatAlignedCFrame = PlacementHelpers.GetFlatAlignedCFrame
 local GetRotationOnly = PlacementHelpers.GetRotation
 local GetPivotRotation = PlacementHelpers.GetPivotRotation
 local GetLiftAlongDirection = PlacementHelpers.GetLiftAlongDirection
+local GetCeilingAttachmentAxes = PlacementHelpers.GetCeilingAttachmentAxes
 
 export type WindowCutoutConfig = {
 	CutoutWidth: number?,
@@ -176,7 +288,7 @@ function Renderer.PreviewWall(
 	local centerPosition = (startCFrame.Position + endCFrame.Position) * 0.5
 	local orientation =
 		CFrame.fromMatrix(centerPosition, anchorCFrame.RightVector, anchorCFrame.UpVector, anchorCFrame.LookVector)
-	model:PivotTo(orientation * CFrame.new(0, lift, 0))
+	applySmoothPivot(model, orientation * CFrame.new(0, lift, 0))
 end
 
 function Renderer.PreviewFloor(
@@ -195,7 +307,7 @@ function Renderer.PreviewFloor(
 		center = center * CFrame.new(0, levelHeight, 0)
 	end
 	local aligned = alignToSurface(center, surface)
-	model:PivotTo(aligned)
+	applySmoothPivot(model, aligned)
 end
 
 function Renderer.PreviewRoof(
@@ -224,14 +336,14 @@ function Renderer.PreviewRoof(
 		local base = grid:CellToWorldCenterCFrame(cellX, cellZ, totalOffset)
 		local aligned = alignToSurface(base, surface)
 		local yaw = CFrame.Angles(0, YawFromFacing(facing :: any), 0)
-		model:PivotTo(aligned * yaw)
+		applySmoothPivot(model, aligned * yaw)
 	else
 		local center = grid:FootprintCenterCFrame(cellX, cellZ, width, depth, facing)
 		center = center * CFrame.new(0, resolvedLevelHeight, 0)
 		local aligned = alignToSurface(center, surface)
 		local yaw = CFrame.Angles(0, YawFromFacing(facing :: any), 0)
 		local liftedPosition = aligned.Position + surface.CFrame.UpVector * roofLift
-		model:PivotTo(CFrame.new(liftedPosition) * GetRotationOnly(aligned) * yaw)
+		applySmoothPivot(model, CFrame.new(liftedPosition) * GetRotationOnly(aligned) * yaw)
 	end
 end
 
@@ -259,7 +371,7 @@ function Renderer.PreviewCellObject(
 	local orientation = baseRotation * yaw * pivotRotation
 	local liftedPosition = center.Position + surface.CFrame.UpVector * lift
 
-	model:PivotTo(CFrame.new(liftedPosition) * orientation)
+	applySmoothPivot(model, CFrame.new(liftedPosition) * orientation)
 end
 
 function Renderer.PreviewWallMounted(
@@ -272,7 +384,7 @@ function Renderer.PreviewWallMounted(
 	local forward = (-wallNormal).Unit
 	local safeUp = if upVector.Magnitude > 1e-3 then upVector.Unit else Vector3.new(0, 1, 0)
 	local previewCFrame = CFrame.lookAt(worldPosition, worldPosition + forward, safeUp)
-	model:PivotTo(previewCFrame * pivotRotation)
+	applySmoothPivot(model, previewCFrame * pivotRotation)
 end
 
 function Renderer.PreviewSurfaceMount(
@@ -284,7 +396,27 @@ function Renderer.PreviewSurfaceMount(
 )
 	local parentPivot = parentModel:GetPivot()
 	local offset = CFrame.new(localPosition) * CFrame.Angles(0, rotationY, 0)
-	model:PivotTo(parentPivot * offset * pivotRotation)
+	applySmoothPivot(model, parentPivot * offset * pivotRotation)
+end
+
+function Renderer.PreviewCeilingMounted(
+	model: Model,
+	worldPosition: Vector3,
+	ceilingNormal: Vector3,
+	upVector: Vector3,
+	rotationY: number,
+	pivotRotation: CFrame
+)
+	local resolvedNormal = ceilingNormal
+	if resolvedNormal.Magnitude < 1e-3 then
+		resolvedNormal = Vector3.new(0, -1, 0)
+	else
+		resolvedNormal = resolvedNormal.Unit
+	end
+	local right, attachmentUp, forward = GetCeilingAttachmentAxes(resolvedNormal, upVector)
+	local baseCFrame = CFrame.fromMatrix(worldPosition, right, attachmentUp, -forward)
+	local aroundAxis = CFrame.fromAxisAngle(resolvedNormal, rotationY)
+	applySmoothPivot(model, baseCFrame * aroundAxis * pivotRotation)
 end
 
 local WINDOW_PREVIEW_SEGMENT_NAME = "_PreviewWindowSegment"

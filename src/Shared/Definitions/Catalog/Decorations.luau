@@ -22,6 +22,29 @@ local Decorations = {
 				"Only sips a tiny bit of power.",
 			},
 		},
+		PendantLight = {
+			Name = "Pendant Light",
+			PlacementType = "Ceiling",
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 110,
+			Description = "Suspended ceiling fixture with a matte shade that pools light right where you need it.",
+			Tags = { "Lighting", "Ceiling" },
+			Rules = { RequiresFloorUnderAllCells = true },
+			CeilingMountConfig = {
+				MinDropStuds = 2,
+				MaxDropStuds = 8,
+				DefaultDropStuds = 2,
+				RotationStepDegrees = 15,
+			},
+			ModelPath = { "Decorations", "PendantLight" },
+			AssetId = 91401639326401,
+			EffectSummary = {
+				"Drops a warm spotlight over dining tables or kitchen islands.",
+				"Installs on any unlocked level thanks to the new ceiling placement mode.",
+			},
+		},
 	},
 	Wall = {},
 	Floor = {
@@ -34,6 +57,10 @@ local Decorations = {
 			Cost = 150,
 			Description = "Cozy round rug with a patchwork design in warm, homey colors.",
 			Tags = { "Basic", "Rug" },
+			Rules = {
+				AllowStacking = true,
+				RequiresFloorUnderAllCells = true,
+			},
 			ModelPath = { "Decorations", "CottageRoundRug" },
 			AssetId = 89844549603607,
 			EffectSummary = {
@@ -92,6 +119,23 @@ local Decorations = {
 			EffectSummary = {
 				"Brings a refreshing green vibe indoors.",
 				"Easy to care for and maintain.",
+			},
+		},
+
+		RaisedGardenBed = {
+			Name = "Raised Garden Bed",
+			PlacementType = "CellObject",
+			WidthCells = 3,
+			DepthCells = 2,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 200,
+			Description = "Wooden raised garden bed filled with a variety of vibrant flowers and greenery.",
+			Tags = { "Nature", "Garden" },
+			ModelPath = { "Decorations", "RaisedGardenBed" },
+			AssetId = 130425632647827, -- Placeholder AssetId
+			EffectSummary = {
+				"Enhances outdoor spaces with colorful blooms.",
+				"Perfect for gardening enthusiasts.",
 			},
 		},
 	},

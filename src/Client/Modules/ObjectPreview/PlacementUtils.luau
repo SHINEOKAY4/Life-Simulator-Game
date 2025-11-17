@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
 
 type Facing = string
 
@@ -13,6 +14,7 @@ export type MoveOriginInfo = {
 	CellZ: number,
 	Facing: Facing,
 	PlacementType: string,
+	PlacementKeyType: string?,
 	WidthCells: number?,
 	DepthCells: number?,
 	Level: number?,
@@ -84,7 +86,7 @@ end
 
 function PlacementUtils.PreviewKindFromItem(
 	itemId: string
-): "CellObject" | "Floor" | "Wall" | "Roof" | "WallMounted" | "SurfaceMounted"
+): "CellObject" | "Floor" | "Wall" | "Roof" | "WallMounted" | "SurfaceMounted" | "Ceiling"
 	local item = ItemFinder.FindItemById(itemId)
 	local itemType = item and item.PlacementType or "CellObject"
 
@@ -98,6 +100,8 @@ function PlacementUtils.PreviewKindFromItem(
 		return "WallMounted"
 	elseif itemType == "SurfaceMounted" then
 		return "SurfaceMounted"
+	elseif itemType == "Ceiling" then
+		return "Ceiling"
 	end
 
 	return "CellObject"
@@ -218,7 +222,7 @@ end
 
 function PlacementUtils.IsCellOccupiedForPreview(
 	grid: any,
-	previewKind: "CellObject" | "Floor" | "Roof" | "WallMounted" | "SurfaceMounted",
+	previewKind: "CellObject" | "Floor" | "Roof" | "WallMounted" | "SurfaceMounted" | "Ceiling",
 	cellX: number,
 	cellZ: number,
 	baseWidthCells: number,
@@ -226,7 +230,8 @@ function PlacementUtils.IsCellOccupiedForPreview(
 	facing: Facing,
 	placed: any,
 	ignorePlacement: MoveOriginInfo?,
-	activeLevel: number?
+	activeLevel: number?,
+	previewAllowsStacking: boolean?
 ): boolean
 	if not placed or next(placed) == nil then
 		return false
@@ -234,9 +239,10 @@ function PlacementUtils.IsCellOccupiedForPreview(
 
 	local footprintFacing = if previewKind == "Floor" then "North" else facing
 	local myCells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, footprintFacing)
+	local previewIsOverlay = previewAllowsStacking == true
 
 	for _, placedEntry in pairs(placed) do
-		local _, placementType, width, depth, facingValue, entryLevel =
+		local itemSpec, placementType, width, depth, facingValue, entryLevel =
 			PlacementUtils.ResolvePlacementEntry(placedEntry)
 		if activeLevel ~= nil and entryLevel ~= activeLevel then
 			continue
@@ -253,14 +259,15 @@ function PlacementUtils.IsCellOccupiedForPreview(
 				end
 			end
 		elseif previewKind == "CellObject" then
-			if
-				placementType == "CellObject"
-				and not shouldSkipEntry(placedEntry, placementType, facingValue, ignorePlacement)
-			then
-				local otherCells =
-					grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, facingValue)
-				if anyCellOverlap(myCells, otherCells) then
-					return true
+			if placementType == "CellObject" then
+				local occupantIsOverlay = PlacementBehavior.allowsStacking(itemSpec)
+				local sameLayer = previewIsOverlay == occupantIsOverlay
+				if sameLayer and not shouldSkipEntry(placedEntry, placementType, facingValue, ignorePlacement) then
+					local otherCells =
+						grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, facingValue)
+					if anyCellOverlap(myCells, otherCells) then
+						return true
+					end
 				end
 			end
 		elseif previewKind == "WallMounted" then

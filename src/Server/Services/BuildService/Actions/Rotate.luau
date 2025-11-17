@@ -34,6 +34,7 @@ local function Rotate(player: Player, payload: Payload): (boolean, string)
 	end
 
 	local placementType = spec.PlacementType or spec.Type or "CellObject"
+	local placementKeyType = Helpers.getPlacementKeyLabel(spec)
 	if placementType == "Wall" and spec.RequiresExistingWall then
 		return false, "Doors cannot be rotated"
 	end
@@ -59,7 +60,7 @@ local function Rotate(player: Player, payload: Payload): (boolean, string)
 	local currentFacing = currentFacingValue :: Facing
 	local level = if typeof(parsedLevel) == "number" then parsedLevel else state.DefaultLevel
 
-	if keyPlacementType and keyPlacementType ~= placementType then
+	if keyPlacementType and keyPlacementType ~= placementKeyType then
 		return false, "Placement type mismatch"
 	end
 
@@ -103,8 +104,8 @@ local function Rotate(player: Player, payload: Payload): (boolean, string)
 	end
 
 	if spec.StationType then
-		local fromKeyNormalized = state:PlacementKeyForType(cellX, cellZ, currentFacing, placementType, level)
-		local toKey = state:PlacementKeyForType(cellX, cellZ, targetFacing, placementType, level)
+		local fromKeyNormalized = state:PlacementKeyForType(cellX, cellZ, currentFacing, placementKeyType, level)
+		local toKey = state:PlacementKeyForType(cellX, cellZ, targetFacing, placementKeyType, level)
 		if fromKeyNormalized ~= toKey then
 			PlotService.RemoveStationForPlayer(player, spec.StationType, fromKeyNormalized)
 			PlotService.AddStationForPlayer(player, spec.StationType, toKey, resolvedId)
@@ -118,8 +119,10 @@ local function Rotate(player: Player, payload: Payload): (boolean, string)
 		sizeCells = metadata,
 	})
 
-	Helpers.sendPlacementDelta(player, "Removed", resolvedId, cellX, cellZ, currentFacing, metadata, level)
-	Helpers.sendPlacementDelta(player, "Placed", resolvedId, cellX, cellZ, targetFacing, metadata, level)
+	local removedKey = payload.FromKey
+	local placedKey = state:PlacementKeyForType(cellX, cellZ, targetFacing, placementKeyType, level)
+	Helpers.sendPlacementDelta(player, "Removed", resolvedId, cellX, cellZ, currentFacing, metadata, level, removedKey)
+	Helpers.sendPlacementDelta(player, "Placed", resolvedId, cellX, cellZ, targetFacing, metadata, level, placedKey)
 
 	return true, "Rotated"
 end

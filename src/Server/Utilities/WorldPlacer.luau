@@ -8,6 +8,7 @@ local PlotState = require(ServerScriptService.Server.Classes.PlotState)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementHelpers = require(ReplicatedStorage.Shared.Utilities.PlacementHelpers)
+local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
 local DoorWallFill = require(ReplicatedStorage.Shared.Utilities.DoorWallFill)
 local WindowWallFill = require(ReplicatedStorage.Shared.Utilities.WindowWallFill)
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
@@ -138,6 +139,39 @@ local function resolveWallMountMetadata(metadata: { [string]: any }?): { [string
 	}
 
 	return resolved
+end
+
+local function resolveCeilingMountMetadata(metadata: { [string]: any }?): { [string]: any }?
+	if typeof(metadata) ~= "table" then
+		return nil
+	end
+
+	local ceilingData = metadata.CeilingMountData
+	if typeof(ceilingData) ~= "table" then
+		return nil
+	end
+
+	return {
+		ReferenceCellX = ceilingData.ReferenceCellX,
+		ReferenceCellZ = ceilingData.ReferenceCellZ,
+		Facing = ceilingData.Facing,
+		RoomLevel = ceilingData.RoomLevel,
+		AnchorLevel = ceilingData.AnchorLevel,
+		DropStuds = ceilingData.DropStuds,
+		RotationY = ceilingData.RotationY,
+		WorldPosition = coerceVector3(ceilingData.WorldPosition, Vector3.new()),
+		CeilingNormal = coerceVector3(ceilingData.CeilingNormal, Vector3.new(0, -1, 0)),
+	}
+end
+
+local function sanitizeRotationY(value: any): number
+	if typeof(value) ~= "number" then
+		return 0
+	end
+	if value ~= value then
+		return 0
+	end
+	return value
 end
 
 local function readSurfaceId(metadata: { [string]: any }?): string?
@@ -364,6 +398,7 @@ function WorldPlacer.Spawn(
 	local levelHeight = resolvedLevel * floorHeight
 
 	local placementType = spec.PlacementType or "CellObject"
+	local placementKeyType = PlacementBehavior.getPlacementKeyLabel(spec)
 	local catalogWidth = spec.WidthCells or spec.Width or 1
 	local catalogDepth = spec.DepthCells or spec.Depth or 1
 	local footprintWidth = catalogWidth
@@ -661,6 +696,29 @@ function WorldPlacer.Spawn(
 		model:SetAttribute("WallMountOffsetFromWall", resolved.OffsetFromWall or 0)
 		model:SetAttribute("WallMountWorldPosition", resolved.WorldPosition)
 		model:SetAttribute("WallMountWallNormal", wallNormal.Unit)
+	elseif placementType == "Ceiling" then
+		local resolved = resolveCeilingMountMetadata(metadata)
+		if not resolved then
+			return
+		end
+		local ceilingNormal = resolved.CeilingNormal
+		if ceilingNormal.Magnitude < 1e-3 then
+			ceilingNormal = Vector3.new(0, -1, 0)
+		else
+			ceilingNormal = ceilingNormal.Unit
+		end
+		local upVector = grid and grid.Plot and grid.Plot.CFrame.UpVector or Vector3.yAxis
+		local pivotRotation = GetPivotRotation(model)
+		local right, attachmentUp, forward = PlacementHelpers.GetCeilingAttachmentAxes(ceilingNormal, upVector)
+		local lookCFrame = CFrame.fromMatrix(resolved.WorldPosition, right, attachmentUp, -forward)
+		local rotationY = sanitizeRotationY(resolved.RotationY)
+		local aroundAxis = CFrame.fromAxisAngle(ceilingNormal, rotationY)
+		target = lookCFrame * aroundAxis * pivotRotation
+		model:SetAttribute("CeilingMountReferenceCellX", resolved.ReferenceCellX)
+		model:SetAttribute("CeilingMountReferenceCellZ", resolved.ReferenceCellZ)
+		model:SetAttribute("CeilingMountDropStuds", resolved.DropStuds)
+		model:SetAttribute("CeilingMountRotationY", rotationY)
+		model:SetAttribute("CeilingMountAnchorLevel", resolved.AnchorLevel)
 	end
 
 	if target then
@@ -680,10 +738,12 @@ function WorldPlacer.Spawn(
 			part.CanQuery = true
 		end
 	end
-	local fromKey = PlotState:PlacementKeyForType(cellX, cellZ, facing, placementType, resolvedLevel)
+	local fromKey = PlotState:PlacementKeyForType(cellX, cellZ, facing, placementKeyType, resolvedLevel)
 	local container = getPlotContainer(player)
 
 	model.Name = fromKey
+	model:SetAttribute("PlacementKey", fromKey)
+	model:SetAttribute("PlacementKeyType", placementKeyType)
 	model.Parent = container
 end
 
@@ -720,16 +780,6 @@ function WorldPlacer.Despawn(
 			break
 		end
 	end
-end
-
-local function sanitizeRotationY(value: any): number
-	if typeof(value) ~= "number" then
-		return 0
-	end
-	if value ~= value then
-		return 0
-	end
-	return value
 end
 
 function WorldPlacer.SpawnSurfaceMount(

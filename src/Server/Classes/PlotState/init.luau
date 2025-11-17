@@ -13,6 +13,7 @@ local Attachments = require(script.Attachments)
 
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 
 local function cloneMetadata(value: any): any
@@ -654,8 +655,18 @@ function PlotState.new(grid: any, chunkSizeInCells: number, save: SaveData): Plo
 			local normalizedLevel = normalizeLevel(savedObject.yLevel)
 			savedObject.yLevel = normalizedLevel
 			local _, _, _, typed = PlacementKey.ParseWithType(key)
-			local placementType = typed or (spec and (spec.PlacementType or spec.Type)) or "CellObject"
-			local normalizedKey = PlacementKey.ForPlacementType(cellX, cellZ, facing, placementType, normalizedLevel)
+			local defaultPlacementType = (spec and (spec.PlacementType or spec.Type)) or "CellObject"
+			local placementType = typed or defaultPlacementType
+			local placementKeyType = placementType
+			if spec then
+				local preferredKeyType = PlacementBehavior.getPlacementKeyLabel(spec)
+				if placementType == defaultPlacementType and preferredKeyType ~= placementType then
+					placementKeyType = preferredKeyType
+				else
+					placementKeyType = placementType
+				end
+			end
+			local normalizedKey = PlacementKey.ForPlacementType(cellX, cellZ, facing, placementKeyType, normalizedLevel)
 			normalizedPlaced[normalizedKey] = savedObject
 			if key ~= normalizedKey then
 				keyRemap[key] = normalizedKey
@@ -741,9 +752,10 @@ function PlotState:HydrateFromSave()
 			for j = 1, #indices do
 				levelRoofs[indices[j]] = true
 			end
-		elseif placementType == "WallMounted" then
-			-- Wall-mounted attachments do not reserve grid footprint.
-			resolvedWidth = resolvedWidth
+		elseif placementType == "WallMounted" or placementType == "Ceiling" then
+			-- Wall and ceiling attachments do not reserve grid occupancy during hydration.
+			do
+			end
 		else
 			local cellIndices =
 				self.Grid:FootprintCells(savedObject.cellX, savedObject.cellZ, resolvedWidth, resolvedDepth, facing)

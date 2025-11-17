@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 local Helpers = require(ServerScriptService.Server.Services.BuildService.Helpers)
 local PlotStateModule = require(ServerScriptService.Server.Classes.PlotState)
 
@@ -29,6 +30,18 @@ type Payload = {
 	WallMountNormalX: number?,
 	WallMountNormalY: number?,
 	WallMountNormalZ: number?,
+	CeilingMountEnabled: boolean?,
+	CeilingMountCellX: number?,
+	CeilingMountCellZ: number?,
+	CeilingMountLevel: number?,
+	CeilingMountDropStuds: number?,
+	CeilingMountRotationY: number?,
+	CeilingMountPosX: number?,
+	CeilingMountPosY: number?,
+	CeilingMountPosZ: number?,
+	CeilingMountNormalX: number?,
+	CeilingMountNormalY: number?,
+	CeilingMountNormalZ: number?,
 	WindowEnabled: boolean?,
 	WindowHeightOffset: number?,
 }
@@ -86,6 +99,75 @@ local function computeWallMountMetadata(
 				Z = worldPosition.Z,
 			},
 			WallNormal = {
+				X = resolvedNormal.X,
+				Y = resolvedNormal.Y,
+				Z = resolvedNormal.Z,
+			},
+		},
+	}
+end
+
+local function computeCeilingMountMetadata(
+	grid: any,
+	cellX: number,
+	cellZ: number,
+	facing: Facing,
+	level: number,
+	dropStuds: number,
+	rotationY: number,
+	referencedWorldPosition: Vector3?,
+	requestedNormal: Vector3?
+): { [string]: any }
+	local resolvedLevel = PlotStateModule.ResolveLevel(level)
+	local floorHeight = BuildConstants.FloorHeightStuds or 12
+	local anchorLevel = resolvedLevel + 1
+	local baseCFrame = grid:FootprintCenterCFrame(cellX, cellZ, 1, 1, "North")
+	local anchorCFrame = baseCFrame * CFrame.new(0, anchorLevel * floorHeight, 0)
+	local anchorPosition = anchorCFrame.Position
+	local plotUp = grid and grid.Plot and grid.Plot.CFrame.UpVector or Vector3.yAxis
+	local fallbackNormal = -plotUp.Unit
+	if fallbackNormal.Magnitude < 1e-3 then
+		fallbackNormal = Vector3.new(0, -1, 0)
+	else
+		fallbackNormal = fallbackNormal.Unit
+	end
+
+	local resolvedNormal = fallbackNormal
+	if requestedNormal and requestedNormal.Magnitude >= 1e-3 then
+		local unitCandidate = requestedNormal.Unit
+		local alignment = unitCandidate:Dot(fallbackNormal)
+		if alignment >= 0.1 then
+			resolvedNormal = unitCandidate
+		elseif (-unitCandidate):Dot(fallbackNormal) >= 0.1 then
+			resolvedNormal = (-unitCandidate).Unit
+		end
+	end
+
+	local supportHeight = anchorPosition.Y
+	if referencedWorldPosition then
+		local supportEstimate = referencedWorldPosition - resolvedNormal * dropStuds
+		local tolerance = math.max(floorHeight * 0.5, 0.5)
+		if math.abs(supportEstimate.Y - anchorPosition.Y) <= tolerance then
+			supportHeight = supportEstimate.Y
+		end
+	end
+	local supportPosition = Vector3.new(anchorPosition.X, supportHeight, anchorPosition.Z)
+	local worldPosition = supportPosition + resolvedNormal * dropStuds
+	return {
+		CeilingMountData = {
+			ReferenceCellX = cellX,
+			ReferenceCellZ = cellZ,
+			Facing = facing,
+			RoomLevel = resolvedLevel,
+			AnchorLevel = anchorLevel,
+			DropStuds = dropStuds,
+			RotationY = rotationY,
+			WorldPosition = {
+				X = worldPosition.X,
+				Y = worldPosition.Y,
+				Z = worldPosition.Z,
+			},
+			CeilingNormal = {
 				X = resolvedNormal.X,
 				Y = resolvedNormal.Y,
 				Z = resolvedNormal.Z,
@@ -328,9 +410,114 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		Helpers.sendPlacementDelta(player, "Placed", payload.ItemId, wallCellX, wallCellZ, wallFacing, metadata, level)
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
 		return true, "Wall attachment placed"
+	elseif placementType == "Ceiling" then
+		local ceilingEnabled = payload.CeilingMountEnabled == true
+		if not ceilingEnabled then
+			return false, "Ceiling mount target missing"
+		end
+
+		local ceilingCellXValue = payload.CeilingMountCellX
+		local ceilingCellZValue = payload.CeilingMountCellZ
+		if typeof(ceilingCellXValue) ~= "number" or typeof(ceilingCellZValue) ~= "number" then
+			return false, "Invalid ceiling coordinates"
+		end
+		local ceilingCellX = math.floor(ceilingCellXValue + 0.5)
+		local ceilingCellZ = math.floor(ceilingCellZValue + 0.5)
+
+		local ceilingLevelValue = payload.CeilingMountLevel
+		local ceilingLevel = if typeof(ceilingLevelValue) == "number"
+			then state:NormalizeLevel(ceilingLevelValue)
+			else level
+
+		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1)
+		if not canAfford then
+			return false, failureReason or "Not enough cash"
+		end
+
+		local canPlaceCeiling, ceilingFailure =
+			state:CanPlaceCeilingMounted(ceilingCellX, ceilingCellZ, facing, ceilingLevel)
+		if not canPlaceCeiling then
+			return false, ceilingFailure or "Cannot attach to ceiling"
+		end
+
+		local mountConfig = if typeof(itemData.CeilingMountConfig) == "table" then itemData.CeilingMountConfig else {}
+		local minDrop = typeof(mountConfig.MinDropStuds) == "number" and math.max(mountConfig.MinDropStuds, 0) or 0
+		local maxDrop = typeof(mountConfig.MaxDropStuds) == "number"
+				and math.max(mountConfig.MaxDropStuds, minDrop + 0.1)
+			or (minDrop + 6)
+		local defaultDrop = typeof(mountConfig.DefaultDropStuds) == "number" and mountConfig.DefaultDropStuds or minDrop
+		local requestedDrop = if typeof(payload.CeilingMountDropStuds) == "number"
+			then payload.CeilingMountDropStuds
+			else defaultDrop
+		local dropStuds = math.clamp(requestedDrop, minDrop, maxDrop)
+
+		local requestedRotation = if typeof(payload.CeilingMountRotationY) == "number"
+			then payload.CeilingMountRotationY
+			else 0
+		local rotationY = requestedRotation
+
+		local grid = state.Grid
+		if not grid then
+			return false, "Plot grid unavailable"
+		end
+
+		local requestedWorldPosition: Vector3? = nil
+		local posX = payload.CeilingMountPosX
+		local posY = payload.CeilingMountPosY
+		local posZ = payload.CeilingMountPosZ
+		if typeof(posX) == "number" and typeof(posY) == "number" and typeof(posZ) == "number" then
+			requestedWorldPosition = Vector3.new(posX, posY, posZ)
+		end
+		local requestedNormal: Vector3? = nil
+		local ceilNormalX = payload.CeilingMountNormalX
+		local ceilNormalY = payload.CeilingMountNormalY
+		local ceilNormalZ = payload.CeilingMountNormalZ
+		if typeof(ceilNormalX) == "number" and typeof(ceilNormalY) == "number" and typeof(ceilNormalZ) == "number" then
+			local candidateNormal = Vector3.new(ceilNormalX, ceilNormalY, ceilNormalZ)
+			if candidateNormal.Magnitude >= 1e-3 then
+				requestedNormal = candidateNormal
+			end
+		end
+
+		local metadata = computeCeilingMountMetadata(
+			grid,
+			ceilingCellX,
+			ceilingCellZ,
+			facing,
+			ceilingLevel,
+			dropStuds,
+			rotationY,
+			requestedWorldPosition,
+			requestedNormal
+		)
+
+		local placedCeiling, ceilingError =
+			state:PlaceCeilingMounted(payload.ItemId, ceilingCellX, ceilingCellZ, facing, metadata, ceilingLevel)
+		if not placedCeiling then
+			return false, ceilingError or "Failed to attach to ceiling"
+		end
+
+		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, ceilingCellX, ceilingCellZ, facing, ceilingLevel, {
+			metadata = metadata,
+		})
+
+		Helpers.sendPlacementDelta(
+			player,
+			"Placed",
+			payload.ItemId,
+			ceilingCellX,
+			ceilingCellZ,
+			facing,
+			metadata,
+			ceilingLevel
+		)
+		Helpers.deductPlacementCost(player, currencyState, totalCost)
+		return true, "Ceiling decor placed"
 	elseif itemData.PlacementType == "CellObject" then
 		local widthCells = itemData.WidthCells or itemData.Width or 1
 		local depthCells = itemData.DepthCells or itemData.Depth or 1
+		local placementKeyType = Helpers.getPlacementKeyLabel(itemData)
+		local allowStacking = Helpers.allowsStacking(itemData)
 
 		if itemData.Rules and itemData.Rules.RequiresFloorUnderAllCells then
 			if
@@ -345,20 +532,33 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			return false, failureReason or "Not enough cash"
 		end
 
-		local success = state:Place(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, facing, level)
+		local success, placementKey =
+			state:Place(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, facing, level, {
+				PlacementType = placementKeyType,
+				IgnoreOccupancy = allowStacking,
+			})
 
-		if not success then
+		if not success or not placementKey then
 			return false, "Failed to place cell object"
 		end
 
 		local stationType = if itemData.StationType then itemData.StationType else nil
 		if stationType then
-			local placementKey = state:PlacementKeyForType(payload.CellX, payload.CellZ, facing, placementType, level)
 			PlotService.AddStationForPlayer(player, stationType, placementKey, payload.ItemId)
 		end
 		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing, level)
 
-		Helpers.sendPlacementDelta(player, "Placed", payload.ItemId, payload.CellX, payload.CellZ, facing, nil, level)
+		Helpers.sendPlacementDelta(
+			player,
+			"Placed",
+			payload.ItemId,
+			payload.CellX,
+			payload.CellZ,
+			facing,
+			nil,
+			level,
+			placementKey
+		)
 
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
 		return true, "Cell object placed"

@@ -9,6 +9,7 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local GridModule = require(ReplicatedStorage.Shared.Utilities.Grid)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 
@@ -96,6 +97,7 @@ type LevelDerivedSnapshot = {
 	Rows: number,
 	FloorCellsList: { FloorCellDescriptor },
 	FloorCellsByIndex: { [number]: FloorCellDescriptor },
+	RoofCellsByIndex: { [number]: boolean },
 	WallSegments: { WallSegmentDescriptor },
 	CardinalWallSegments: { WallSegmentDescriptor },
 	BlockedCardinalEdges: { [string]: WallSegmentDescriptor },
@@ -188,6 +190,17 @@ end
 
 local function computeCellIndex(columns: number, cellX: number, cellZ: number): number
 	return (cellZ - 1) * columns + cellX
+end
+
+local function resolveSnapshotCellIndex(snapshot: LevelDerivedSnapshot, cellX: number, cellZ: number): number?
+	local columns = snapshot.Columns
+	local rows = snapshot.Rows
+	if columns <= 0 or rows <= 0 then
+		return nil
+	end
+	local clampedX = math.clamp(math.floor(cellX + 0.5), 1, columns)
+	local clampedZ = math.clamp(math.floor(cellZ + 0.5), 1, rows)
+	return computeCellIndex(columns, clampedX, clampedZ)
 end
 
 local function makeEdgeKey(ax: number, az: number, bx: number, bz: number): string
@@ -361,6 +374,7 @@ local function buildLevelDerivedSnapshot(level: number): LevelDerivedSnapshot?
 
 	local floorCellsList: { FloorCellDescriptor } = {}
 	local floorCellsByIndex: { [number]: FloorCellDescriptor } = {}
+	local roofCellsByIndex: { [number]: boolean } = {}
 	local cardinalWalls: { WallSegmentDescriptor } = {}
 	local diagonalWalls: { WallSegmentDescriptor } = {}
 	local blockedEdges: { [string]: WallSegmentDescriptor } = {}
@@ -465,6 +479,14 @@ local function buildLevelDerivedSnapshot(level: number): LevelDerivedSnapshot?
 					maxCellX,
 					maxCellZ
 				)
+				if placementType == "Roof" then
+					for cellZ = minCellZ, maxCellZ do
+						for cellX = minCellX, maxCellX do
+							local index = computeCellIndex(columns, cellX, cellZ)
+							roofCellsByIndex[index] = true
+						end
+					end
+				end
 			end
 		elseif placementType == "Wall" then
 			local facing = tostring(record.facing or "North")
@@ -552,6 +574,7 @@ local function buildLevelDerivedSnapshot(level: number): LevelDerivedSnapshot?
 		Rows = rows,
 		FloorCellsList = floorCellsList,
 		FloorCellsByIndex = floorCellsByIndex,
+		RoofCellsByIndex = roofCellsByIndex,
 		WallSegments = wallSegments,
 		CardinalWallSegments = cardinalWalls,
 		BlockedCardinalEdges = blockedEdges,
@@ -834,6 +857,7 @@ function PlotStateStore.Init()
 					levelValue = defaultLevel
 				end
 				local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
+				local placementKeyType = PlacementBehavior.getPlacementKeyLabel(spec)
 				local itemSnapshot = {
 					id = entry.id,
 					cellX = entry.cellX,
@@ -844,12 +868,13 @@ function PlotStateStore.Init()
 					Metadata = metadata,
 					Level = levelValue,
 					PlacementType = placementType,
+					PlacementKeyType = placementKeyType,
 				}
 				local key = PlacementKey.ForPlacementType(
 					itemSnapshot.cellX,
 					itemSnapshot.cellZ,
 					facing,
-					placementType,
+					placementKeyType,
 					levelValue
 				)
 				placedMap[key] = itemSnapshot
@@ -917,6 +942,7 @@ function PlotStateStore.Init()
 		local facing = delta.Item.Facing or "North"
 		local spec = itemId and ItemFinder.FindItemById(itemId) or nil
 		local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
+		local placementKeyType = PlacementBehavior.getPlacementKeyLabel(spec)
 		local metadata = normalizeMetadata(delta.Item.Metadata)
 		local widthCells = delta.Item.WidthCells or delta.Item.widthCells
 		local depthCells = delta.Item.DepthCells or delta.Item.depthCells
@@ -937,7 +963,16 @@ function PlotStateStore.Init()
 		else
 			levelValue = ActiveLevel
 		end
-		local key = PlacementKey.ForPlacementType(delta.Item.CellX, delta.Item.CellZ, facing, placementType, levelValue)
+		local keyValue = delta.Item.PlacementKey or delta.Item.placementKey
+		local key = if typeof(keyValue) == "string" and keyValue ~= ""
+			then keyValue
+			else PlacementKey.ForPlacementType(
+				delta.Item.CellX,
+				delta.Item.CellZ,
+				facing,
+				placementKeyType,
+				levelValue
+			)
 		if delta.Action == "Removed" then
 			StateSnapshot.PlacedItems[key] = nil
 			invalidateDerivedLevelSnapshots()
@@ -958,6 +993,7 @@ function PlotStateStore.Init()
 			Metadata = metadata,
 			Level = levelValue,
 			PlacementType = placementType,
+			PlacementKeyType = placementKeyType,
 		}
 		invalidateDerivedLevelSnapshots()
 	end)
@@ -1384,6 +1420,70 @@ function PlotStateStore.GetPlacementRoomCoverage(key: string): PlacementRoomCove
 		RoomIds = deepClone(coverage.RoomIds),
 		HasOutdoorCells = coverage.HasOutdoorCells,
 	}
+end
+
+function PlotStateStore.HasFloorAtCell(level: number?, cellX: number, cellZ: number): boolean
+	local resolvedLevel = sanitizeLevelInput(level)
+	local snapshot = getLevelDerivedSnapshot(resolvedLevel)
+	if not snapshot then
+		return false
+	end
+	local index = resolveSnapshotCellIndex(snapshot, cellX, cellZ)
+	if not index then
+		return false
+	end
+	return snapshot.FloorCellsByIndex[index] ~= nil
+end
+
+function PlotStateStore.HasRoofCoverage(level: number?, cellX: number, cellZ: number): boolean
+	local resolvedLevel = sanitizeLevelInput(level)
+	local snapshot = getLevelDerivedSnapshot(resolvedLevel)
+	if not snapshot then
+		return false
+	end
+	local index = resolveSnapshotCellIndex(snapshot, cellX, cellZ)
+	if not index then
+		return false
+	end
+	return snapshot.RoofCellsByIndex[index] == true
+end
+
+function PlotStateStore.HasCeilingSupport(level: number?, cellX: number, cellZ: number): boolean
+	local resolvedLevel = sanitizeLevelInput(level)
+	if PlotStateStore.HasRoofCoverage(resolvedLevel, cellX, cellZ) then
+		return true
+	end
+	local aboveLevel = resolvedLevel + 1
+	if aboveLevel > PlotStateStore.GetMaxLevel() then
+		return false
+	end
+	return PlotStateStore.HasFloorAtCell(aboveLevel, cellX, cellZ)
+end
+
+function PlotStateStore.IsCellUnlocked(cellX: number, cellZ: number): boolean
+	if not PlotStateStore.IsReady() then
+		return false
+	end
+	local chunkInfo = StateSnapshot.ChunkInfo
+	if not chunkInfo then
+		return false
+	end
+	local chunkSize = tonumber(chunkInfo.ChunkSizeInCells)
+	local chunkColumns = tonumber(chunkInfo.ChunkColumns)
+	local chunkRows = tonumber(chunkInfo.ChunkRows)
+	if not chunkSize or chunkSize <= 0 or not chunkColumns or not chunkRows then
+		return false
+	end
+	local maxCellX = chunkColumns * chunkSize
+	local maxCellZ = chunkRows * chunkSize
+	local resolvedX = math.clamp(math.floor(cellX + 0.5), 1, maxCellX)
+	local resolvedZ = math.clamp(math.floor(cellZ + 0.5), 1, maxCellZ)
+	local chunkX = math.floor((resolvedX - 1) / chunkSize) + 1
+	local chunkZ = math.floor((resolvedZ - 1) / chunkSize) + 1
+	if chunkX < 1 or chunkX > chunkColumns or chunkZ < 1 or chunkZ > chunkRows then
+		return false
+	end
+	return PlotStateStore.IsChunkUnlocked(chunkX, chunkZ)
 end
 
 return PlotStateStore

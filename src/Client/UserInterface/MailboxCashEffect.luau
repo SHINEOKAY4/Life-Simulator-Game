@@ -249,7 +249,6 @@ function MailboxCashEffect.Init()
 	refreshMailboxReference()
 
 	LocalPlayer:GetAttributeChangedSignal("OwnedPlotIndex"):Connect(refreshMailboxReference)
-	PayrollPackets.PayrollUpdate.OnClientEvent:Connect(onPayrollUpdate)
 end
 
 return MailboxCashEffect

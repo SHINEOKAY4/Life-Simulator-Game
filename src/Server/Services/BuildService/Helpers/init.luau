@@ -9,6 +9,7 @@ local PlotStateModule = require(ServerScriptService.Server.Classes.PlotState)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
 local SurfacePalette = require(ReplicatedStorage.Shared.Configurations.Build.SurfacePalette)
 
 type Facing = PlotStateModule.Facing
@@ -98,7 +99,8 @@ function Helpers.sendPlacementDelta(
 	cellZ: number,
 	facing: Facing,
 	metadata: Metadata?,
-	level: number?
+	level: number?,
+	placementKey: string?
 )
 	local width, depth = Helpers.resolveFootprintDimensions(itemId, metadata)
 	local metadataPayload = if metadata ~= nil then cloneMetadata(metadata) else nil
@@ -113,12 +115,21 @@ function Helpers.sendPlacementDelta(
 			DepthCells = depth,
 			Metadata = metadataPayload,
 			Level = level,
+			PlacementKey = placementKey,
 		},
 	})
 end
 
 function Helpers.resolveSurfaceId(itemSpec: { [string]: any }?, requestedSurfaceId: string?): string?
 	return SurfacePalette.ResolveForPlacement(itemSpec, sanitizeSurfaceId(requestedSurfaceId))
+end
+
+function Helpers.getPlacementKeyLabel(itemSpec: { [string]: any }?): string
+	return PlacementBehavior.getPlacementKeyLabel(itemSpec)
+end
+
+function Helpers.allowsStacking(itemSpec: { [string]: any }?): boolean
+	return PlacementBehavior.allowsStacking(itemSpec)
 end
 
 function Helpers.sendSurfaceMountDelta(

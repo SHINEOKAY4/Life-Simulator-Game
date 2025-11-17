@@ -117,11 +117,11 @@ local Build = {
 			ModelPath = { "Walls", "StandardWall" },
 			AssetId = 101105961277316,
 			WallDimensions = {
-				NominalWidth = 4,
+				NominalWidth = 0,
 				NominalHeight = 12,
-				NominalThickness = 0.5,
+				NominalThickness = 0,
 				DiagonalLengthMultiplier = math.sqrt(2),
-				MinFrameThickness = 0.2,
+				MinFrameThickness = 0,
 			},
 			EffectSummary = {
 				"Closes off a side of the room for a finished look.",

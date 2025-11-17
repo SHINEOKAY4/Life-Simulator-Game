@@ -9,8 +9,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
 local PlacementHelpers = require(ReplicatedStorage.Shared.Utilities.PlacementHelpers)
 local PlotStateStore = require(script.Parent.Parent:WaitForChild("ClientStores"):WaitForChild("PlotStateStore"))
+local CutawayViewController = require(script.Parent:WaitForChild("CutawayViewController"))
 
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 
@@ -23,73 +25,28 @@ local WallConstraints = require(script:WaitForChild("WallConstraints"))
 local Renderer = require(script:WaitForChild("Renderer"))
 local PlacementCostDisplay = require(script.Parent:WaitForChild("PlacementCostDisplay"))
 local GetYawFromFacing = PlacementHelpers.GetYawFromFacing
+local Types = require(script:WaitForChild("Types"))
+local PoseCache = require(script:WaitForChild("PoseCache"))
+local CeilingPreviewState = require(script:WaitForChild("CeilingPreviewState"))
+local WindowPreviewController = require(script:WaitForChild("WindowPreviewController"))
 
-type PreviewFacing = string
-type PreviewKind = "CellObject" | "Floor" | "Wall" | "Roof" | "WallMounted" | "SurfaceMounted"
+type PreviewFacing = Types.PreviewFacing
+type PreviewKind = Types.PreviewKind
+type PreviewPose = Types.PreviewPose
+type WallMountPose = Types.WallMountPose
+type SurfaceMountPose = Types.SurfaceMountPose
+type CeilingMountPose = Types.CeilingMountPose
+type WindowCutoutPose = Types.WindowCutoutPose
+type PoseCacheComparable = Types.PoseCacheComparable
+type PoseCacheSnapshot = Types.PoseCacheSnapshot
+type WindowCutoutConfig = Renderer.WindowCutoutConfig
 type MoveOriginInfo = PlacementUtils.MoveOriginInfo
 export type Facing = PreviewFacing
-export type PreviewPose = {
-	ItemId: string,
-	CellX: number?,
-	CellZ: number?,
-	Facing: PreviewFacing,
-	Kind: PreviewKind,
-	WallMount: WallMountPose?,
-	WindowCutout: WindowCutoutPose?,
-	SurfaceMount: SurfaceMountPose?,
-	Level: number?,
-	LevelHeight: number?,
-}
 export type FloorSelectionInfo = FloorPreview.FloorSelectionInfo
 type FloorUpdateResult = FloorPreview.FloorUpdateResult
 export type RoofSelectionInfo = RoofPreview.RoofSelectionInfo
 type RoofUpdateResult = RoofPreview.RoofUpdateResult
 export type WallStripSelectionInfo = WallStripPreview.WallStripSelectionInfo
-
-export type WallMountPose = {
-	WorldPosition: Vector3,
-	WallNormal: Vector3,
-	WallCellX: number,
-	WallCellZ: number,
-	AttachedFacing: PreviewFacing,
-	HeightOffset: number,
-	ReferenceCellX: number,
-	ReferenceCellZ: number,
-}
-
-export type SurfaceMountPose = {
-	ParentKey: string,
-	LocalPosition: Vector3,
-	LocalRotationY: number,
-	WorldPosition: Vector3,
-	ParentCellX: number?,
-	ParentCellZ: number?,
-	ParentFacing: PreviewFacing?,
-	CanPlace: boolean,
-}
-
-export type WindowCutoutPose = {
-	WorldPosition: Vector3,
-	WallNormal: Vector3,
-	WallUp: Vector3,
-	WallCellX: number,
-	WallCellZ: number,
-	AttachedFacing: PreviewFacing,
-	WallCenter: Vector3,
-	HeightOffset: number,
-	CutoutWidth: number,
-	CutoutHeight: number,
-	WallHeight: number,
-	WallWidth: number,
-	WallThickness: number,
-	LocalCenterY: number,
-	FrameThickness: number,
-	OffsetFromWall: number,
-	EffectiveWallWidth: number,
-}
-
-type WindowPreviewVisual = Renderer.WindowPreviewVisual
-type WindowCutoutConfig = Renderer.WindowCutoutConfig
 
 type WallMountedPreviewResult = {
 	CanPlace: boolean,
@@ -117,6 +74,8 @@ local objectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnab
 
 local storedPromptServiceEnabled: boolean? = nil
 local proximityPromptsSuppressed = false
+local CeilingCutawaySuppressed = false
+local CEILING_CUTAWAY_SOURCE = "CeilingPreview"
 
 -- Temporarily disable proximity prompts so preview input keys do not trigger world interactions.
 
@@ -142,6 +101,32 @@ local function restoreProximityPrompts()
 	storedPromptServiceEnabled = nil
 end
 
+local function disableCutawayForCeiling()
+	if CeilingCutawaySuppressed then
+		return
+	end
+	CeilingCutawaySuppressed = true
+	CutawayViewController.Request(CEILING_CUTAWAY_SOURCE, {
+		Priority = 64,
+		TargetLevel = PlotStateStore.GetMaxLevel(),
+		HidePlacementTypes = {
+			Wall = false,
+			Roof = false,
+			Ceiling = false,
+			Floor = false,
+			CellObject = false,
+		},
+	})
+end
+
+local function restoreCutawayAfterCeiling()
+	if not CeilingCutawaySuppressed then
+		return
+	end
+	CeilingCutawaySuppressed = false
+	CutawayViewController.Release(CEILING_CUTAWAY_SOURCE)
+end
+
 local Camera = workspace.CurrentCamera
 
 local ObjectPreview = {}
@@ -152,14 +137,7 @@ local CurrentItemId: string? = nil
 local CurrentItemSpec: any? = nil
 local CurrentKind: PreviewKind = "CellObject"
 local CurrentFacing: PreviewFacing = "North"
-local LastCellX: number? = nil
-local LastCellZ: number? = nil
-local LastFacing: PreviewFacing? = nil
-local LastWallPosition: Vector3? = nil
-local LastSurfaceMountParentKey: string? = nil
-local LastSurfaceMountLocalPosition: Vector3? = nil
 local CurrentPivotRotation: CFrame = CFrame.identity
-local LastWindowHeightOffset: number? = nil
 
 local LastLevel: number? = nil
 local LastLevelHeight: number? = nil
@@ -175,61 +153,7 @@ local RoofPlacementHandler: ((RoofSelectionInfo) -> ())? = nil
 local LastPrimaryMouseDown = false
 local CurrentWallMountPose: WallMountPose? = nil
 local CurrentSurfaceMountPose: SurfaceMountPose? = nil
-local CurrentWindowCutoutPose: WindowCutoutPose? = nil
-local ActiveWindowPreview: WindowPreviewVisual? = nil
-local WindowPreviewVisible = true
-local HIDDEN_PREVIEW_CFRAME = CFrame.new(0, 1e6, 0)
-
-local function specIsWindowVariant(spec: any?): boolean
-	if typeof(spec) ~= "table" then
-		return false
-	end
-	if spec.RequiresExistingWall ~= true then
-		return false
-	end
-	return spec.WallVariant == "Window"
-end
-
-local function isCurrentWindowPreview(): boolean
-	return specIsWindowVariant(CurrentItemSpec)
-end
-
-local function hideWindowPreviewModel()
-	if not isCurrentWindowPreview() then
-		return
-	end
-
-	local model = SelectedItem
-	if not model then
-		return
-	end
-
-	if PreviewHighlight.Adornee == model then
-		PreviewHighlight.Adornee = nil
-	end
-	if WindowPreviewVisible then
-		model:PivotTo(HIDDEN_PREVIEW_CFRAME)
-	end
-	WindowPreviewVisible = false
-end
-
-local function showWindowPreviewModel()
-	if not isCurrentWindowPreview() then
-		return
-	end
-
-	local model = SelectedItem
-	if not model then
-		return
-	end
-
-	if PreviewHighlight.Adornee ~= model then
-		PreviewHighlight.Adornee = model
-	end
-	if not WindowPreviewVisible then
-		WindowPreviewVisible = true
-	end
-end
+local CurrentCeilingMountPose: CeilingMountPose? = nil
 
 local PLACEABLE_FILL = Color3.fromRGB(159, 234, 159)
 local PLACEABLE_OUTLINE = Color3.fromRGB(137, 255, 119)
@@ -260,8 +184,11 @@ local function computeIgnorePlacement(): MoveOriginInfo?
 end
 
 local function updateFacing(newFacing: PreviewFacing)
+	if CurrentFacing == newFacing then
+		return
+	end
 	CurrentFacing = newFacing
-	LastFacing = nil
+	PoseCache.Reset()
 end
 
 local function applyModelPhysicsOverrides(model: Model)
@@ -341,6 +268,10 @@ local function rotationSequenceForCurrent(): ({ PreviewFacing }, { [PreviewFacin
 end
 
 local function rotateFacing(step: number)
+	if CurrentKind == "Ceiling" then
+		CeilingPreviewState.Rotate(step)
+		return
+	end
 	local sequence, indexMap = rotationSequenceForCurrent()
 	local count = #sequence
 	if count == 0 then
@@ -366,90 +297,38 @@ local function rotateFacing(step: number)
 	end
 end
 
-local function isSamePlacementPose(
-	cellX: number,
-	cellZ: number,
-	facing: PreviewFacing,
-	wallPosition: Vector3?,
-	windowHeightOffset: number?,
-	surfaceParentKey: string?,
-	surfaceLocalPosition: Vector3?
-): boolean
-	if CurrentKind == "WallMounted" then
-		if not wallPosition or not LastWallPosition then
-			return false
-		end
-		if LastCellX ~= cellX or LastCellZ ~= cellZ or LastFacing ~= facing then
-			return false
-		end
-		return (LastWallPosition - wallPosition).Magnitude < 0.05
-	end
-
-	if CurrentKind == "SurfaceMounted" then
-		if LastSurfaceMountParentKey ~= surfaceParentKey then
-			return false
-		end
-		if LastFacing ~= facing then
-			return false
-		end
-		if not surfaceLocalPosition or not LastSurfaceMountLocalPosition then
-			return false
-		end
-		return (LastSurfaceMountLocalPosition - surfaceLocalPosition).Magnitude <= SURFACE_LOCAL_EPSILON
-	end
-
-	if
-		CurrentKind == "Wall"
-		and CurrentItemSpec
-		and typeof(CurrentItemSpec) == "table"
-		and CurrentItemSpec.WallVariant == "Window"
-	then
-		if LastCellX ~= cellX or LastCellZ ~= cellZ or LastFacing ~= facing then
-			return false
-		end
-		if LastWindowHeightOffset == nil or windowHeightOffset == nil then
-			return false
-		end
-		return math.abs(LastWindowHeightOffset - windowHeightOffset) < 1e-3
-	end
-
-	return LastCellX == cellX and LastCellZ == cellZ and LastFacing == facing
+local function shouldSkipPose(pose: PoseCacheComparable): boolean
+	return PoseCache.ShouldSkip(CurrentKind, pose, SURFACE_LOCAL_EPSILON)
 end
 
-local function updateLastPose(
-	cellX: number,
-	cellZ: number,
-	facing: PreviewFacing,
-	wallPosition: Vector3?,
-	windowHeightOffset: number?,
-	surfaceParentKey: string?,
-	surfaceLocalPosition: Vector3?
-)
-	LastCellX = cellX
-	LastCellZ = cellZ
-	LastFacing = facing
-	if CurrentKind == "WallMounted" then
-		LastWallPosition = wallPosition
-	else
-		LastWallPosition = nil
+local function updatePoseCache(pose: PoseCacheComparable)
+	PoseCache.Update(CurrentKind, pose)
+end
+
+local function getPoseSnapshot(): PoseCacheSnapshot
+	return PoseCache.GetSnapshot()
+end
+
+local function isWindowVariant(spec: any?): boolean
+	return WindowPreviewController.IsWindowSpec(spec)
+end
+
+local function hideWindowPreviewModel()
+	if not isWindowVariant(CurrentItemSpec) then
+		return
 	end
-	if CurrentKind == "SurfaceMounted" then
-		LastSurfaceMountParentKey = surfaceParentKey
-		LastSurfaceMountLocalPosition = surfaceLocalPosition
-	else
-		LastSurfaceMountParentKey = nil
-		LastSurfaceMountLocalPosition = nil
+	WindowPreviewController.HideModel(SelectedItem, PreviewHighlight)
+end
+
+local function showWindowPreviewModel()
+	if not isWindowVariant(CurrentItemSpec) then
+		return
 	end
-	if
-		CurrentKind == "Wall"
-		and CurrentItemSpec
-		and typeof(CurrentItemSpec) == "table"
-		and CurrentItemSpec.WallVariant == "Window"
-	then
-		LastWindowHeightOffset = windowHeightOffset
-	else
-		LastWindowHeightOffset = nil
-	end
+	WindowPreviewController.ShowModel(SelectedItem, PreviewHighlight)
+end
+
+local function clearWindowPreview()
+	WindowPreviewController.Clear(SelectedItem, PreviewHighlight)
 end
 
 local function computeLift(spec: any?, model: Model, surface: BasePart): number
@@ -809,7 +688,7 @@ local function validateExistingWallReplacement(
 		return true, nil, occupant, occupantSpec, true
 	end
 
-	if specIsWindowVariant(spec) then
+	if isWindowVariant(spec) then
 		local occupantMetadata = typeof(occupant.Metadata) == "table" and occupant.Metadata or nil
 		local hasExistingWindow = false
 		if occupantMetadata then
@@ -912,11 +791,12 @@ local function computeWallMountedPreview(
 	local ignoreKey: string? = nil
 	if ignorePlacement then
 		local ignoreFacing = PlacementKey.NormalizeFacing(ignorePlacement.Facing :: any)
+		local ignorePlacementType = ignorePlacement.PlacementKeyType or ignorePlacement.PlacementType
 		ignoreKey = PlacementKey.ForPlacementType(
 			ignorePlacement.CellX,
 			ignorePlacement.CellZ,
 			ignoreFacing :: any,
-			ignorePlacement.PlacementType,
+			ignorePlacementType,
 			ignorePlacement.Level
 		)
 	end
@@ -962,16 +842,6 @@ local function computeWallMountedPreview(
 		WallNormal = wallNormal,
 		HeightOffset = clampedHeight,
 	}
-end
-
-local function clearWindowPreview()
-	if ActiveWindowPreview then
-		Renderer.ClearWindowPreview(ActiveWindowPreview)
-		ActiveWindowPreview = nil
-	end
-	CurrentWindowCutoutPose = nil
-	LastWindowHeightOffset = nil
-	hideWindowPreviewModel()
 end
 
 local function computeWindowCutoutPose(
@@ -1192,6 +1062,522 @@ local function updateHighlightForResult(canPlace: boolean)
 	PreviewHighlight.OutlineColor = if canPlace then PLACEABLE_OUTLINE else BLOCKED_OUTLINE
 end
 
+local function handleRaycastMiss(kind: PreviewKind, isWindowItem: boolean)
+	if WindowPreviewController.GetPose() then
+		clearWindowPreview()
+	end
+	if isWindowItem then
+		hideWindowPreviewModel()
+	end
+
+	if kind == "WallMounted" then
+		CurrentWallMountPose = nil
+	elseif kind == "SurfaceMounted" then
+		CurrentSurfaceMountPose = nil
+	elseif kind == "Ceiling" then
+		CurrentCeilingMountPose = nil
+	end
+
+	updateHighlightForResult(false)
+	PlacementCostDisplay.Hide()
+end
+
+type DragController = (kind: PreviewKind, cellX: number, cellZ: number) -> ()
+
+local function beginFloorDrag(_: PreviewKind, cellX: number, cellZ: number)
+	if CurrentItemId then
+		FloorPreview.TryBeginDrag(CurrentKind, CurrentItemId, cellX, cellZ, true)
+	end
+end
+
+local function beginRoofDrag(_: PreviewKind, cellX: number, cellZ: number)
+	if CurrentItemId then
+		RoofPreview.TryBeginDrag(CurrentKind, CurrentItemId, cellX, cellZ, true)
+	end
+end
+
+local DragControllers: { [PreviewKind]: DragController } = {
+	Floor = beginFloorDrag,
+	Roof = beginRoofDrag,
+}
+
+local DragInProgressCheck: { [PreviewKind]: () -> boolean } = {
+	Floor = FloorPreview.IsDragInProgress,
+	Roof = RoofPreview.IsDragInProgress,
+}
+
+local function tryBeginCurrentDrag(kind: PreviewKind, cellX: number, cellZ: number, isMouseDown: boolean)
+	if not isMouseDown or LastPrimaryMouseDown then
+		return
+	end
+	if not CurrentItemId then
+		return
+	end
+	local beginDrag = DragControllers[kind]
+	if not beginDrag then
+		return
+	end
+	local isDragging = DragInProgressCheck[kind]
+	if isDragging and isDragging() then
+		return
+	end
+	beginDrag(kind, cellX, cellZ)
+end
+
+type DefaultPreviewArgs = {
+	model: Model,
+	grid: any,
+	surface: BasePart,
+	chunkSize: number,
+	cellX: number,
+	cellZ: number,
+	baseWidthCells: number,
+	baseDepthCells: number,
+	previewFacing: PreviewFacing,
+	resolvedPreviewKind: PreviewKind,
+	placed: any,
+	ignorePlacement: MoveOriginInfo?,
+	activeLevel: number,
+	levelHeight: number,
+	lift: number,
+}
+
+local function processWindowVariant(
+	model: Model,
+	surface: BasePart,
+	wallModelForWindow: Model?,
+	resolvedPose: WindowCutoutPose,
+	itemSpec: any?
+): boolean
+	if not wallModelForWindow then
+		handleRaycastMiss("Wall", true)
+		return false
+	end
+
+	local wallPart = wallModelForWindow.PrimaryPart or wallModelForWindow:FindFirstChildWhichIsA("BasePart")
+	if not wallPart then
+		handleRaycastMiss("Wall", true)
+		return false
+	end
+
+	local rendered = WindowPreviewController.RenderOnWall({
+		model = model,
+		wallPart = wallPart,
+		pose = resolvedPose,
+		windowConfig = (itemSpec and itemSpec.WindowCutoutConfig) or nil,
+		pivotRotation = CurrentPivotRotation,
+		highlight = PreviewHighlight,
+	})
+	if not rendered then
+		handleRaycastMiss("Wall", true)
+		return false
+	end
+
+	showWindowPreviewModel()
+	updateHighlightForResult(true)
+	local upVector = surface.CFrame.UpVector
+	PlacementCostDisplay.UpdateWall(CurrentItemId or "", 1, true, resolvedPose.WorldPosition + upVector * 2)
+	return true
+end
+
+local function processWallMountedPreview(model: Model, surface: BasePart, wallPreview: WallMountedPreviewResult)
+	CurrentWallMountPose = {
+		WorldPosition = wallPreview.WorldPosition,
+		WallNormal = wallPreview.WallNormal,
+		WallCellX = wallPreview.ReferenceCellX,
+		WallCellZ = wallPreview.ReferenceCellZ,
+		AttachedFacing = wallPreview.AttachedFacing,
+		HeightOffset = wallPreview.HeightOffset,
+		ReferenceCellX = wallPreview.ReferenceCellX,
+		ReferenceCellZ = wallPreview.ReferenceCellZ,
+	}
+
+	local upVector = surface.CFrame.UpVector
+	Renderer.PreviewWallMounted(
+		model,
+		wallPreview.WorldPosition,
+		wallPreview.WallNormal,
+		upVector,
+		CurrentPivotRotation
+	)
+	updateHighlightForResult(wallPreview.CanPlace)
+	PlacementCostDisplay.UpdateWallMounted(
+		CurrentItemId or "",
+		1,
+		wallPreview.CanPlace,
+		wallPreview.WorldPosition + upVector * 2
+	)
+end
+
+local function processSurfaceMountedPreview(model: Model, surfaceMountPose: SurfaceMountPose, surfaceMountParent: Model)
+	CurrentSurfaceMountPose = surfaceMountPose
+
+	Renderer.PreviewSurfaceMount(
+		model,
+		surfaceMountParent,
+		surfaceMountPose.LocalPosition,
+		surfaceMountPose.LocalRotationY,
+		CurrentPivotRotation
+	)
+	local parentPivot = surfaceMountParent:GetPivot()
+	local parentUp = parentPivot.UpVector
+	if parentUp.Magnitude < 1e-3 then
+		parentUp = Vector3.new(0, 1, 0)
+	else
+		parentUp = parentUp.Unit
+	end
+	updateHighlightForResult(surfaceMountPose.CanPlace)
+	PlacementCostDisplay.UpdateSurfaceMounted(
+		CurrentItemId or "",
+		1,
+		surfaceMountPose.CanPlace,
+		surfaceMountPose.WorldPosition + parentUp * 2
+	)
+end
+
+local function processCeilingPreview(model: Model, surface: BasePart, ceilingMountPose: CeilingMountPose)
+	CurrentCeilingMountPose = ceilingMountPose
+	local upVector = surface.CFrame.UpVector
+	Renderer.PreviewCeilingMounted(
+		model,
+		ceilingMountPose.WorldPosition,
+		ceilingMountPose.CeilingNormal,
+		upVector,
+		ceilingMountPose.RotationY,
+		CurrentPivotRotation
+	)
+	updateHighlightForResult(ceilingMountPose.CanPlace)
+	PlacementCostDisplay.UpdateCeiling(
+		CurrentItemId or "",
+		1,
+		ceilingMountPose.CanPlace,
+		ceilingMountPose.WorldPosition + upVector * 2
+	)
+end
+
+local function processRoofDragPreview(
+	model: Model,
+	grid: any,
+	surface: BasePart,
+	chunkSize: number,
+	cellX: number,
+	cellZ: number,
+	placed,
+	ignorePlacement: MoveOriginInfo?,
+	activeLevel: number
+): boolean
+	local roofResult = RoofPreview.Update({
+		model = model,
+		grid = grid,
+		surface = surface,
+		chunkSize = chunkSize,
+		cellX = cellX,
+		cellZ = cellZ,
+		itemId = CurrentItemId,
+		spec = CurrentItemSpec,
+		placed = placed,
+		ignorePlacement = ignorePlacement,
+		isChunkUnlocked = PlotStateStore.IsChunkUnlocked,
+		level = activeLevel,
+	}) :: RoofUpdateResult?
+	if roofResult then
+		PreviewHighlight.FillColor = roofResult.fillColor
+		PreviewHighlight.OutlineColor = roofResult.outlineColor
+		local summary = roofResult.summary
+		if summary and typeof(CurrentItemId) == "string" then
+			local gridWidth = summary.WidthCells or (summary.MaxCellX - summary.MinCellX + 1)
+			local gridDepth = summary.DepthCells or (summary.MaxCellZ - summary.MinCellZ + 1)
+			local summaryLevel = (summary :: any).Level
+			local summaryLevelHeight = PlotStateStore.GetLevelHeight(summaryLevel)
+			local centerCFrame =
+				grid:FootprintCenterCFrame(summary.MinCellX, summary.MinCellZ, gridWidth, gridDepth, "North")
+			centerCFrame = centerCFrame * CFrame.new(0, summaryLevelHeight, 0)
+			local upVector = surface.CFrame.UpVector
+			local heightStuds = BuildConstants.RoofLiftStuds or 12
+			if typeof(CurrentItemSpec) == "table" then
+				local specHeight = (CurrentItemSpec :: any).HeightStuds
+				if typeof(specHeight) == "number" then
+					heightStuds = specHeight
+				end
+			end
+			local maxDimension = math.max(gridWidth, gridDepth)
+			local heightOffset = math.max(0, heightStuds) + 2.25 + math.max(0, maxDimension - 1) * 0.25
+			local worldPosition = centerCFrame.Position + upVector * heightOffset
+			PlacementCostDisplay.UpdateRoof(CurrentItemId, summary.CellCount, roofResult.canPlace, worldPosition)
+		else
+			PlacementCostDisplay.Hide()
+		end
+	else
+		PlacementCostDisplay.Hide()
+	end
+	return roofResult ~= nil
+end
+
+local function renderDefaultPreview(args: DefaultPreviewArgs)
+	local model = args.model
+	local grid = args.grid
+	local surface = args.surface
+	local chunkSize = args.chunkSize
+	local cellX = args.cellX
+	local cellZ = args.cellZ
+	local baseWidthCells = args.baseWidthCells
+	local baseDepthCells = args.baseDepthCells
+	local previewFacing = args.previewFacing
+	local resolvedPreviewKind = args.resolvedPreviewKind
+	local placed = args.placed
+	local ignorePlacement = args.ignorePlacement
+	local activeLevel = args.activeLevel
+	local levelHeight = args.levelHeight
+	local lift = args.lift
+
+	withMarkerPool(function()
+		local isUnlocked = PlacementUtils.IsFootprintUnlockedWithChecker(
+			grid,
+			chunkSize,
+			cellX,
+			cellZ,
+			baseWidthCells,
+			baseDepthCells,
+			previewFacing,
+			PlotStateStore.IsChunkUnlocked
+		)
+		local blocked = false
+		local previewAllowsStacking = PlacementBehavior.allowsStacking(CurrentItemSpec)
+		if resolvedPreviewKind == "CellObject" then
+			blocked = PlacementUtils.IsCellOccupiedForPreview(
+				grid,
+				"CellObject",
+				cellX,
+				cellZ,
+				baseWidthCells,
+				baseDepthCells,
+				previewFacing,
+				placed,
+				ignorePlacement,
+				activeLevel,
+				previewAllowsStacking
+			)
+		elseif resolvedPreviewKind == "Roof" then
+			blocked = PlacementUtils.IsCellOccupiedForPreview(
+				grid,
+				"Roof",
+				cellX,
+				cellZ,
+				baseWidthCells,
+				baseDepthCells,
+				previewFacing,
+				placed,
+				ignorePlacement,
+				activeLevel,
+				false
+			)
+		end
+		local wallEdgeOccupant: string? = nil
+
+		if resolvedPreviewKind == "Wall" or resolvedPreviewKind == "CellObject" then
+			WallConstraints.Populate(grid, placed, ignorePlacement, activeLevel)
+		end
+
+		if resolvedPreviewKind == "Wall" and WallStripPreview.IsDragInProgress() then
+			local stripResult = WallStripPreview.Update({
+				grid = grid,
+				chunkSize = chunkSize,
+				placed = placed,
+				itemId = CurrentItemId,
+				spec = CurrentItemSpec,
+				currentCellX = cellX,
+				currentCellZ = cellZ,
+				facing = previewFacing,
+				isChunkUnlocked = PlotStateStore.IsChunkUnlocked,
+				level = activeLevel,
+			})
+			if stripResult then
+				updateHighlightForResult(stripResult.canPlace)
+				local highlightCells = stripResult.highlightCells
+				MarkerPool.RenderFootprintMarkers(
+					grid,
+					surface,
+					highlightCells,
+					stripResult.canPlace,
+					"Wall",
+					levelHeight
+				)
+				local summary = stripResult.summary
+				if summary then
+					local summaryLevelHeight = PlotStateStore.GetLevelHeight(summary.Level)
+					if typeof(CurrentItemId) == "string" then
+						local startCFrame = grid:CellToWorldEdgeCenterCFrame(
+							summary.StartCellX,
+							summary.StartCellZ,
+							summary.Facing,
+							summaryLevelHeight
+						)
+						local endCFrame = grid:CellToWorldEdgeCenterCFrame(
+							summary.EndCellX,
+							summary.EndCellZ,
+							summary.Facing,
+							summaryLevelHeight
+						)
+						local midpoint = (startCFrame.Position + endCFrame.Position) * 0.5
+						local upVector = surface.CFrame.UpVector
+						local heightOffset = 2.75 + math.max(0, summary.SegmentCount - 1) * 0.15
+						local worldPosition = midpoint + upVector * heightOffset
+						PlacementCostDisplay.UpdateWall(
+							CurrentItemId,
+							summary.SegmentCount,
+							stripResult.canPlace,
+							worldPosition
+						)
+					else
+						PlacementCostDisplay.Hide()
+					end
+					previewWall(
+						model,
+						grid,
+						summary.AnchorCellX,
+						summary.AnchorCellZ,
+						summary.Facing,
+						summaryLevelHeight,
+						lift,
+						summary
+					)
+				else
+					PlacementCostDisplay.Hide()
+					previewWall(model, grid, cellX, cellZ, previewFacing, levelHeight, lift)
+				end
+				return
+			end
+			PlacementCostDisplay.Hide()
+		end
+
+		if resolvedPreviewKind == "Wall" then
+			PlacementCostDisplay.Hide()
+		end
+
+		if resolvedPreviewKind == "Wall" then
+			wallEdgeOccupant = WallConstraints.GetEdgeOccupant(cellX, cellZ, previewFacing)
+			if wallEdgeOccupant == WallConstraints.EdgeKind.Interior then
+				blocked = true
+			end
+
+			local spec = CurrentItemSpec
+			if spec and spec.RequiresExistingWall then
+				local placementKey =
+					PlacementKey.ForPlacementType(cellX, cellZ, previewFacing :: any, "Wall", activeLevel)
+				local occupant = placed and placed[placementKey]
+				if not occupant then
+					blocked = true
+				else
+					local occupantMatchesOrigin = false
+					if ignorePlacement then
+						local sameId = occupant.id == ignorePlacement.ItemId
+						local sameCell = occupant.cellX == ignorePlacement.CellX
+							and occupant.cellZ == ignorePlacement.CellZ
+						local sameFacing = PlacementKey.NormalizeFacing(occupant.facing) == ignorePlacement.Facing
+						local ignoreLevel = ignorePlacement.Level
+						local occupantLevel = if typeof(occupant.Level) == "number" then occupant.Level else nil
+						local sameLevel = if ignoreLevel ~= nil then occupantLevel == ignoreLevel else true
+						occupantMatchesOrigin = sameId and sameCell and sameFacing and sameLevel
+					end
+
+					if not occupantMatchesOrigin then
+						local occupantCheckId = occupant.id
+						local occupantSpec = occupantCheckId and ItemFinder.FindItemById(occupantCheckId) or nil
+						if occupantSpec and occupantSpec.RequiresExistingWall == true then
+							local previousId = occupant.Metadata and occupant.Metadata.PreviousId
+							if typeof(previousId) == "string" and previousId ~= "" then
+								occupantCheckId = previousId
+								occupantSpec = ItemFinder.FindItemById(previousId)
+							end
+						end
+
+						local canReplace = occupantSpec ~= nil and occupantSpec.PlacementType == "Wall"
+						if canReplace and spec.ReplaceableWallTag then
+							canReplace = ItemFinder.HasTag(occupantCheckId, spec.ReplaceableWallTag)
+						end
+						if not canReplace then
+							blocked = true
+						end
+					end
+				end
+			elseif wallEdgeOccupant == WallConstraints.EdgeKind.Wall then
+				blocked = true
+			end
+		end
+
+		if resolvedPreviewKind == "CellObject" then
+			local minCellX, minCellZ, maxCellX, maxCellZ =
+				grid:FootprintBounds(cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
+			if WallConstraints.HasInteriorEdgeBetweenCells(minCellX, minCellZ, maxCellX, maxCellZ) then
+				blocked = true
+			end
+		end
+
+		local missingFloorSupport = false
+		if resolvedPreviewKind == "Roof" then
+			local spec = CurrentItemSpec
+			local requiresFloor = spec ~= nil and spec.Rules ~= nil and spec.Rules.RequiresFloorUnderAllCells == true
+			if requiresFloor then
+				PlacementUtils.PopulateCellMapForType(
+					grid,
+					placed,
+					"Floor",
+					FloorSupportMap,
+					ignorePlacement,
+					activeLevel
+				)
+				local cells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
+				for _, index in cells do
+					if not FloorSupportMap[index] then
+						missingFloorSupport = true
+						break
+					end
+				end
+			end
+		end
+
+		local canPlace = isUnlocked and not blocked and not missingFloorSupport
+
+		if resolvedPreviewKind == "Wall" then
+			previewWall(model, grid, cellX, cellZ, previewFacing, levelHeight, lift)
+		elseif resolvedPreviewKind == "Roof" then
+			previewRoof(
+				model,
+				grid,
+				surface,
+				cellX,
+				cellZ,
+				previewFacing,
+				baseWidthCells,
+				baseDepthCells,
+				levelHeight,
+				CurrentItemSpec
+			)
+		else
+			previewCellObject(
+				model,
+				grid,
+				surface,
+				cellX,
+				cellZ,
+				previewFacing,
+				baseWidthCells,
+				baseDepthCells,
+				levelHeight,
+				lift
+			)
+		end
+
+		updateHighlightForResult(canPlace)
+
+		local cells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, previewFacing)
+		local markerKind: "CellObject" | "Floor" | "Roof" | "Wall" = if resolvedPreviewKind == "WallMounted"
+			then "CellObject"
+			else resolvedPreviewKind :: "CellObject" | "Floor" | "Roof" | "Wall"
+		MarkerPool.RenderFootprintMarkers(grid, surface, cells, canPlace, markerKind, levelHeight)
+	end)
+end
+
 findWallModel = function(hit: Instance?): Model?
 	if not hit then
 		return nil
@@ -1326,7 +1712,7 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 	end
 
 	CurrentItemSpec = ItemFinder.FindItemById(itemId)
-	local isWindowItem = specIsWindowVariant(CurrentItemSpec)
+	local isWindowItem = isWindowVariant(CurrentItemSpec)
 
 	if not PlotStateStore.IsReady() then
 		warn("PlotStateStore is not ready.")
@@ -1370,7 +1756,6 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 	PreviewHighlight.Adornee = itemModel
 	itemModel.Parent = containerFolder
 	SelectedItem = itemModel
-	WindowPreviewVisible = true
 	if isWindowItem then
 		hideWindowPreviewModel()
 	end
@@ -1392,6 +1777,8 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 		or derivedPreviewKind == "Wall"
 		or derivedPreviewKind == "Roof"
 		or derivedPreviewKind == "WallMounted"
+		or derivedPreviewKind == "SurfaceMounted"
+		or derivedPreviewKind == "Ceiling"
 	then
 		resolvedPreviewKind = derivedPreviewKind
 	else
@@ -1401,6 +1788,13 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 
 	CurrentItemId = itemId
 	CurrentKind = resolvedPreviewKind
+	if resolvedPreviewKind == "Ceiling" then
+		disableCutawayForCeiling()
+		CeilingPreviewState.Initialize(CurrentItemSpec)
+	else
+		restoreCutawayAfterCeiling()
+		CeilingPreviewState.Reset()
+	end
 	local sequenceForCurrent, indexForCurrent = rotationSequenceForCurrent()
 	if sequenceForCurrent[1] and not indexForCurrent[CurrentFacing] then
 		updateFacing(sequenceForCurrent[1])
@@ -1411,7 +1805,8 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 	PreviewContext.RotateLeft.Enabled = (resolvedPreviewKind ~= "Floor")
 	PreviewContext.RotateRight.Enabled = (resolvedPreviewKind ~= "Floor")
 
-	Connection = RunService.PreRender:Connect(function()
+	Connection = RunService.PreRender:Connect(function(deltaTime)
+		Renderer.SetFrameDelta(deltaTime)
 		local model = SelectedItem
 		if not model then
 			return
@@ -1430,22 +1825,16 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 		local ray = Camera:ViewportPointToRay(mouse.X, mouse.Y)
 		local activeParams = if resolvedPreviewKind == "WallMounted" then wallRaycastParams else raycastParams
 		local result = Workspace:Raycast(ray.Origin, ray.Direction * 2048, activeParams)
-		if not result then
-			if CurrentWindowCutoutPose then
-				clearWindowPreview()
+		local rejectedCeilingHit = false
+		if result and resolvedPreviewKind == "Ceiling" then
+			local plotUp = surface.CFrame.UpVector
+			local downwardAlignment = result.Normal:Dot(-plotUp.Unit)
+			if downwardAlignment < 0.5 then
+				rejectedCeilingHit = true
 			end
-			if isWindowItem then
-				hideWindowPreviewModel()
-			end
-			if resolvedPreviewKind == "WallMounted" then
-				CurrentWallMountPose = nil
-				updateHighlightForResult(false)
-				PlacementCostDisplay.Hide()
-			elseif resolvedPreviewKind == "SurfaceMounted" then
-				CurrentSurfaceMountPose = nil
-				updateHighlightForResult(false)
-				PlacementCostDisplay.Hide()
-			end
+		end
+		if not result or rejectedCeilingHit then
+			handleRaycastMiss(resolvedPreviewKind, isWindowItem)
 			return
 		end
 
@@ -1498,24 +1887,14 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 
 		resolvedFacing = PlacementKey.NormalizeFacing(resolvedFacing :: any)
 		local isMouseDown = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
-		if CurrentKind == "Floor" and CurrentItemId then
-			if isMouseDown and not LastPrimaryMouseDown then
-				FloorPreview.TryBeginDrag(CurrentKind, CurrentItemId, cellX, cellZ, true)
-			end
-		elseif CurrentKind == "Roof" and CurrentItemId then
-			if isMouseDown and not LastPrimaryMouseDown then
-				RoofPreview.TryBeginDrag(CurrentKind, CurrentItemId, cellX, cellZ, true)
-			end
-		end
+		tryBeginCurrentDrag(CurrentKind, cellX, cellZ, isMouseDown)
 		LastPrimaryMouseDown = isMouseDown
 
 		local wallPreview: WallMountedPreviewResult? = nil
 		if resolvedPreviewKind == "WallMounted" then
 			wallPreview = computeWallMountedPreview(result, grid, surface, chunkSize, placed, ignorePlacement)
 			if not wallPreview then
-				CurrentWallMountPose = nil
-				updateHighlightForResult(false)
-				PlacementCostDisplay.Hide()
+				handleRaycastMiss(resolvedPreviewKind, isWindowItem)
 				return
 			end
 			cellX = wallPreview.ReferenceCellX
@@ -1529,9 +1908,7 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 		if resolvedPreviewKind == "SurfaceMounted" then
 			local parentModel = findSurfaceMountParent(result.Instance, containerFolder)
 			if not parentModel then
-				CurrentSurfaceMountPose = nil
-				updateHighlightForResult(false)
-				PlacementCostDisplay.Hide()
+				handleRaycastMiss(resolvedPreviewKind, isWindowItem)
 				return
 			end
 
@@ -1539,9 +1916,7 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 			surfaceMountPose =
 				computeSurfaceMountPreview(result, parentModel, snapshot, CurrentPivotRotation, CurrentFacing)
 			if not surfaceMountPose then
-				CurrentSurfaceMountPose = nil
-				updateHighlightForResult(false)
-				PlacementCostDisplay.Hide()
+				handleRaycastMiss(resolvedPreviewKind, isWindowItem)
 				return
 			end
 
@@ -1551,14 +1926,34 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 			end
 		end
 
-		local isWindowVariant = isWindowItem and resolvedPreviewKind == "Wall"
+		local ceilingMountPose: CeilingMountPose? = nil
+		if resolvedPreviewKind == "Ceiling" then
+			ceilingMountPose = CeilingPreviewState.ComputePose(
+				grid,
+				surface,
+				result,
+				cellX,
+				cellZ,
+				resolvedFacing,
+				activeLevel,
+				snapshot
+			)
+			if not ceilingMountPose then
+				CurrentCeilingMountPose = nil
+				updateHighlightForResult(false)
+				PlacementCostDisplay.Hide()
+				return
+			end
+		end
 
-		if not isWindowVariant and CurrentWindowCutoutPose then
+		local windowVariantActive = isWindowItem and resolvedPreviewKind == "Wall"
+
+		if not windowVariantActive and WindowPreviewController.GetPose() then
 			clearWindowPreview()
 		end
 
 		local windowPose: WindowCutoutPose? = nil
-		if isWindowVariant then
+		if windowVariantActive then
 			local wallModelForWindow = hitWallModel or findWallModel(result.Instance)
 			if not wallModelForWindow then
 				clearWindowPreview()
@@ -1617,124 +2012,61 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 
 		local surfaceParentKeyForCache = surfaceMountPose and surfaceMountPose.ParentKey or nil
 		local surfaceLocalPositionForCache = surfaceMountPose and surfaceMountPose.LocalPosition or nil
+		local ceilingDropForCache = ceilingMountPose and ceilingMountPose.DropStuds or nil
+		local ceilingRotationForCache = ceilingMountPose and ceilingMountPose.RotationY or nil
 
-		if
-			isSamePlacementPose(
-				cellX,
-				cellZ,
-				resolvedFacing,
-				wallMountPosition,
-				windowHeightOffset,
-				surfaceParentKeyForCache,
-				surfaceLocalPositionForCache
-			)
-		then
+		local poseInfo: PoseCacheComparable = {
+			cellX = cellX,
+			cellZ = cellZ,
+			facing = resolvedFacing,
+			wallPosition = wallMountPosition,
+			windowHeightOffset = windowHeightOffset,
+			surfaceParentKey = surfaceParentKeyForCache,
+			surfaceLocalPosition = surfaceLocalPositionForCache,
+			ceilingDrop = ceilingDropForCache,
+			ceilingRotation = ceilingRotationForCache,
+		}
+
+		if shouldSkipPose(poseInfo) then
+			Renderer.StepModel(model)
 			return
 		end
 
-		updateLastPose(
-			cellX,
-			cellZ,
-			resolvedFacing,
-			wallMountPosition,
-			windowHeightOffset,
-			surfaceParentKeyForCache,
-			surfaceLocalPositionForCache
-		)
+		updatePoseCache(poseInfo)
 		CurrentFacing = resolvedFacing
 
-		if isWindowVariant and windowPose then
-			local resolvedPose = windowPose :: WindowCutoutPose
-			CurrentWindowCutoutPose = resolvedPose
-			if ActiveWindowPreview then
-				Renderer.ClearWindowPreview(ActiveWindowPreview)
-				ActiveWindowPreview = nil
-			end
-
-			local wallModelForWindow = hitWallModel or findWallModel(result.Instance)
-			local wallPart = wallModelForWindow
-				and (wallModelForWindow.PrimaryPart or wallModelForWindow:FindFirstChildWhichIsA("BasePart"))
-			if wallPart then
-				ActiveWindowPreview = Renderer.PreviewWindowOnWall(
-					model,
-					wallPart,
-					resolvedPose,
-					(itemSpec and itemSpec.WindowCutoutConfig :: WindowCutoutConfig?) or nil,
-					CurrentPivotRotation
-				)
-			end
-
-			if not ActiveWindowPreview then
-				CurrentWindowCutoutPose = nil
-				LastWindowHeightOffset = nil
-				hideWindowPreviewModel()
-				updateHighlightForResult(false)
-				PlacementCostDisplay.Hide()
+		if windowVariantActive and windowPose then
+			local success = processWindowVariant(
+				model,
+				surface,
+				hitWallModel or findWallModel(result.Instance),
+				windowPose :: WindowCutoutPose,
+				itemSpec
+			)
+			if not success then
 				return
 			end
-
-			showWindowPreviewModel()
-
-			updateHighlightForResult(true)
-			local upVector = surface.CFrame.UpVector
-			PlacementCostDisplay.UpdateWall(CurrentItemId or "", 1, true, resolvedPose.WorldPosition + upVector * 2)
 			return
 		end
 
 		if resolvedPreviewKind == "WallMounted" and wallPreview then
-			CurrentWallMountPose = {
-				WorldPosition = wallPreview.WorldPosition,
-				WallNormal = wallPreview.WallNormal,
-				WallCellX = wallPreview.ReferenceCellX,
-				WallCellZ = wallPreview.ReferenceCellZ,
-				AttachedFacing = wallPreview.AttachedFacing,
-				HeightOffset = wallPreview.HeightOffset,
-				ReferenceCellX = wallPreview.ReferenceCellX,
-				ReferenceCellZ = wallPreview.ReferenceCellZ,
-			}
-
-			local upVector = surface.CFrame.UpVector
-			Renderer.PreviewWallMounted(
-				model,
-				wallPreview.WorldPosition,
-				wallPreview.WallNormal,
-				upVector,
-				CurrentPivotRotation
-			)
-			updateHighlightForResult(wallPreview.CanPlace)
-			PlacementCostDisplay.UpdateWallMounted(
-				CurrentItemId or "",
-				1,
-				wallPreview.CanPlace,
-				wallPreview.WorldPosition + upVector * 2
-			)
+			processWallMountedPreview(model, surface, wallPreview)
 			return
 		end
 
 		if resolvedPreviewKind == "SurfaceMounted" and surfaceMountPose and surfaceMountParent then
-			CurrentSurfaceMountPose = surfaceMountPose
+			processSurfaceMountedPreview(model, surfaceMountPose, surfaceMountParent)
+			return
+		end
 
-			Renderer.PreviewSurfaceMount(
-				model,
-				surfaceMountParent,
-				surfaceMountPose.LocalPosition,
-				surfaceMountPose.LocalRotationY,
-				CurrentPivotRotation
-			)
-			local parentPivot = surfaceMountParent:GetPivot()
-			local parentUp = parentPivot.UpVector
-			if parentUp.Magnitude < 1e-3 then
-				parentUp = Vector3.new(0, 1, 0)
+		if resolvedPreviewKind == "Ceiling" then
+			if ceilingMountPose then
+				processCeilingPreview(model, surface, ceilingMountPose)
 			else
-				parentUp = parentUp.Unit
+				CurrentCeilingMountPose = nil
+				PlacementCostDisplay.Hide()
+				updateHighlightForResult(false)
 			end
-			updateHighlightForResult(surfaceMountPose.CanPlace)
-			PlacementCostDisplay.UpdateSurfaceMounted(
-				CurrentItemId or "",
-				1,
-				surfaceMountPose.CanPlace,
-				surfaceMountPose.WorldPosition + parentUp * 2
-			)
 			return
 		end
 
@@ -1756,311 +2088,43 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 		end
 
 		if resolvedPreviewKind == "Roof" and RoofPreview.IsDragInProgress() then
-			local roofResult = RoofPreview.Update({
-				model = model,
-				grid = grid,
-				surface = surface,
-				chunkSize = chunkSize,
-				cellX = cellX,
-				cellZ = cellZ,
-				itemId = CurrentItemId,
-				spec = CurrentItemSpec,
-				placed = placed,
-				ignorePlacement = ignorePlacement,
-				isChunkUnlocked = PlotStateStore.IsChunkUnlocked,
-				level = activeLevel,
-			}) :: RoofUpdateResult?
-			if roofResult then
-				PreviewHighlight.FillColor = roofResult.fillColor
-				PreviewHighlight.OutlineColor = roofResult.outlineColor
-				local summary = roofResult.summary
-				if summary and typeof(CurrentItemId) == "string" then
-					local widthCells = summary.WidthCells or (summary.MaxCellX - summary.MinCellX + 1)
-					local depthCells = summary.DepthCells or (summary.MaxCellZ - summary.MinCellZ + 1)
-					local summaryLevel = (summary :: any).Level
-					local summaryLevelHeight = PlotStateStore.GetLevelHeight(summaryLevel)
-					local centerCFrame =
-						grid:FootprintCenterCFrame(summary.MinCellX, summary.MinCellZ, widthCells, depthCells, "North")
-					centerCFrame = centerCFrame * CFrame.new(0, summaryLevelHeight, 0)
-					local upVector = surface.CFrame.UpVector
-					local heightStuds = BuildConstants.RoofLiftStuds or 12
-					if typeof(CurrentItemSpec) == "table" then
-						local specHeight = (CurrentItemSpec :: any).HeightStuds
-						if typeof(specHeight) == "number" then
-							heightStuds = specHeight
-						end
-					end
-					local maxDimension = math.max(widthCells, depthCells)
-					local heightOffset = math.max(0, heightStuds) + 2.25 + math.max(0, maxDimension - 1) * 0.25
-					local worldPosition = centerCFrame.Position + upVector * heightOffset
-					PlacementCostDisplay.UpdateRoof(
-						CurrentItemId,
-						summary.CellCount,
-						roofResult.canPlace,
-						worldPosition
-					)
-				else
-					PlacementCostDisplay.Hide()
-				end
+			local handled = processRoofDragPreview(
+				model,
+				grid,
+				surface,
+				chunkSize,
+				cellX,
+				cellZ,
+				placed,
+				ignorePlacement,
+				activeLevel
+			)
+			if handled then
+				return
 			end
-			return
 		end
 
 		if resolvedPreviewKind == "Roof" then
 			PlacementCostDisplay.Hide()
 		end
 
-		if resolvedPreviewKind == "SurfaceMounted" then
-			return
-		end
-
-		withMarkerPool(function()
-			local previewFacing = CurrentFacing
-			local isUnlocked = PlacementUtils.IsFootprintUnlockedWithChecker(
-				grid,
-				chunkSize,
-				cellX,
-				cellZ,
-				baseWidthCells,
-				baseDepthCells,
-				previewFacing,
-				PlotStateStore.IsChunkUnlocked
-			)
-			local blocked = false
-			if resolvedPreviewKind == "CellObject" then
-				blocked = PlacementUtils.IsCellOccupiedForPreview(
-					grid,
-					"CellObject",
-					cellX,
-					cellZ,
-					baseWidthCells,
-					baseDepthCells,
-					previewFacing,
-					placed,
-					ignorePlacement,
-					activeLevel
-				)
-			elseif resolvedPreviewKind == "Roof" then
-				blocked = PlacementUtils.IsCellOccupiedForPreview(
-					grid,
-					"Roof",
-					cellX,
-					cellZ,
-					baseWidthCells,
-					baseDepthCells,
-					previewFacing,
-					placed,
-					ignorePlacement,
-					activeLevel
-				)
-			end
-			local wallEdgeOccupant: string? = nil
-
-			if resolvedPreviewKind == "Wall" or resolvedPreviewKind == "CellObject" then
-				WallConstraints.Populate(grid, placed, ignorePlacement, activeLevel)
-			end
-
-			if resolvedPreviewKind == "Wall" and WallStripPreview.IsDragInProgress() then
-				local stripResult = WallStripPreview.Update({
-					grid = grid,
-					chunkSize = chunkSize,
-					placed = placed,
-					itemId = CurrentItemId,
-					spec = CurrentItemSpec,
-					currentCellX = cellX,
-					currentCellZ = cellZ,
-					facing = previewFacing,
-					isChunkUnlocked = PlotStateStore.IsChunkUnlocked,
-					level = activeLevel,
-				})
-				if stripResult then
-					updateHighlightForResult(stripResult.canPlace)
-					local highlightCells = stripResult.highlightCells
-					MarkerPool.RenderFootprintMarkers(
-						grid,
-						surface,
-						highlightCells,
-						stripResult.canPlace,
-						"Wall",
-						levelHeight
-					)
-					local summary = stripResult.summary
-					if summary then
-						local summaryLevelHeight = PlotStateStore.GetLevelHeight(summary.Level)
-						if typeof(CurrentItemId) == "string" then
-							local startCFrame = grid:CellToWorldEdgeCenterCFrame(
-								summary.StartCellX,
-								summary.StartCellZ,
-								summary.Facing,
-								summaryLevelHeight
-							)
-							local endCFrame = grid:CellToWorldEdgeCenterCFrame(
-								summary.EndCellX,
-								summary.EndCellZ,
-								summary.Facing,
-								summaryLevelHeight
-							)
-							local midpoint = (startCFrame.Position + endCFrame.Position) * 0.5
-							local upVector = surface.CFrame.UpVector
-							local heightOffset = 2.75 + math.max(0, summary.SegmentCount - 1) * 0.15
-							local worldPosition = midpoint + upVector * heightOffset
-							PlacementCostDisplay.UpdateWall(
-								CurrentItemId,
-								summary.SegmentCount,
-								stripResult.canPlace,
-								worldPosition
-							)
-						else
-							PlacementCostDisplay.Hide()
-						end
-						previewWall(
-							model,
-							grid,
-							summary.AnchorCellX,
-							summary.AnchorCellZ,
-							summary.Facing,
-							summaryLevelHeight,
-							lift,
-							summary
-						)
-					else
-						PlacementCostDisplay.Hide()
-						previewWall(model, grid, cellX, cellZ, previewFacing, levelHeight, lift)
-					end
-					return
-				end
-				PlacementCostDisplay.Hide()
-			end
-
-			if resolvedPreviewKind == "Wall" then
-				PlacementCostDisplay.Hide()
-			end
-
-			if resolvedPreviewKind == "Wall" then
-				wallEdgeOccupant = WallConstraints.GetEdgeOccupant(cellX, cellZ, previewFacing)
-				if wallEdgeOccupant == WallConstraints.EdgeKind.Interior then
-					blocked = true
-				end
-
-				local spec = CurrentItemSpec
-				if spec and spec.RequiresExistingWall then
-					local placementKey =
-						PlacementKey.ForPlacementType(cellX, cellZ, previewFacing :: any, "Wall", activeLevel)
-					local occupant = placed and placed[placementKey]
-					if not occupant then
-						blocked = true
-					else
-						local occupantMatchesOrigin = false
-						if ignorePlacement then
-							local sameId = occupant.id == ignorePlacement.ItemId
-							local sameCell = occupant.cellX == ignorePlacement.CellX
-								and occupant.cellZ == ignorePlacement.CellZ
-							local sameFacing = PlacementKey.NormalizeFacing(occupant.facing) == ignorePlacement.Facing
-							local ignoreLevel = ignorePlacement.Level
-							local occupantLevel = if typeof(occupant.Level) == "number" then occupant.Level else nil
-							local sameLevel = if ignoreLevel ~= nil then occupantLevel == ignoreLevel else true
-							occupantMatchesOrigin = sameId and sameCell and sameFacing and sameLevel
-						end
-
-						if not occupantMatchesOrigin then
-							local occupantCheckId = occupant.id
-							local occupantSpec = occupantCheckId and ItemFinder.FindItemById(occupantCheckId) or nil
-							if occupantSpec and occupantSpec.RequiresExistingWall == true then
-								local previousId = occupant.Metadata and occupant.Metadata.PreviousId
-								if typeof(previousId) == "string" and previousId ~= "" then
-									occupantCheckId = previousId
-									occupantSpec = ItemFinder.FindItemById(previousId)
-								end
-							end
-
-							local canReplace = occupantSpec ~= nil and occupantSpec.PlacementType == "Wall"
-							if canReplace and spec.ReplaceableWallTag then
-								canReplace = ItemFinder.HasTag(occupantCheckId, spec.ReplaceableWallTag)
-							end
-							if not canReplace then
-								blocked = true
-							end
-						end
-					end
-				elseif wallEdgeOccupant == WallConstraints.EdgeKind.Wall then
-					blocked = true
-				end
-			end
-
-			if resolvedPreviewKind == "CellObject" then
-				local minCellX, minCellZ, maxCellX, maxCellZ =
-					grid:FootprintBounds(cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
-				if WallConstraints.HasInteriorEdgeBetweenCells(minCellX, minCellZ, maxCellX, maxCellZ) then
-					blocked = true
-				end
-			end
-
-			local missingFloorSupport = false
-			if resolvedPreviewKind == "Roof" then
-				local spec = CurrentItemSpec
-				local requiresFloor = spec ~= nil
-					and spec.Rules ~= nil
-					and spec.Rules.RequiresFloorUnderAllCells == true
-				if requiresFloor then
-					PlacementUtils.PopulateCellMapForType(
-						grid,
-						placed,
-						"Floor",
-						FloorSupportMap,
-						ignorePlacement,
-						activeLevel
-					)
-					local cells =
-						grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
-					for _, index in cells do
-						if not FloorSupportMap[index] then
-							missingFloorSupport = true
-							break
-						end
-					end
-				end
-			end
-
-			local canPlace = isUnlocked and not blocked and not missingFloorSupport
-
-			if resolvedPreviewKind == "Wall" then
-				previewWall(model, grid, cellX, cellZ, previewFacing, levelHeight, lift)
-			elseif resolvedPreviewKind == "Roof" then
-				previewRoof(
-					model,
-					grid,
-					surface,
-					cellX,
-					cellZ,
-					previewFacing,
-					baseWidthCells,
-					baseDepthCells,
-					levelHeight,
-					CurrentItemSpec
-				)
-			else
-				previewCellObject(
-					model,
-					grid,
-					surface,
-					cellX,
-					cellZ,
-					previewFacing,
-					baseWidthCells,
-					baseDepthCells,
-					levelHeight,
-					lift
-				)
-			end
-
-			updateHighlightForResult(canPlace)
-
-			local cells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, previewFacing)
-			local markerKind: "CellObject" | "Floor" | "Roof" | "Wall" = if resolvedPreviewKind == "WallMounted"
-				then "CellObject"
-				else resolvedPreviewKind :: "CellObject" | "Floor" | "Roof" | "Wall"
-			MarkerPool.RenderFootprintMarkers(grid, surface, cells, canPlace, markerKind, levelHeight)
-		end)
+		renderDefaultPreview({
+			model = model,
+			grid = grid,
+			surface = surface,
+			chunkSize = chunkSize,
+			cellX = cellX,
+			cellZ = cellZ,
+			baseWidthCells = baseWidthCells,
+			baseDepthCells = baseDepthCells,
+			previewFacing = CurrentFacing,
+			resolvedPreviewKind = resolvedPreviewKind,
+			placed = placed,
+			ignorePlacement = ignorePlacement,
+			activeLevel = activeLevel,
+			levelHeight = levelHeight,
+			lift = lift,
+		})
 	end)
 end
 
@@ -2078,6 +2142,7 @@ function ObjectPreview.ClearPreview()
 
 	if SelectedItem then
 		PreviewHighlight.Adornee = nil
+		Renderer.ClearModel(SelectedItem)
 		SelectedItem:Destroy()
 		SelectedItem = nil
 	end
@@ -2089,10 +2154,7 @@ function ObjectPreview.ClearPreview()
 		Connection = nil
 	end
 
-	LastCellX = nil
-	LastCellZ = nil
-	LastFacing = nil
-	LastWallPosition = nil
+	PoseCache.Reset()
 	CurrentItemId = nil
 	CurrentItemSpec = nil
 	CurrentPivotRotation = CFrame.identity
@@ -2102,9 +2164,9 @@ function ObjectPreview.ClearPreview()
 	LastPrimaryMouseDown = false
 	CurrentWallMountPose = nil
 	CurrentSurfaceMountPose = nil
-	LastSurfaceMountParentKey = nil
-	LastSurfaceMountLocalPosition = nil
-	WindowPreviewVisible = true
+	CurrentCeilingMountPose = nil
+	CeilingPreviewState.Reset()
+	restoreCutawayAfterCeiling()
 end
 
 function ObjectPreview.GetCurrentPose(): PreviewPose?
@@ -2115,27 +2177,38 @@ function ObjectPreview.GetCurrentPose(): PreviewPose?
 	local poseLevel = LastLevel or PlotStateStore.GetActiveLevel()
 	local poseLevelHeight = LastLevelHeight or PlotStateStore.GetLevelHeight(poseLevel)
 	local originSignature = MoveOriginSignature
+	local poseSnapshot = getPoseSnapshot()
+	local cachedCellX = poseSnapshot.cellX
+	local cachedCellZ = poseSnapshot.cellZ
+	local windowPose = WindowPreviewController.GetPose()
 
 	if CurrentKind == "SurfaceMounted" then
 		if not CurrentSurfaceMountPose then
 			return nil
 		end
 
+		local targetCellX = CurrentSurfaceMountPose.ParentCellX or cachedCellX
+		local targetCellZ = CurrentSurfaceMountPose.ParentCellZ or cachedCellZ
+		if not targetCellX or not targetCellZ then
+			return nil
+		end
+
 		return {
 			ItemId = CurrentItemId,
-			CellX = CurrentSurfaceMountPose.ParentCellX or LastCellX,
-			CellZ = CurrentSurfaceMountPose.ParentCellZ or LastCellZ,
+			CellX = targetCellX,
+			CellZ = targetCellZ,
 			Facing = CurrentFacing,
 			Kind = CurrentKind,
 			WallMount = nil,
-			WindowCutout = nil,
+			WindowCutout = windowPose,
 			SurfaceMount = CurrentSurfaceMountPose,
+			CeilingMount = CurrentCeilingMountPose,
 			Level = poseLevel,
 			LevelHeight = poseLevelHeight,
 		}
 	end
 
-	if (not LastCellX or not LastCellZ) and originSignature then
+	if (not cachedCellX or not cachedCellZ) and originSignature then
 		local originCellX = originSignature.CellX
 		local originCellZ = originSignature.CellZ
 		if typeof(originCellX) == "number" and typeof(originCellZ) == "number" then
@@ -2153,27 +2226,29 @@ function ObjectPreview.GetCurrentPose(): PreviewPose?
 				Facing = resolvedFacing,
 				Kind = CurrentKind,
 				WallMount = CurrentWallMountPose,
-				WindowCutout = CurrentWindowCutoutPose,
+				WindowCutout = windowPose,
 				SurfaceMount = CurrentSurfaceMountPose,
+				CeilingMount = CurrentCeilingMountPose,
 				Level = fallbackLevel,
 				LevelHeight = fallbackLevelHeight,
 			}
 		end
 	end
 
-	if not LastCellX or not LastCellZ then
+	if not cachedCellX or not cachedCellZ then
 		return nil
 	end
 
 	return {
 		ItemId = CurrentItemId,
-		CellX = LastCellX,
-		CellZ = LastCellZ,
+		CellX = cachedCellX,
+		CellZ = cachedCellZ,
 		Facing = CurrentFacing,
 		Kind = CurrentKind,
 		WallMount = CurrentWallMountPose,
-		WindowCutout = CurrentWindowCutoutPose,
+		WindowCutout = windowPose,
 		SurfaceMount = CurrentSurfaceMountPose,
+		CeilingMount = CurrentCeilingMountPose,
 		Level = poseLevel,
 		LevelHeight = poseLevelHeight,
 	}
@@ -2198,13 +2273,16 @@ function ObjectPreview.TryBeginFloorDrag(): boolean
 	if FloorPreview.IsDragInProgress() then
 		return true
 	end
-	if not CurrentItemId or not LastCellX or not LastCellZ then
+	local poseSnapshot = getPoseSnapshot()
+	local cachedCellX = poseSnapshot.cellX
+	local cachedCellZ = poseSnapshot.cellZ
+	if not CurrentItemId or not cachedCellX or not cachedCellZ then
 		return false
 	end
 	if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
 		return false
 	end
-	return FloorPreview.TryBeginDrag(CurrentKind, CurrentItemId, LastCellX, LastCellZ, true)
+	return FloorPreview.TryBeginDrag(CurrentKind, CurrentItemId, cachedCellX, cachedCellZ, true)
 end
 
 function ObjectPreview.IsFloorDragInProgress(): boolean
@@ -2228,7 +2306,10 @@ function ObjectPreview.TryBeginWallStripDrag(): boolean
 	if CurrentItemSpec.RequiresExistingWall == true then
 		return false
 	end
-	if not LastCellX or not LastCellZ then
+	local poseSnapshot = getPoseSnapshot()
+	local cachedCellX = poseSnapshot.cellX
+	local cachedCellZ = poseSnapshot.cellZ
+	if not cachedCellX or not cachedCellZ then
 		return false
 	end
 	local isPressed = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
@@ -2238,8 +2319,8 @@ function ObjectPreview.TryBeginWallStripDrag(): boolean
 
 	return WallStripPreview.TryBeginDrag({
 		itemId = CurrentItemId,
-		anchorCellX = LastCellX,
-		anchorCellZ = LastCellZ,
+		anchorCellX = cachedCellX,
+		anchorCellZ = cachedCellZ,
 		facing = CurrentFacing,
 		spec = CurrentItemSpec,
 		isMousePressed = isPressed,
@@ -2261,13 +2342,16 @@ function ObjectPreview.TryBeginRoofDrag(): boolean
 	if RoofPreview.IsDragInProgress() then
 		return true
 	end
-	if not CurrentItemId or not LastCellX or not LastCellZ then
+	local poseSnapshot = getPoseSnapshot()
+	local cachedCellX = poseSnapshot.cellX
+	local cachedCellZ = poseSnapshot.cellZ
+	if not CurrentItemId or not cachedCellX or not cachedCellZ then
 		return false
 	end
 	if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
 		return false
 	end
-	return RoofPreview.TryBeginDrag(CurrentKind, CurrentItemId, LastCellX, LastCellZ, true)
+	return RoofPreview.TryBeginDrag(CurrentKind, CurrentItemId, cachedCellX, cachedCellZ, true)
 end
 
 function ObjectPreview.IsRoofDragInProgress(): boolean
@@ -2330,7 +2414,9 @@ function ObjectPreview.SetMoveOrigin(originInfo: {
 		entry.level = originInfo.Level
 	end
 
-	local _, placementType, resolvedWidth, resolvedDepth, resolvedFacing = PlacementUtils.ResolvePlacementEntry(entry)
+	local itemSpec, placementType, resolvedWidth, resolvedDepth, resolvedFacing =
+		PlacementUtils.ResolvePlacementEntry(entry)
+	local placementKeyType = PlacementBehavior.getPlacementKeyLabel(itemSpec)
 
 	local resolvedLevel = nil
 	if typeof(originInfo.Level) == "number" then
@@ -2343,6 +2429,7 @@ function ObjectPreview.SetMoveOrigin(originInfo: {
 		CellZ = cellZ,
 		Facing = tostring(PlacementKey.NormalizeFacing(resolvedFacing :: any)),
 		PlacementType = placementType,
+		PlacementKeyType = placementKeyType,
 		WidthCells = if typeof(widthCells) == "number" and widthCells > 0 then widthCells else resolvedWidth,
 		DepthCells = if typeof(depthCells) == "number" and depthCells > 0 then depthCells else resolvedDepth,
 		Level = resolvedLevel,

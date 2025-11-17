@@ -334,6 +334,10 @@ function PlotBuilder.PlaceSelectedPreview()
 		return
 	end
 
+	local wallPose = pose.WallMount
+	local windowPose = pose.WindowCutout
+	local ceilingPose = pose.CeilingMount
+
 	if pose.Kind == "Floor" then
 		if ObjectPreview.IsFloorDragInProgress() then
 			return
@@ -391,10 +395,12 @@ function PlotBuilder.PlaceSelectedPreview()
 		SoundtrackManager.PlayPlacementSuccess()
 		PlacementCelebration.ShowSuccess(surfacePose.WorldPosition, pose.ItemId)
 		return
+	elseif pose.Kind == "Ceiling" then
+		if not ceilingPose or ceilingPose.CanPlace ~= true then
+			return
+		end
 	end
 
-	local wallPose = pose.WallMount
-	local windowPose = pose.WindowCutout
 	local cellX = pose.CellX
 	local cellZ = pose.CellZ
 	if typeof(cellX) ~= "number" or typeof(cellZ) ~= "number" then
@@ -402,6 +408,7 @@ function PlotBuilder.PlaceSelectedPreview()
 		return
 	end
 	local poseLevel = if typeof(pose.Level) == "number" then pose.Level else PlotStateStore.GetActiveLevel()
+	local ceilingEnabled = pose.Kind == "Ceiling" and ceilingPose ~= nil
 	local success, message = Packets.PlaceRequest:Fire({
 		ItemId = pose.ItemId,
 		CellX = cellX,
@@ -420,6 +427,18 @@ function PlotBuilder.PlaceSelectedPreview()
 		WallMountNormalX = wallPose and wallPose.WallNormal.X or 0,
 		WallMountNormalY = wallPose and wallPose.WallNormal.Y or 0,
 		WallMountNormalZ = wallPose and wallPose.WallNormal.Z or -1,
+		CeilingMountEnabled = ceilingEnabled,
+		CeilingMountCellX = ceilingPose and ceilingPose.CellX or cellX,
+		CeilingMountCellZ = ceilingPose and ceilingPose.CellZ or cellZ,
+		CeilingMountLevel = ceilingPose and ceilingPose.Level or poseLevel,
+		CeilingMountDropStuds = ceilingPose and ceilingPose.DropStuds or 0,
+		CeilingMountRotationY = ceilingPose and ceilingPose.RotationY or 0,
+		CeilingMountPosX = ceilingPose and ceilingPose.WorldPosition.X or 0,
+		CeilingMountPosY = ceilingPose and ceilingPose.WorldPosition.Y or 0,
+		CeilingMountPosZ = ceilingPose and ceilingPose.WorldPosition.Z or 0,
+		CeilingMountNormalX = ceilingPose and ceilingPose.CeilingNormal.X or 0,
+		CeilingMountNormalY = ceilingPose and ceilingPose.CeilingNormal.Y or -1,
+		CeilingMountNormalZ = ceilingPose and ceilingPose.CeilingNormal.Z or 0,
 		WindowEnabled = pose.Kind == "Wall" and windowPose ~= nil,
 		WindowHeightOffset = windowPose and windowPose.HeightOffset or 0,
 	})
@@ -428,6 +447,7 @@ function PlotBuilder.PlaceSelectedPreview()
 		warn("Placement failed: " .. (message or "unknown reason"))
 		local failurePosition = if pose.Kind == "WallMounted" and wallPose
 			then wallPose.WorldPosition
+			elseif pose.Kind == "Ceiling" and ceilingPose then ceilingPose.WorldPosition
 			else computeCellObjectPosition(pose.ItemId, cellX, cellZ, pose.Facing, poseLevel)
 		PlacementCelebration.ShowFailure(failurePosition, pose.ItemId, message)
 		return
