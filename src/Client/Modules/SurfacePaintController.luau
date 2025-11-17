@@ -49,6 +49,7 @@ type DragState = {
 	currentCellX: number?,
 	currentCellZ: number?,
 	level: number?,
+	placementType: string?,
 	startPlacementKey: string?,
 	startModel: Model?,
 }
@@ -66,6 +67,7 @@ local lastUsedPaintColor: Color3? = nil
 local dragState: DragState = {
 	isMouseDown = false,
 	isDragging = false,
+	placementType = nil,
 }
 
 local function isDebugEnabled(): boolean
@@ -452,13 +454,17 @@ local function collectPlacementsInArea(
 	minCellX: number,
 	minCellZ: number,
 	maxCellX: number,
-	maxCellZ: number
+	maxCellZ: number,
+	placementTypeFilter: string?
 ): { string }
 	local results: { string } = {}
 	local seen: { [string]: boolean } = {}
 	PlotStateStore.IteratePlacements(function(key, record)
 		local placementType = tostring(record.PlacementType or record.Type or "CellObject")
 		if placementType ~= "Floor" and placementType ~= "Wall" then
+			return
+		end
+		if placementTypeFilter and placementType ~= placementTypeFilter then
 			return
 		end
 		local placementLevel = record.Level or record.yLevel or PlotStateStore.GetDefaultLevel()
@@ -488,6 +494,7 @@ local function resetDragState()
 	dragState = {
 		isMouseDown = false,
 		isDragging = false,
+		placementType = nil,
 	}
 	clearDragPreview()
 end
@@ -527,7 +534,8 @@ local function buildTargetsForDragState(includeHoverFallback: boolean): { string
 		local maxCellX = math.max(dragState.startCellX, dragState.currentCellX)
 		local minCellZ = math.min(dragState.startCellZ, dragState.currentCellZ)
 		local maxCellZ = math.max(dragState.startCellZ, dragState.currentCellZ)
-		targets = collectPlacementsInArea(dragState.level, minCellX, minCellZ, maxCellX, maxCellZ)
+		targets =
+			collectPlacementsInArea(dragState.level, minCellX, minCellZ, maxCellX, maxCellZ, dragState.placementType)
 	elseif dragState.startPlacementKey then
 		targets = { dragState.startPlacementKey }
 	elseif dragState.startModel and dragState.startModel.Name ~= "" then
@@ -565,6 +573,7 @@ local function beginPaintAction()
 		dragState.currentCellX = hoverInfo.cellX
 		dragState.currentCellZ = hoverInfo.cellZ
 		dragState.level = hoverInfo.level
+		dragState.placementType = hoverInfo.placementType
 		dragState.startPlacementKey = hoverInfo.placementKey
 		dragState.startModel = hoverInfo.model
 	else
@@ -573,6 +582,7 @@ local function beginPaintAction()
 		dragState.startPlacementKey = nil
 		dragState.startModel = nil
 		dragState.level = PlotStateStore.GetActiveLevel()
+		dragState.placementType = nil
 	end
 	refreshDragPreview()
 end

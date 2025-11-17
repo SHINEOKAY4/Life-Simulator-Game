@@ -5,8 +5,14 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
 
 local PlotBuilder = require(script.Parent.Parent.Modules.PlotBuilder)
+local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
+local SurfacePaintController = require(script.Parent.Parent.Modules.SurfacePaintController)
+local BuildPaletteUI = require(script.Parent.BuildPaletteUI)
+local ObjectSelector = require(script.Parent.Parent.Modules.ObjectSelector)
+local CutawayViewController = require(script.Parent.Parent.Modules.CutawayViewController)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local Tooltip = require(script.Parent:WaitForChild("Tooltip"))
@@ -21,6 +27,22 @@ assert(
 	"PlotBuilderUI expected PlotBuilderUI or PlotBuilderGui ScreenGui"
 )
 local PlotBuilderGui = plotBuilderGuiInstance :: ScreenGui
+local BuildPaletteGui = PlayerGui:FindFirstChild("BuildPaletteGui")
+local BuildPaletteMainFrame = BuildPaletteGui and BuildPaletteGui:FindFirstChild("Main")
+local BuildPaletteVisibilityConnection: RBXScriptConnection? = nil
+
+local function resolveBuildPaletteMainFrame(): Frame?
+	if BuildPaletteMainFrame and BuildPaletteMainFrame.Parent then
+		return BuildPaletteMainFrame
+	end
+	if not BuildPaletteGui or not BuildPaletteGui.Parent then
+		BuildPaletteGui = PlayerGui:FindFirstChild("BuildPaletteGui")
+	end
+	if BuildPaletteGui then
+		BuildPaletteMainFrame = BuildPaletteGui:FindFirstChild("Main")
+	end
+	return BuildPaletteMainFrame
+end
 
 local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
 local PreviewContext = InputContextsFolder:WaitForChild("PreviewContext")
@@ -35,6 +57,7 @@ local ItemButtonTemplate = InterfacesTemplatesFolder:WaitForChild("ItemButtonTem
 local CancelButtonTemplate = InterfacesTemplatesFolder:WaitForChild("CancelButton") :: TextButton
 
 local MainFrame = PlotBuilderGui:WaitForChild("Main") :: Frame
+local MenuFrame = MainFrame:WaitForChild("Menu") :: Frame
 local RightFrame = MainFrame:WaitForChild("Right") :: Frame
 local LeftFrame = MainFrame:WaitForChild("Left") :: Frame
 local UpFrame = LeftFrame:WaitForChild("UpFrame") :: Frame
@@ -76,6 +99,8 @@ local PLACEHOLDER_THUMBNAIL = "rbxasset://textures/ui/GuiImagePlaceholder.png"
 local THUMBNAIL_TEMPLATE = "rbxthumb://type=Asset&id=%d&w=420&h=420"
 local CATEGORY_HOVER_OFFSET = Vector2.new(12, 8)
 local CATEGORY_HOVER_TWEEN = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local UPGRADE_CUTAWAY_SOURCE = "PlotBuilderUpgrade"
+local CUTAWAY_PRIORITY = 20
 
 type ItemSpec = { [string]: any }
 type ItemEntry = { Id: string, Spec: ItemSpec, Path: { string } }
@@ -104,6 +129,10 @@ type ButtonMetrics = {
 }
 
 local PlotBuilderUI = {}
+local upgradeViewChangedSignal = GoodSignal.new()
+PlotBuilderUI.UpgradeViewChanged = upgradeViewChangedSignal
+local isUpgradeViewActive = false
+local storageMenuActive = false
 local CategoryInfos: { [string]: CategoryInfo } = {}
 local CurrentCategory: string? = nil
 local CurrentPanel: Frame? = nil
@@ -121,10 +150,193 @@ local PreviewControlsFrame: Frame? = nil
 local CancelPreviewButton: TextButton? = nil
 local CancelActionPressedConnection: RBXScriptConnection? = nil
 local CancelRKeyConnection: RBXScriptConnection? = nil
+local PreviewToggleKeyConnection: RBXScriptConnection? = nil
 local ActiveLevelChangedConnection: RBXScriptConnection? = nil
 local ExternalCancelSource: string? = nil
 local ExternalCancelHandler: (() -> ())? = nil
 local EXIT_BUTTON_BOUND_ATTRIBUTE = "PlotBuilderExitBound"
+local paletteHiddenDuringPreview = false
+
+local function findMenuButton(name: string): GuiButton?
+	local container = MenuFrame:FindFirstChild(name)
+	if not container then
+		return nil
+	end
+	if container:IsA("GuiButton") then
+		return container
+	end
+	local button = container:FindFirstChildWhichIsA("GuiButton")
+	if button then
+		return button
+	end
+	return nil
+end
+
+local MenuButtons = {
+	Paint = findMenuButton("Paint"),
+	Storage = findMenuButton("Storage"),
+	Select = findMenuButton("Select"),
+	Upgrade = findMenuButton("Upgrade"),
+	Back = findMenuButton("Back"),
+}
+
+local MENU_BUTTON_HOVER_SCALE = 1.08
+local MENU_BUTTON_TWEEN = TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local MENU_BUTTON_SOUND_ID = "rbxassetid://103307955424380"
+local MENU_BUTTON_SOUND_VOLUME = 0.55
+
+local POPUP_HIDDEN_SCALE = 0.9
+local POPUP_SHOW_TWEEN = TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local POPUP_HIDE_TWEEN = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+local POPUP_SCALE_NAME = "UIPopupScale"
+
+local menuButtonTweens: { [GuiButton]: Tween? } = {}
+local menuButtonScales: { [GuiButton]: UIScale } = {}
+local framePopTweens: { [GuiObject]: Tween? } = {}
+local framePopTargets: { [GuiObject]: boolean } = {}
+
+local function playMenuButtonClickSound()
+	local sound = Instance.new("Sound")
+	sound.Name = "MenuButtonClick"
+	sound.SoundId = MENU_BUTTON_SOUND_ID
+	sound.Volume = MENU_BUTTON_SOUND_VOLUME
+	sound.RollOffMode = Enum.RollOffMode.Linear
+	sound.Parent = SoundService
+	sound:Play()
+	sound.Ended:Connect(function()
+		sound:Destroy()
+	end)
+end
+
+local function ensureUIScale(target: GuiObject, scaleName: string): UIScale
+	local existing = target:FindFirstChild(scaleName)
+	if existing and existing:IsA("UIScale") then
+		return existing
+	end
+	local scale = Instance.new("UIScale")
+	scale.Name = scaleName
+	scale.Scale = 1
+	scale.Parent = target
+	return scale
+end
+
+local function attachMenuButtonEffects(button: GuiButton?)
+	if not button then
+		return
+	end
+	if menuButtonScales[button] then
+		return
+	end
+
+	local scale = ensureUIScale(button, "MenuButtonHoverScale")
+	menuButtonScales[button] = scale
+	scale.Scale = 1
+
+	local function tweenScale(targetScale: number)
+		local activeTween = menuButtonTweens[button]
+		if activeTween then
+			activeTween:Cancel()
+		end
+		local tween = TweenService:Create(scale, MENU_BUTTON_TWEEN, {
+			Scale = targetScale,
+		})
+		menuButtonTweens[button] = tween
+		tween.Completed:Connect(function()
+			if menuButtonTweens[button] == tween then
+				menuButtonTweens[button] = nil
+			end
+		end)
+		tween:Play()
+	end
+
+	button.MouseEnter:Connect(function()
+		tweenScale(MENU_BUTTON_HOVER_SCALE)
+	end)
+
+	button.MouseLeave:Connect(function()
+		tweenScale(1)
+	end)
+
+	button.InputEnded:Connect(function(input)
+		local inputType = input.UserInputType
+		if inputType == Enum.UserInputType.Touch or inputType == Enum.UserInputType.MouseButton1 then
+			tweenScale(1)
+		end
+	end)
+
+	button.SelectionLost:Connect(function()
+		tweenScale(1)
+	end)
+
+	button.Activated:Connect(function()
+		tweenScale(1)
+		playMenuButtonClickSound()
+	end)
+
+	button.Destroying:Connect(function()
+		local activeTween = menuButtonTweens[button]
+		if activeTween then
+			activeTween:Cancel()
+		end
+		menuButtonTweens[button] = nil
+		menuButtonScales[button] = nil
+	end)
+end
+
+local function setPopupVisible(frame: GuiObject, shouldShow: boolean)
+	if framePopTargets[frame] == shouldShow then
+		if shouldShow and not frame.Visible then
+			frame.Visible = true
+		end
+		return
+	end
+	framePopTargets[frame] = shouldShow
+
+	local scale = ensureUIScale(frame, POPUP_SCALE_NAME)
+	local activeTween = framePopTweens[frame]
+	if activeTween then
+		activeTween:Cancel()
+		framePopTweens[frame] = nil
+	end
+
+	if shouldShow then
+		frame.Visible = true
+		scale.Scale = POPUP_HIDDEN_SCALE
+		local tween = TweenService:Create(scale, POPUP_SHOW_TWEEN, {
+			Scale = 1,
+		})
+		framePopTweens[frame] = tween
+		tween.Completed:Connect(function()
+			if framePopTweens[frame] == tween then
+				framePopTweens[frame] = nil
+			end
+		end)
+		tween:Play()
+		return
+	end
+
+	if not frame.Visible then
+		framePopTargets[frame] = false
+		scale.Scale = 1
+		return
+	end
+
+	local tween = TweenService:Create(scale, POPUP_HIDE_TWEEN, {
+		Scale = POPUP_HIDDEN_SCALE,
+	})
+	framePopTweens[frame] = tween
+	tween.Completed:Connect(function()
+		if framePopTweens[frame] ~= tween then
+			return
+		end
+		framePopTweens[frame] = nil
+		if framePopTargets[frame] == false then
+			frame.Visible = false
+			scale.Scale = 1
+		end
+	end)
+	tween:Play()
+end
 
 local function formatLevelDisplay(level: number): string
 	local defaultLevel = PlotStateStore.GetDefaultLevel()
@@ -275,6 +487,18 @@ local function shouldShowMainFrame(): boolean
 	return true
 end
 
+local function refreshUpgradeCutaway()
+	if not isUpgradeViewActive or not shouldShowMainFrame() then
+		CutawayViewController.Release(UPGRADE_CUTAWAY_SOURCE)
+		return
+	end
+
+	CutawayViewController.Request(UPGRADE_CUTAWAY_SOURCE, {
+		Priority = CUTAWAY_PRIORITY,
+		TargetLevel = PlotStateStore.GetActiveLevel(),
+	})
+end
+
 local function updateCancelButtonState()
 	if not CancelPreviewButton then
 		return
@@ -300,16 +524,151 @@ local function updateCancelButtonState()
 	end
 end
 
+local function isMenuBlocked(): boolean
+	if storageMenuActive then
+		return true
+	end
+	if isPreviewActive() then
+		return true
+	end
+	if BuildPaletteUI.IsSelectModeActive() then
+		return true
+	end
+	local paletteFrame = resolveBuildPaletteMainFrame()
+	if paletteFrame and paletteFrame.Visible then
+		return true
+	end
+	return false
+end
+
+local function syncPalettePreviewState()
+	local builderActive = PlotBuilderEnabledValue and boolValueTrue(PlotBuilderEnabledValue)
+	local previewActive = builderActive and isPreviewActive()
+	if previewActive then
+		if BuildPaletteUI.IsVisible() then
+			BuildPaletteUI.Hide()
+			paletteHiddenDuringPreview = true
+		end
+		return
+	end
+
+	if paletteHiddenDuringPreview and builderActive then
+		BuildPaletteUI.Show()
+	end
+	paletteHiddenDuringPreview = false
+end
+
 local function syncVisibility()
 	local builderVisible = shouldShowMainFrame()
 	local previewActive = isPreviewActive()
+	PlotBuilderGui.Enabled = builderVisible
 	MainFrame.Visible = builderVisible
-	if LeftFrame then
-		LeftFrame.Visible = builderVisible
+
+	local showMenuFrame = false
+	local showRightFrame = false
+
+	if not builderVisible then
+		LeftFrame.Visible = false
+	elseif isUpgradeViewActive then
+		LeftFrame.Visible = true
+		showRightFrame = not previewActive
+	else
+		LeftFrame.Visible = false
+		showMenuFrame = not isMenuBlocked()
 	end
-	if RightFrame then
-		RightFrame.Visible = builderVisible and not previewActive
+
+	setPopupVisible(MenuFrame, builderVisible and showMenuFrame)
+	setPopupVisible(RightFrame, builderVisible and showRightFrame)
+
+	refreshUpgradeCutaway()
+end
+
+local function setUpgradeViewActive(active: boolean)
+	if isUpgradeViewActive == active then
+		return
 	end
+	isUpgradeViewActive = active
+	if active then
+		BuildPaletteUI.Hide()
+	else
+		PlotBuilder.RemovePreview()
+	end
+	upgradeViewChangedSignal:Fire(isUpgradeViewActive)
+	syncVisibility()
+end
+
+local function returnToMenuView()
+	setUpgradeViewActive(false)
+end
+
+local function ensureBuildPaletteVisibilityObserver()
+	if BuildPaletteVisibilityConnection then
+		return
+	end
+	local paletteFrame = resolveBuildPaletteMainFrame()
+	if not paletteFrame then
+		return
+	end
+	BuildPaletteVisibilityConnection = paletteFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+		syncVisibility()
+	end)
+end
+
+local function toggleBuildPalette()
+	local paletteFrame = resolveBuildPaletteMainFrame()
+	if paletteFrame and paletteFrame.Visible then
+		BuildPaletteUI.Hide()
+		syncVisibility()
+		return
+	end
+	returnToMenuView()
+	BuildPaletteUI.Show()
+	syncPalettePreviewState()
+	ensureBuildPaletteVisibilityObserver()
+	syncVisibility()
+end
+
+local function toggleStorageInventory()
+	warn("[PlotBuilderUI] Storage inventory UI is not implemented yet.")
+end
+
+local function toggleObjectSelectorMode()
+	if not ObjectSelectorEnabledValue then
+		warn("[PlotBuilderUI] Object selector state missing for menu binding.")
+		return
+	end
+	if boolValueTrue(ObjectSelectorEnabledValue) then
+		ObjectSelector.Hide()
+	else
+		ObjectSelector.Show()
+	end
+end
+
+local function toggleUpgradePanel()
+	setUpgradeViewActive(not isUpgradeViewActive)
+end
+
+local function exitBuilder()
+	returnToMenuView()
+	BuildPaletteUI.Hide()
+	PlotBuilder.Hide()
+end
+
+local function bindMenuButtonHandler(name: string, button: GuiButton?, handler: () -> ())
+	if not button then
+		warn(string.format("[PlotBuilderUI] Missing '%s' menu button", name))
+		return
+	end
+	attachMenuButtonEffects(button)
+	button.Activated:Connect(handler)
+end
+
+local function bindMenuButtons()
+	bindMenuButtonHandler("Paint", MenuButtons.Paint, toggleBuildPalette)
+	bindMenuButtonHandler("Storage", MenuButtons.Storage, toggleStorageInventory)
+	bindMenuButtonHandler("Select", MenuButtons.Select, toggleObjectSelectorMode)
+	bindMenuButtonHandler("Upgrade", MenuButtons.Upgrade, toggleUpgradePanel)
+	bindMenuButtonHandler("Back", MenuButtons.Back, exitBuilder)
 end
 
 local function ensureItemLayout()
@@ -934,6 +1293,29 @@ local function bindCancelPreviewButton()
 			PlotBuilder.RemovePreview()
 		end)
 	end
+
+	if not PreviewToggleKeyConnection then
+		PreviewToggleKeyConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+			if gameProcessed then
+				return
+			end
+			if input.KeyCode ~= Enum.KeyCode.B then
+				return
+			end
+			if UserInputService:GetFocusedTextBox() then
+				return
+			end
+			if not boolValueTrue(PlotBuilderEnabledValue) then
+				return
+			end
+			if not boolValueTrue(ObjectPreviewEnabledValue) then
+				return
+			end
+			SurfacePaintController.Stop()
+			handlePreviewCancelled()
+			PlotBuilder.Hide()
+		end)
+	end
 end
 
 local function createItemButton(entry: ItemEntry, layoutOrder: number, categoryName: string?): GuiButton
@@ -1536,7 +1918,7 @@ local function bindExitButton(button: GuiButton)
 	end
 	button:SetAttribute(EXIT_BUTTON_BOUND_ATTRIBUTE, true)
 	button.Activated:Connect(function()
-		PlotBuilder.Hide()
+		returnToMenuView()
 	end)
 end
 
@@ -1557,7 +1939,7 @@ local function bindExitControls()
 	if ExitAction then
 		if ExitAction:IsA("InputAction") then
 			connectDebounced(ExitAction, "Exit", function()
-				PlotBuilder.Hide()
+				returnToMenuView()
 			end)
 		elseif ExitAction:IsA("GuiButton") then
 			bindExitButton(ExitAction)
@@ -1577,24 +1959,35 @@ end
 local function initializeVisibilityObservers()
 	if PlotBuilderEnabledValue then
 		PlotBuilderEnabledValue.Changed:Connect(function()
+			if not boolValueTrue(PlotBuilderEnabledValue) then
+				SurfacePaintController.Stop()
+				clearActiveSelection()
+				BuildPaletteUI.Hide()
+				paletteHiddenDuringPreview = false
+			end
+			setUpgradeViewActive(false)
 			syncVisibility()
 			updateCancelButtonState()
-			if not boolValueTrue(PlotBuilderEnabledValue) then
-				clearActiveSelection()
-			end
+			syncPalettePreviewState()
 		end)
 	end
 	if ObjectPreviewEnabledValue then
 		ObjectPreviewEnabledValue.Changed:Connect(function()
 			syncVisibility()
 			updateCancelButtonState()
+			syncPalettePreviewState()
 		end)
 	end
 	if PlotExpansionEnabledValue then
 		PlotExpansionEnabledValue.Changed:Connect(syncVisibility)
 	end
 	if ObjectSelectorEnabledValue then
-		ObjectSelectorEnabledValue.Changed:Connect(syncVisibility)
+		ObjectSelectorEnabledValue.Changed:Connect(function()
+			if boolValueTrue(ObjectSelectorEnabledValue) then
+				returnToMenuView()
+			end
+			syncVisibility()
+		end)
 	end
 end
 
@@ -1630,6 +2023,7 @@ function PlotBuilderUI:Init()
 	registerCategories()
 	bindPanelInputActions()
 	bindSearchBox()
+	bindMenuButtons()
 	bindExitControls()
 	initializeVisibilityObservers()
 	bindCancelPreviewButton()
@@ -1639,11 +2033,29 @@ function PlotBuilderUI:Init()
 	end
 	ActiveLevelChangedConnection = PlotStateStore.OnActiveLevelChanged(function()
 		refreshLevelControls()
+		refreshUpgradeCutaway()
 	end)
 	refreshLevelControls()
 	selectInitialCategory()
+	ensureBuildPaletteVisibilityObserver()
+	PlayerGui.ChildAdded:Connect(function(child)
+		if child.Name ~= "BuildPaletteGui" then
+			return
+		end
+		if not child:IsA("ScreenGui") then
+			return
+		end
+		BuildPaletteGui = child
+		BuildPaletteMainFrame = BuildPaletteGui:FindFirstChild("Main")
+		ensureBuildPaletteVisibilityObserver()
+		syncVisibility()
+	end)
+	BuildPaletteUI.OnSelectModeChanged(function()
+		syncVisibility()
+	end)
 	syncVisibility()
 	updateCancelButtonState()
+	syncPalettePreviewState()
 end
 
 function PlotBuilderUI.Show()
@@ -1651,7 +2063,12 @@ function PlotBuilderUI.Show()
 end
 
 function PlotBuilderUI.Hide()
+	returnToMenuView()
+	setPopupVisible(MenuFrame, false)
+	LeftFrame.Visible = false
+	setPopupVisible(RightFrame, false)
 	MainFrame.Visible = false
+	CutawayViewController.Release(UPGRADE_CUTAWAY_SOURCE)
 end
 
 function PlotBuilderUI.AcquireCancelButton(sourceId: string, handler: (() -> ())?)
@@ -1685,6 +2102,17 @@ function PlotBuilderUI.ReleaseCancelButton(sourceId: string)
 	ExternalCancelSource = nil
 	ExternalCancelHandler = nil
 	updateCancelButtonState()
+end
+
+function PlotBuilderUI.OnUpgradeViewChanged(handler: (boolean) -> ())
+	if typeof(handler) ~= "function" then
+		error("PlotBuilderUI.OnUpgradeViewChanged requires a handler function")
+	end
+	return upgradeViewChangedSignal:Connect(handler)
+end
+
+function PlotBuilderUI.IsUpgradeViewActive(): boolean
+	return isUpgradeViewActive
 end
 
 return PlotBuilderUI

@@ -20,6 +20,7 @@ local TRACKED_PLACEMENT_TYPES = {
 	Roof = true,
 	Floor = true,
 	Ceiling = true,
+	CellObject = true,
 }
 
 local DEFAULT_DIM_TRANSPARENCY = 0.88
@@ -29,6 +30,7 @@ local FLOOR_DIM_TRANSPARENCY = 0.96
 local ROOF_DIM_TRANSPARENCY = 0.9
 local CEILING_DIM_TRANSPARENCY = 0.92
 local TRANSPARENCY_EPSILON = 0.01
+local INVISIBLE_TRANSPARENCY = 1
 
 type CutawayState = PlotStateStore.CutawayState
 type PlacementRoomCoverageRecord = PlotStateStore.PlacementRoomCoverageRecord
@@ -48,6 +50,8 @@ type CameraInfo = {
 	Forward: Vector3,
 }
 
+type VisibilityMode = "Visible" | "Dim" | "Invisible"
+
 type TrackedPlacement = {
 	Instance: Instance,
 	PlacementType: string,
@@ -58,6 +62,7 @@ type TrackedPlacement = {
 	OriginalCanCollide: { [BasePart]: boolean }?,
 	Hidden: boolean,
 	HiddenTransparency: number?,
+	HiddenMode: VisibilityMode?,
 	LevelConnection: RBXScriptConnection?,
 	DestroyingConnection: RBXScriptConnection?,
 	Coverage: PlacementRoomCoverageRecord?,
@@ -291,25 +296,28 @@ local function ensureCutawayValue(): BoolValue
 	return boolValue
 end
 
-local function hidePlacement(entry: TrackedPlacement)
-	local target = computeDimTransparency(entry)
-	if target < 0 then
-		target = 0
-	elseif target > 1 then
-		target = 1
+local function hidePlacement(entry: TrackedPlacement, state: CutawayState, mode: VisibilityMode)
+	local targetTransparency = if mode == "Invisible" then INVISIBLE_TRANSPARENCY else computeDimTransparency(entry)
+	if targetTransparency < 0 then
+		targetTransparency = 0
+	elseif targetTransparency > 1 then
+		targetTransparency = 1
 	end
+
 	if
 		entry.Hidden
 		and entry.HiddenTransparency
-		and math.abs(entry.HiddenTransparency - target) < TRANSPARENCY_EPSILON
+		and math.abs(entry.HiddenTransparency - targetTransparency) < TRANSPARENCY_EPSILON
+		and entry.HiddenMode == mode
 	then
 		return
 	end
 
 	local shouldDisableQuery = false
-	local state = currentState
 	if state.Visible then
-		if entry.PlacementType == "Floor" or entry.PlacementType == "Roof" or entry.PlacementType == "Ceiling" then
+		if mode == "Invisible" then
+			shouldDisableQuery = true
+		elseif entry.PlacementType == "Floor" or entry.PlacementType == "Roof" or entry.PlacementType == "Ceiling" then
 			shouldDisableQuery = entry.Level >= state.TargetLevel
 		end
 	end
@@ -325,8 +333,8 @@ local function hidePlacement(entry: TrackedPlacement)
 		if entry.OriginalLTM[part] == nil then
 			entry.OriginalLTM[part] = part.LocalTransparencyModifier
 		end
-		part.LocalTransparencyModifier = target
-		part.CastShadow = target < 0.9
+		part.LocalTransparencyModifier = targetTransparency
+		part.CastShadow = mode ~= "Invisible" and targetTransparency < 0.9
 
 		if shouldDisableQuery then
 			local queryCache = entry.OriginalCanQuery
@@ -347,7 +355,8 @@ local function hidePlacement(entry: TrackedPlacement)
 		end
 	end
 	entry.Hidden = true
-	entry.HiddenTransparency = target
+	entry.HiddenTransparency = targetTransparency
+	entry.HiddenMode = mode
 end
 
 local function showPlacement(entry: TrackedPlacement)
@@ -387,6 +396,7 @@ local function showPlacement(entry: TrackedPlacement)
 	table.clear(entry.OriginalLTM)
 	entry.Hidden = false
 	entry.HiddenTransparency = nil
+	entry.HiddenMode = nil
 end
 
 local function shouldHideWall(entry: TrackedPlacement, state: CutawayState): boolean
@@ -497,35 +507,57 @@ local function shouldHideRoofOrCeiling(entry: TrackedPlacement, state: CutawaySt
 	return true
 end
 
-local function shouldHide(entry: TrackedPlacement, state: CutawayState): boolean
+local function resolveVisibilityMode(entry: TrackedPlacement, state: CutawayState): VisibilityMode
 	if not state.Visible then
-		return false
+		return "Visible"
 	end
 
-	if entry.PlacementType == "Floor" then
-		return entry.Level > state.TargetLevel
+	local placementType = entry.PlacementType
+	if entry.Level > state.TargetLevel then
+		return "Invisible"
 	end
 
-	if not state.HidePlacementTypes[entry.PlacementType] then
-		return false
+	if placementType == "Floor" then
+		return "Visible"
 	end
 
-	if entry.PlacementType == "Wall" then
-		return shouldHideWall(entry, state)
+	if placementType == "CellObject" then
+		return "Visible"
 	end
 
-	if entry.PlacementType == "Roof" or entry.PlacementType == "Ceiling" then
-		return shouldHideRoofOrCeiling(entry, state)
+	if placementType == "Wall" then
+		if not state.HidePlacementTypes[placementType] then
+			return "Visible"
+		end
+		if not shouldHideWall(entry, state) then
+			return "Visible"
+		end
+		return "Dim"
 	end
 
-	return entry.Level >= state.TargetLevel
+	if placementType == "Roof" or placementType == "Ceiling" then
+		if not state.HidePlacementTypes[placementType] then
+			return "Visible"
+		end
+		if not shouldHideRoofOrCeiling(entry, state) then
+			return "Visible"
+		end
+		return "Dim"
+	end
+
+	if not state.HidePlacementTypes[placementType] then
+		return "Visible"
+	end
+
+	return "Dim"
 end
 
 local function updatePlacementVisibility(entry: TrackedPlacement, state: CutawayState)
-	if shouldHide(entry, state) then
-		hidePlacement(entry)
-	else
+	local mode = resolveVisibilityMode(entry, state)
+	if mode == "Visible" then
 		showPlacement(entry)
+	else
+		hidePlacement(entry, state, mode)
 	end
 end
 
@@ -744,6 +776,7 @@ local function registerPlacement(instance: Instance)
 		OriginalCanCollide = nil,
 		Hidden = false,
 		HiddenTransparency = nil,
+		HiddenMode = nil,
 		LevelConnection = nil,
 		DestroyingConnection = nil,
 		Coverage = nil,

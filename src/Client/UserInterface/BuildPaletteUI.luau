@@ -1,6 +1,8 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -13,7 +15,6 @@ local RightFrame = MainFrame:WaitForChild("Right") :: Frame
 local BottomFrame = LeftFrame:WaitForChild("BottomFrame") :: Frame
 local exitButton = BottomFrame:WaitForChild("CancelButton") :: GuiButton
 local selectButton = BottomFrame:WaitForChild("SelectButton") :: GuiButton
-local ColorPickerButton = MainFrame:WaitForChild("ColorPickerButton") :: GuiButton
 
 local ColorsFrame = RightFrame:WaitForChild("ColorsFrame") :: Frame
 local MaterialsFrame = RightFrame:WaitForChild("MaterialsFrame") :: Frame
@@ -26,10 +27,6 @@ local SurfacePalette = require(ReplicatedStorage.Shared.Configurations.Build.Sur
 local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
 local InterfacesTemplatesFolder = AssetsFolder:WaitForChild("InterfacesTemplates")
 local CancelPreviewButtonTemplate = InterfacesTemplatesFolder:WaitForChild("CancelPreviewButton") :: TextButton
-
-local sliderWidthPixels = 20
-local sliderHeightPixels = 120
-local previewSizePixels = 64
 
 local presetColorDefinitions: { Color3 } = {
 	Color3.fromRGB(255, 255, 255),
@@ -56,6 +53,14 @@ BuildPaletteUI.ColorChanged = colorChangedSignal
 BuildPaletteUI.MaterialChanged = materialChangedSignal
 local suggestionSelectedSignal = GoodSignal.new()
 BuildPaletteUI.SuggestionSelected = suggestionSelectedSignal
+local selectModeChangedSignal = GoodSignal.new()
+BuildPaletteUI.SelectModeChanged = selectModeChangedSignal
+
+local CURSOR_ICON_ASSET_ID = "rbxassetid://79483268729599"
+local POPUP_HIDDEN_SCALE = 0.9
+local POPUP_SHOW_TWEEN = TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local POPUP_HIDE_TWEEN = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+local POPUP_SCALE_NAME = "PalettePopScale"
 
 local isInitialized = false
 local sliderConnections: { RBXScriptConnection } = {}
@@ -66,8 +71,6 @@ type SliderReferences = {
 	valueSliderFrame: Frame,
 	saturationGradient: UIGradient,
 	valueGradient: UIGradient,
-	slidersContainer: Frame,
-	sliderElements: { GuiObject },
 	selectedColorPreviewImage: ImageLabel,
 	selectedColorLabel: TextLabel,
 	materialNameLabel: TextLabel,
@@ -87,7 +90,6 @@ local currentSaturation = 1.0
 local currentValue = 1.0
 local selectedPresetButton: TextButton? = nil
 local selectedMaterialButton: GuiButton? = nil
-local slidersVisible = false
 local currentMaterialImage: string? = nil
 local currentMaterialRectOffset: Vector2? = nil
 local currentMaterialRectSize: Vector2? = nil
@@ -100,12 +102,146 @@ local paletteCancelSource: string? = nil
 local paletteCancelHandler: (() -> ())? = nil
 local currentSuggestions: { PaintSuggestion } = {}
 local suggestionButtonConnections: { RBXScriptConnection } = {}
+local boundMaterialButtons: { [GuiButton]: boolean } = {}
+local isSelectModeActive = false
+local isPaletteVisible = false
+local paletteScale: UIScale? = nil
+local paletteTween: Tween? = nil
+local cursorGui: ScreenGui? = nil
+local cursorImage: ImageLabel? = nil
+local cursorConnection: RBXScriptConnection? = nil
+local cursorActive = false
+
+local CURSOR_IMAGE_SIZE = Vector2.new(48, 48)
+local CURSOR_OFFSET = Vector2.new(-8, -8)
 
 local function clearSliderConnections()
 	for _, connection in ipairs(sliderConnections) do
 		connection:Disconnect()
 	end
 	table.clear(sliderConnections)
+end
+
+local function ensurePaletteScale(): UIScale
+	if paletteScale and paletteScale.Parent == MainFrame then
+		return paletteScale
+	end
+	local existing = MainFrame:FindFirstChild(POPUP_SCALE_NAME)
+	if existing and existing:IsA("UIScale") then
+		paletteScale = existing
+		return paletteScale
+	end
+	local scale = Instance.new("UIScale")
+	scale.Name = POPUP_SCALE_NAME
+	scale.Scale = 1
+	scale.Parent = MainFrame
+	paletteScale = scale
+	return scale
+end
+
+local function tweenPaletteVisibility(shouldShow: boolean)
+	local scale = ensurePaletteScale()
+	if paletteTween then
+		paletteTween:Cancel()
+		paletteTween = nil
+	end
+
+	if shouldShow then
+		BuildPaletteGui.Enabled = true
+		MainFrame.Visible = true
+		scale.Scale = POPUP_HIDDEN_SCALE
+		local tween = TweenService:Create(scale, POPUP_SHOW_TWEEN, {
+			Scale = 1,
+		})
+		paletteTween = tween
+		tween.Completed:Connect(function()
+			if paletteTween == tween then
+				paletteTween = nil
+			end
+		end)
+		tween:Play()
+		return
+	end
+
+	if not MainFrame.Visible then
+		scale.Scale = 1
+		return
+	end
+
+	local tween = TweenService:Create(scale, POPUP_HIDE_TWEEN, {
+		Scale = POPUP_HIDDEN_SCALE,
+	})
+	paletteTween = tween
+	tween.Completed:Connect(function()
+		if paletteTween ~= tween then
+			return
+		end
+		paletteTween = nil
+		if not isPaletteVisible then
+			MainFrame.Visible = false
+			scale.Scale = 1
+		end
+	end)
+	tween:Play()
+end
+
+local function ensureCursorGui(): ImageLabel
+	if cursorImage and cursorImage.Parent then
+		return cursorImage
+	end
+
+	local gui = cursorGui
+	if not gui or not gui.Parent then
+		gui = Instance.new("ScreenGui")
+		gui.Name = "BuildPaletteCursorGui"
+		gui.ResetOnSpawn = false
+		gui.IgnoreGuiInset = true
+		gui.DisplayOrder = 1000
+		gui.Parent = PlayerGui
+		cursorGui = gui
+	end
+
+	local image = Instance.new("ImageLabel")
+	image.Name = "CursorIcon"
+	image.Image = CURSOR_ICON_ASSET_ID
+	image.BackgroundTransparency = 1
+	image.Size = UDim2.fromOffset(CURSOR_IMAGE_SIZE.X, CURSOR_IMAGE_SIZE.Y)
+	image.AnchorPoint = Vector2.new(0, 0)
+	image.Visible = false
+	image.ZIndex = 10
+	image.Parent = gui
+	cursorImage = image
+	return image
+end
+
+local function setCursorActive(isActive: boolean)
+	if cursorActive == isActive then
+		return
+	end
+	cursorActive = isActive
+
+	if isActive then
+		local image = ensureCursorGui()
+		image.Visible = true
+		UserInputService.MouseIconEnabled = false
+		if cursorConnection then
+			cursorConnection:Disconnect()
+		end
+		cursorConnection = RunService.RenderStepped:Connect(function()
+			local mousePosition = UserInputService:GetMouseLocation()
+			image.Position = UDim2.fromOffset(mousePosition.X + CURSOR_OFFSET.X, mousePosition.Y + CURSOR_OFFSET.Y)
+		end)
+		return
+	end
+
+	if cursorConnection then
+		cursorConnection:Disconnect()
+		cursorConnection = nil
+	end
+	UserInputService.MouseIconEnabled = true
+	if cursorImage then
+		cursorImage.Visible = false
+	end
 end
 
 local function createRoundCorner(parent: Instance, cornerRadiusScale: number)
@@ -115,51 +251,16 @@ local function createRoundCorner(parent: Instance, cornerRadiusScale: number)
 	return corner
 end
 
-local function createVerticalSlider(parent: Instance, name: string, backgroundColor: Color3): Frame
-	local sliderFrame = Instance.new("Frame")
-	sliderFrame.Name = name
-	sliderFrame.BackgroundColor3 = backgroundColor
-	sliderFrame.BorderSizePixel = 0
-	sliderFrame.Size = UDim2.fromOffset(sliderWidthPixels, sliderHeightPixels)
-	sliderFrame.Parent = parent
-	createRoundCorner(sliderFrame, 0.25)
-
-	local trackPadding = Instance.new("UIPadding")
-	trackPadding.PaddingTop = UDim.new(0, 4)
-	trackPadding.PaddingBottom = UDim.new(0, 4)
-	trackPadding.Parent = sliderFrame
-
-	local handle = Instance.new("Frame")
-	handle.Name = "Handle"
-	handle.Size = UDim2.new(1, 0, 0, 4)
-	handle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	handle.BorderSizePixel = 0
-	handle.Parent = sliderFrame
-	createRoundCorner(handle, 1)
-
-	return sliderFrame
-end
-
 local function updateSliderHandlePosition(sliderFrame: Frame, value: number)
 	local handle = sliderFrame:FindFirstChild("Handle")
 	if handle and handle:IsA("Frame") then
 		handle.AnchorPoint = Vector2.new(0, 0.5)
-		handle.Position = UDim2.fromScale(0, 1 - value)
+		handle.Position = UDim2.fromScale(0, value)
 	end
 end
 
 local function getCurrentColor(): Color3
 	return Color3.fromHSV(currentHue, currentSaturation, currentValue)
-end
-
-local function refreshSliderVisibility()
-	if not sliderRefs then
-		return
-	end
-	for _, slider in ipairs(sliderRefs.sliderElements) do
-		slider.Visible = slidersVisible
-		slider.Active = slidersVisible
-	end
 end
 
 local function clearPresetSelection()
@@ -328,8 +429,7 @@ local function connectVerticalSliderInput(sliderFrame: Frame, onValueChanged: (n
 			return
 		end
 		local relative = math.clamp((inputPositionY - top) / height, 0, 1)
-		local value = 1 - relative
-		onValueChanged(value)
+		onValueChanged(relative)
 	end
 
 	table.insert(
@@ -392,141 +492,27 @@ local function ensureSliderUi(): SliderReferences
 
 	LeftFrame.Visible = true
 
-	local container = LeftFrame:FindFirstChild("ColorPickerContainer")
-	if not container or not container:IsA("Frame") then
-		container = Instance.new("Frame")
-		container.Name = "ColorPickerContainer"
-		container.BackgroundTransparency = 1
-		container.Size = UDim2.new(1, -12, 1, -12)
-		container.Position = UDim2.fromOffset(6, 6)
-		container.Parent = LeftFrame
+	local colorPickerContainer = LeftFrame:WaitForChild("ColorPickerContainer") :: Frame
+	local pickerRow = colorPickerContainer:WaitForChild("PickerRow") :: Frame
+	local slidersContainer = pickerRow:WaitForChild("SlidersContainer") :: Frame
 
-		local padding = Instance.new("UIPadding")
-		padding.PaddingTop = UDim.new(0, 6)
-		padding.PaddingBottom = UDim.new(0, 6)
-		padding.PaddingLeft = UDim.new(0, 6)
-		padding.PaddingRight = UDim.new(0, 6)
-		padding.Parent = container
-
-		local layout = Instance.new("UIListLayout")
-		layout.FillDirection = Enum.FillDirection.Vertical
-		layout.SortOrder = Enum.SortOrder.LayoutOrder
-		layout.Padding = UDim.new(0, 8)
-		layout.Parent = container
-	end
-
-	local headerLabel = container:FindFirstChild("ColorPickerLabel")
-	if not headerLabel then
-		headerLabel = Instance.new("TextLabel")
-		headerLabel.Name = "ColorPickerLabel"
-		headerLabel.BackgroundTransparency = 1
-		headerLabel.Size = UDim2.new(1, 0, 0, 20)
-		headerLabel.Font = Enum.Font.GothamBold
-		headerLabel.Text = "Color Picker"
-		headerLabel.TextSize = 16
-		headerLabel.TextColor3 = Color3.fromRGB(240, 240, 240)
-		headerLabel.TextXAlignment = Enum.TextXAlignment.Left
-		headerLabel.Parent = container
-	end
-
-	local pickerRow = container:FindFirstChild("PickerRow")
-	if not pickerRow then
-		pickerRow = Instance.new("Frame")
-		pickerRow.Name = "PickerRow"
-		pickerRow.BackgroundTransparency = 1
-		pickerRow.Size = UDim2.new(1, 0, 0, 150)
-		pickerRow.Parent = container
-
-		local rowLayout = Instance.new("UIListLayout")
-		rowLayout.FillDirection = Enum.FillDirection.Horizontal
-		rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
-		rowLayout.Padding = UDim.new(0, 10)
-		rowLayout.Parent = pickerRow
-	end
-
-	local slidersContainer = pickerRow:FindFirstChild("SlidersContainer")
-	if not slidersContainer then
-		slidersContainer = Instance.new("Frame")
-		slidersContainer.Name = "SlidersContainer"
-		slidersContainer.BackgroundTransparency = 1
-		slidersContainer.Size = UDim2.new(0, 140, 1, 0)
-		slidersContainer.Parent = pickerRow
-
-		local slidersLayout = Instance.new("UIListLayout")
-		slidersLayout.FillDirection = Enum.FillDirection.Horizontal
-		slidersLayout.SortOrder = Enum.SortOrder.LayoutOrder
-		slidersLayout.Padding = UDim.new(0, 8)
-		slidersLayout.Parent = slidersContainer
-	end
-
-	local previewFrame = pickerRow:FindFirstChild("SelectedColorPreview")
-	if not previewFrame or not previewFrame:IsA("ImageLabel") then
-		if previewFrame then
-			previewFrame:Destroy()
+	local function expectSlider(name: string): Frame
+		local slider = slidersContainer:FindFirstChild(name)
+		if not slider or not slider:IsA("Frame") then
+			error(string.format("BuildPaletteUI missing slider '%s' inside SlidersContainer", name))
 		end
-		local newPreview = Instance.new("ImageLabel")
-		newPreview.Name = "SelectedColorPreview"
-		newPreview.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-		newPreview.BorderSizePixel = 0
-		newPreview.Size = UDim2.fromOffset(previewSizePixels, previewSizePixels)
-		newPreview.ScaleType = Enum.ScaleType.Stretch
-		newPreview.Image = ""
-		newPreview.ImageTransparency = 1
-		newPreview.Parent = pickerRow
-		createRoundCorner(newPreview, 0.35)
-		previewFrame = newPreview
-	else
-		previewFrame = previewFrame :: ImageLabel
-	end
-	previewFrame.BackgroundTransparency = 0
-	previewFrame.ClipsDescendants = false
-
-	local previewLabel = previewFrame:FindFirstChild("SelectedColorLabel")
-	if not previewLabel then
-		previewLabel = Instance.new("TextLabel")
-		previewLabel.Name = "SelectedColorLabel"
-	else
-		previewLabel = previewLabel :: TextLabel
+		return slider
 	end
 
-	previewLabel.AnchorPoint = Vector2.new(0.5, 0)
-	previewLabel.Position = UDim2.new(0.5, 0, 1, 6)
-	previewLabel.Size = UDim2.new(1, 16, 0, 26)
-	previewLabel.BackgroundTransparency = 1
-	previewLabel.Font = Enum.Font.GothamBold
-	previewLabel.TextSize = 16
-	previewLabel.TextColor3 = Color3.fromRGB(245, 245, 245)
-	previewLabel.TextXAlignment = Enum.TextXAlignment.Center
-	previewLabel.Text = "255, 0, 0"
-	previewLabel.Parent = previewFrame
-	previewLabel.ZIndex = 3
+	local hueSlider = expectSlider("HueSlider")
+	local saturationSlider = expectSlider("SaturationSlider")
+	local valueSlider = expectSlider("ValueSlider")
 
-	local materialNameLabel = previewFrame:FindFirstChild("MaterialNameLabel")
-	if not materialNameLabel then
-		materialNameLabel = Instance.new("TextLabel")
-		materialNameLabel.Name = "MaterialNameLabel"
-	else
-		materialNameLabel = materialNameLabel :: TextLabel
-	end
-
-	materialNameLabel.AnchorPoint = Vector2.new(0.5, 0)
-	materialNameLabel.Position = UDim2.new(0.5, 0, 1, 32)
-	materialNameLabel.Size = UDim2.new(1, 20, 0, 22)
-	materialNameLabel.BackgroundTransparency = 1
-	materialNameLabel.Font = Enum.Font.Gotham
-	materialNameLabel.TextSize = 14
-	materialNameLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
-	materialNameLabel.TextXAlignment = Enum.TextXAlignment.Center
-	materialNameLabel.Text = currentMaterialName or "Material"
-	materialNameLabel.Parent = previewFrame
-	materialNameLabel.ZIndex = 3
-
-	local hueSlider = slidersContainer:FindFirstChild("HueSlider")
-	if not hueSlider then
-		hueSlider = createVerticalSlider(slidersContainer, "HueSlider", Color3.fromRGB(128, 128, 128))
-		local gradient = Instance.new("UIGradient")
-		gradient.Rotation = 90
-		gradient.Color = ColorSequence.new({
+	local hueGradient = hueSlider:FindFirstChildWhichIsA("UIGradient")
+	if not hueGradient then
+		hueGradient = Instance.new("UIGradient")
+		hueGradient.Rotation = 90
+		hueGradient.Color = ColorSequence.new({
 			ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 0, 0)),
 			ColorSequenceKeypoint.new(0.17, Color3.fromRGB(255, 255, 0)),
 			ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0, 255, 0)),
@@ -535,51 +521,52 @@ local function ensureSliderUi(): SliderReferences
 			ColorSequenceKeypoint.new(0.83, Color3.fromRGB(255, 0, 255)),
 			ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 0, 0)),
 		})
-		gradient.Parent = hueSlider
+		hueGradient.Parent = hueSlider
+	else
+		hueGradient.Rotation = 90
 	end
 
-	local saturationSlider = slidersContainer:FindFirstChild("SaturationSlider")
-	local saturationGradient = saturationSlider and saturationSlider:FindFirstChildWhichIsA("UIGradient")
-	if not saturationSlider then
-		saturationSlider = createVerticalSlider(slidersContainer, "SaturationSlider", Color3.fromRGB(255, 255, 255))
-		saturationGradient = Instance.new("UIGradient")
-		saturationGradient.Rotation = 90
-		saturationGradient.Parent = saturationSlider
-	elseif not saturationGradient then
-		saturationGradient = Instance.new("UIGradient")
-		saturationGradient.Rotation = 90
-		saturationGradient.Parent = saturationSlider
+	local function ensureGradient(slider: Frame): UIGradient
+		local gradient = slider:FindFirstChildWhichIsA("UIGradient")
+		if gradient then
+			gradient.Rotation = 90
+			return gradient
+		end
+		local newGradient = Instance.new("UIGradient")
+		newGradient.Rotation = 90
+		newGradient.Parent = slider
+		return newGradient
 	end
 
-	local valueSlider = slidersContainer:FindFirstChild("ValueSlider")
-	local valueGradient = valueSlider and valueSlider:FindFirstChildWhichIsA("UIGradient")
-	if not valueSlider then
-		valueSlider = createVerticalSlider(slidersContainer, "ValueSlider", Color3.fromRGB(0, 0, 0))
-		valueGradient = Instance.new("UIGradient")
-		valueGradient.Rotation = 90
-		valueGradient.Parent = valueSlider
-	elseif not valueGradient then
-		valueGradient = Instance.new("UIGradient")
-		valueGradient.Rotation = 90
-		valueGradient.Parent = valueSlider
+	local saturationGradient = ensureGradient(saturationSlider)
+	local valueGradient = ensureGradient(valueSlider)
+
+	local selectedColorPreview = colorPickerContainer:WaitForChild("SelectedColorPreview")
+	if not selectedColorPreview:IsA("ImageLabel") then
+		error("BuildPaletteUI missing SelectedColorPreview ImageLabel")
 	end
+	local previewLabel = selectedColorPreview:WaitForChild("SelectedColorLabel")
+	if not previewLabel:IsA("TextLabel") then
+		error("BuildPaletteUI missing SelectedColorLabel TextLabel")
+	end
+	local materialNameLabel = selectedColorPreview:WaitForChild("MaterialNameLabel")
+	if not materialNameLabel:IsA("TextLabel") then
+		error("BuildPaletteUI missing MaterialNameLabel TextLabel")
+	end
+	local previewImage = selectedColorPreview :: ImageLabel
+	local previewTextLabel = previewLabel :: TextLabel
+	local materialNameTextLabel = materialNameLabel :: TextLabel
+	materialNameTextLabel.Text = currentMaterialName or "Material"
 
 	sliderRefs = {
 		hueSliderFrame = hueSlider,
 		saturationSliderFrame = saturationSlider,
 		valueSliderFrame = valueSlider,
-		saturationGradient = saturationGradient :: UIGradient,
-		valueGradient = valueGradient :: UIGradient,
-		slidersContainer = slidersContainer,
-		sliderElements = {
-			headerLabel,
-			hueSlider,
-			saturationSlider,
-			valueSlider,
-		},
-		selectedColorPreviewImage = previewFrame :: ImageLabel,
-		selectedColorLabel = previewLabel :: TextLabel,
-		materialNameLabel = materialNameLabel :: TextLabel,
+		saturationGradient = saturationGradient,
+		valueGradient = valueGradient,
+		selectedColorPreviewImage = previewImage,
+		selectedColorLabel = previewTextLabel,
+		materialNameLabel = materialNameTextLabel,
 	}
 	local refs = sliderRefs
 	if not refs then
@@ -607,7 +594,6 @@ local function ensureSliderUi(): SliderReferences
 	end)
 
 	refreshColorPreview(true)
-	refreshSliderVisibility()
 	return typedRefs
 end
 
@@ -755,10 +741,10 @@ local function applyMaterialSelectionFromButton(materialButton: GuiButton)
 end
 
 local function bindMaterialButton(materialButton: GuiButton)
-	if materialButton:GetAttribute("MaterialButtonBound") then
+	if boundMaterialButtons[materialButton] then
 		return
 	end
-	materialButton:SetAttribute("MaterialButtonBound", true)
+	boundMaterialButtons[materialButton] = true
 	materialButton.Activated:Connect(function()
 		applyMaterialSelectionFromButton(materialButton)
 	end)
@@ -769,6 +755,7 @@ local function bindMaterialButton(materialButton: GuiButton)
 		if selectedMaterialButton == materialButton then
 			selectedMaterialButton = nil
 		end
+		boundMaterialButtons[materialButton] = nil
 	end)
 	getOrCreateMaterialStroke(materialButton)
 end
@@ -814,18 +801,11 @@ function BuildPaletteUI.OnSuggestionSelected(handler: (PaintSuggestion) -> ())
 end
 
 local function setSelectButtonActiveState(isActive: boolean)
+	isSelectModeActive = isActive
 	selectButton:SetAttribute("Active", isActive)
 	selectButton:SetAttribute("SurfacePaintActive", isActive)
-end
-
-local function applySliderVisibility()
-	refreshSliderVisibility()
-	ColorPickerButton:SetAttribute("PaletteVisible", slidersVisible)
-end
-
-local function toggleSliderVisibility()
-	slidersVisible = not slidersVisible
-	applySliderVisibility()
+	setCursorActive(isActive)
+	selectModeChangedSignal:Fire(isActive)
 end
 
 local function ensureCancelButton(): TextButton
@@ -876,26 +856,32 @@ function BuildPaletteUI.Init()
 	createPresetButtons()
 	BuildPaletteUI.SetSuggestions({})
 	bindMaterialButtons()
-	applySliderVisibility()
 	selectButton.Activated:Connect(function()
 		selectActivatedSignal:Fire()
 	end)
 	exitButton.Activated:Connect(BuildPaletteUI.Hide)
-	ColorPickerButton.Activated:Connect(toggleSliderVisibility)
 	isInitialized = true
 end
 
 function BuildPaletteUI.Show()
+	if isPaletteVisible then
+		return
+	end
+	isPaletteVisible = true
 	BuildPaletteGui.Enabled = true
-	MainFrame.Visible = true
+	tweenPaletteVisibility(true)
 end
 
 function BuildPaletteUI.Hide()
-	MainFrame.Visible = false
+	if not isPaletteVisible then
+		return
+	end
+	isPaletteVisible = false
+	tweenPaletteVisibility(false)
 end
 
 function BuildPaletteUI.IsVisible(): boolean
-	return BuildPaletteGui.Enabled
+	return isPaletteVisible
 end
 
 function BuildPaletteUI.GetSelectedColor(): Color3
@@ -938,6 +924,17 @@ function BuildPaletteUI.OnSelectActivated(handler: () -> ())
 		error("BuildPaletteUI.OnSelectActivated requires a handler function")
 	end
 	return selectActivatedSignal:Connect(handler)
+end
+
+function BuildPaletteUI.OnSelectModeChanged(handler: (boolean) -> ())
+	if typeof(handler) ~= "function" then
+		error("BuildPaletteUI.OnSelectModeChanged requires a handler function")
+	end
+	return selectModeChangedSignal:Connect(handler)
+end
+
+function BuildPaletteUI.IsSelectModeActive(): boolean
+	return isSelectModeActive
 end
 
 function BuildPaletteUI.SetSelectModeActive(isActive: boolean)

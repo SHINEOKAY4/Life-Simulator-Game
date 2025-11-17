@@ -13,7 +13,6 @@ local PlacementCelebration = require(script.Parent.PlacementCelebration)
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local SurfacePalette = require(ReplicatedStorage.Shared.Configurations.Build.SurfacePalette)
-local CutawayViewController = require(script.Parent.CutawayViewController)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -44,7 +43,6 @@ local DEFAULT_BUILD_CONTEXT_PRIORITY = BuildContext.Priority or 0
 local PREVIEW_SUPPRESSED_PRIORITY = DEFAULT_BUILD_CONTEXT_PRIORITY - 1
 local DEFAULT_FLOOR_CONTEXT_PRIORITY = FloorContext.Priority or (DEFAULT_BUILD_CONTEXT_PRIORITY + 1)
 local FLOOR_INPUT_SUPPRESS_SECONDS = 0.12
-local BUILDER_CUTAWAY_SOURCE = "PlotBuilder"
 
 local previewRestoreToken = 0
 local floorInputSuppressUntil = 0
@@ -61,20 +59,6 @@ local function syncInputContextPriorities()
 	else
 		BuildContext.Priority = DEFAULT_BUILD_CONTEXT_PRIORITY
 		FloorContext.Priority = DEFAULT_FLOOR_CONTEXT_PRIORITY
-	end
-end
-
-local function refreshCutawayForBuilder()
-	if not PlotBuilderEnabled then
-		return
-	end
-	if PlotBuilderEnabled.Value then
-		CutawayViewController.Request(BUILDER_CUTAWAY_SOURCE, {
-			Priority = 20,
-			TargetLevel = PlotStateStore.GetActiveLevel(),
-		})
-	else
-		CutawayViewController.Release(BUILDER_CUTAWAY_SOURCE)
 	end
 end
 
@@ -235,16 +219,6 @@ local function runDebounced(actionName: string, callback: () -> ()): ()
 end
 
 function PlotBuilder.Init()
-	if PlotBuilderEnabled then
-		PlotBuilderEnabled.Changed:Connect(refreshCutawayForBuilder)
-	end
-
-	PlotStateStore.OnActiveLevelChanged(function()
-		if PlotBuilderEnabled and PlotBuilderEnabled.Value then
-			refreshCutawayForBuilder()
-		end
-	end)
-
 	PlotExpansionEnabled.Changed:Connect(function()
 		if PlotExpansionEnabled.Value and PlotBuilderEnabled.Value then
 			PlotBuilder.Hide()
@@ -321,21 +295,18 @@ function PlotBuilder.Init()
 	end)
 
 	syncInputContextPriorities()
-	refreshCutawayForBuilder()
 end
 
 function PlotBuilder.Show()
 	PlotBuilderEnabled.Value = true
 	PlotBuilderMain.Visible = true
 	PlotFinder.StartTracking(Player)
-	refreshCutawayForBuilder()
 end
 
 function PlotBuilder.Hide()
 	PlotBuilderEnabled.Value = false
 	PlotBuilderMain.Visible = false
 	PlotBuilder.RemovePreview()
-	refreshCutawayForBuilder()
 end
 
 function PlotBuilder.PreviewSelected(itemId: string, initialFacing: string?)
