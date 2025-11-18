@@ -3,7 +3,7 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
-local DirectActionService = require(ServerScriptService.Server.Services.DirectActionService)
+local StationActionRegistry = require(ServerScriptService.Server.Modules.StationActionRegistry)
 local KitchenService = require(ServerScriptService.Server.Services.KitchenService)
 local StationManager = require(ServerScriptService.Server.Services.ResidentAutonomyService.StationManager)
 local State = require(script.Parent.State)
@@ -167,7 +167,7 @@ function Utils.hasBlockingCriticalNeed(
 			if value <= def.Critical then
 				local stationType = State.NeedToStationType[needName]
 				if State.SurvivalNeeds[needName] then
-					if stationType and DirectActionService.HasHandler(stationType) then
+					if stationType and StationActionRegistry.HasHandler(stationType) then
 						if not State.isSurvivalNeedUnavailable(resident, needName) then
 							local actionable = false
 							if needName == "Hunger" then
@@ -185,7 +185,7 @@ function Utils.hasBlockingCriticalNeed(
 					end
 				else
 					if stationType then
-						if not DirectActionService.HasHandler(stationType) then
+						if not StationActionRegistry.HasHandler(stationType) then
 							return true
 						end
 						if cache and hasStationsForNeed(player, cache, stationType, residentName) then
@@ -222,7 +222,7 @@ function Utils.shouldBlockRoam(player: Player, resident: ResidentState, stationC
 		if value <= def.Critical then
 			local stationType = State.NeedToStationType[needName]
 			if State.SurvivalNeeds[needName] then
-				if stationType and DirectActionService.HasHandler(stationType) then
+				if stationType and StationActionRegistry.HasHandler(stationType) then
 					if not State.isSurvivalNeedUnavailable(resident, needName) then
 						local actionable = false
 						if needName == "Hunger" then
@@ -241,11 +241,11 @@ function Utils.shouldBlockRoam(player: Player, resident: ResidentState, stationC
 			else
 				if stationType then
 					if
-						DirectActionService.HasHandler(stationType)
+						StationActionRegistry.HasHandler(stationType)
 						and hasStationsForNeed(player, cache, stationType, residentName)
 					then
 						return true
-					elseif not DirectActionService.HasHandler(stationType) then
+					elseif not StationActionRegistry.HasHandler(stationType) then
 						return true
 					end
 				else

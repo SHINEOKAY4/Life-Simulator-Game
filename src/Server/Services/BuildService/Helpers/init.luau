@@ -104,6 +104,13 @@ function Helpers.sendPlacementDelta(
 )
 	local width, depth = Helpers.resolveFootprintDimensions(itemId, metadata)
 	local metadataPayload = if metadata ~= nil then cloneMetadata(metadata) else nil
+	local subSlotId = ""
+	if metadataPayload then
+		local slotCandidate = metadataPayload.SubSlotId or metadataPayload.subSlotId
+		if typeof(slotCandidate) == "string" and slotCandidate ~= "" then
+			subSlotId = slotCandidate
+		end
+	end
 	Packets.PlacementDelta:FireClient(player, {
 		Action = action,
 		Item = {
@@ -116,6 +123,7 @@ function Helpers.sendPlacementDelta(
 			Metadata = metadataPayload,
 			Level = level,
 			PlacementKey = placementKey,
+			SubSlotId = subSlotId,
 		},
 	})
 end
@@ -126,6 +134,10 @@ end
 
 function Helpers.getPlacementKeyLabel(itemSpec: { [string]: any }?): string
 	return PlacementBehavior.getPlacementKeyLabel(itemSpec)
+end
+
+function Helpers.getPlacementKeyLabelForSubSlot(itemSpec: { [string]: any }?, subSlotId: string?): string
+	return PlacementBehavior.getPlacementKeyLabelForSubSlot(itemSpec, subSlotId)
 end
 
 function Helpers.allowsStacking(itemSpec: { [string]: any }?): boolean

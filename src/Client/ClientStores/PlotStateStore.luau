@@ -944,6 +944,13 @@ function PlotStateStore.Init()
 		local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
 		local placementKeyType = PlacementBehavior.getPlacementKeyLabel(spec)
 		local metadata = normalizeMetadata(delta.Item.Metadata)
+		local deltaSubSlotId = delta.Item.SubSlotId or delta.Item.subSlotId
+		if typeof(deltaSubSlotId) == "string" and deltaSubSlotId ~= "" then
+			if metadata == nil then
+				metadata = {}
+			end
+			metadata.SubSlotId = deltaSubSlotId
+		end
 		local widthCells = delta.Item.WidthCells or delta.Item.widthCells
 		local depthCells = delta.Item.DepthCells or delta.Item.depthCells
 		if not widthCells or widthCells <= 0 then

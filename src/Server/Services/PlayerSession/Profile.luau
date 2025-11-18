@@ -14,6 +14,14 @@ local Profile = {
 		Cash = 0,
 		OutstandingBalance = 0,
 	},
+	TenantState = {
+		Version = 1,
+		LastOfferUnix = 0,
+		OfferSequence = 0,
+		PendingOffer = false,
+		ActiveLease = false,
+		OutstandingRent = 0,
+	},
 	WorldEventState = {
 		RotationId = "",
 		RotationEndsAt = 0,

@@ -4,7 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ResidentChat = require(ServerScriptService.Server.Utilities.ResidentChat)
-local DirectActionService = require(ServerScriptService.Server.Services.DirectActionService)
+local StationActionRegistry = require(ServerScriptService.Server.Modules.StationActionRegistry)
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local KitchenService = require(ServerScriptService.Server.Services.KitchenService)
 local TraitUtils = require(ReplicatedStorage.Shared.Utilities.TraitUtils)
@@ -177,7 +177,7 @@ local function buildNeedContexts(
 		if cached ~= nil then
 			return cached
 		end
-		local available = DirectActionService.HasHandler(stationType)
+		local available = StationActionRegistry.HasHandler(stationType)
 		handlerCache[stationType] = available
 		return available
 	end

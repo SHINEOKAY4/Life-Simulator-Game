@@ -17,6 +17,18 @@ local Decorations = {
 			SurfaceOffsetStuds = 0.1,
 			ModelPath = { "Furnitures", "Lamp" },
 			AssetId = 116003840493275,
+			SubSlots = {
+				Group = "SmallDecor",
+				AllowMixing = true,
+				DefaultId = "Center",
+				Slots = {
+					{ Id = "Center" },
+					{ Id = "North", OffsetCell = { X = 0, Z = -0.32 } },
+					{ Id = "East", OffsetCell = { X = 0.32, Z = 0 } },
+					{ Id = "South", OffsetCell = { X = 0, Z = 0.32 } },
+					{ Id = "West", OffsetCell = { X = -0.32, Z = 0 } },
+				},
+			},
 			EffectSummary = {
 				"Makes late-night rooms feel welcoming.",
 				"Only sips a tiny bit of power.",
@@ -99,6 +111,18 @@ local Decorations = {
 			Tags = { "Nature", "Plant" },
 			ModelPath = { "Decorations", "PlantPot" },
 			AssetId = 76774175860401,
+			SubSlots = {
+				Group = "SmallDecor",
+				AllowMixing = true,
+				DefaultId = "Center",
+				Slots = {
+					{ Id = "Center" },
+					{ Id = "North", OffsetCell = { X = 0, Z = -0.32 } },
+					{ Id = "East", OffsetCell = { X = 0.32, Z = 0 } },
+					{ Id = "South", OffsetCell = { X = 0, Z = 0.32 } },
+					{ Id = "West", OffsetCell = { X = -0.32, Z = 0 } },
+				},
+			},
 			EffectSummary = {
 				"Adds a touch of life to desks and shelves.",
 				"Thrives with minimal care.",
@@ -116,6 +140,18 @@ local Decorations = {
 			Tags = { "Nature", "Plant" },
 			ModelPath = { "Decorations", "PottedPlant" },
 			AssetId = 80441180073151,
+			SubSlots = {
+				Group = "SmallDecor",
+				AllowMixing = true,
+				DefaultId = "Center",
+				Slots = {
+					{ Id = "Center" },
+					{ Id = "North", OffsetCell = { X = 0, Z = -0.32 } },
+					{ Id = "East", OffsetCell = { X = 0.32, Z = 0 } },
+					{ Id = "South", OffsetCell = { X = 0, Z = 0.32 } },
+					{ Id = "West", OffsetCell = { X = -0.32, Z = 0 } },
+				},
+			},
 			EffectSummary = {
 				"Brings a refreshing green vibe indoors.",
 				"Easy to care for and maintain.",

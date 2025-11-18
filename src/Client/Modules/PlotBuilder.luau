@@ -13,6 +13,7 @@ local PlacementCelebration = require(script.Parent.PlacementCelebration)
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local SurfacePalette = require(ReplicatedStorage.Shared.Configurations.Build.SurfacePalette)
+local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -152,7 +153,8 @@ local function computeCellObjectPosition(
 	cellX: number,
 	cellZ: number,
 	facing: string,
-	level: number?
+	level: number?,
+	subSlotId: string?
 ): Vector3?
 	local widthCells = 1
 	local depthCells = 1
@@ -163,7 +165,25 @@ local function computeCellObjectPosition(
 			depthCells = spec.DepthCells or spec.Depth or depthCells
 		end
 	end
-	return computeFootprintPosition(cellX, cellZ, widthCells, depthCells, facing, level)
+	local basePosition = computeFootprintPosition(cellX, cellZ, widthCells, depthCells, facing, level)
+	if not basePosition then
+		return nil
+	end
+	if typeof(itemId) == "string" then
+		local spec = ItemFinder.FindItemById(itemId)
+		if spec and SubSlotResolver.UsesSubSlots(spec) then
+			local grid = PlotStateStore.GetGrid()
+			local cellSize = if grid and typeof(grid.CellSize) == "number" then grid.CellSize else nil
+			if cellSize then
+				local normalizedSlotId = SubSlotResolver.NormalizeSlotId(spec, subSlotId)
+				if normalizedSlotId then
+					local offset = SubSlotResolver.ResolveOffset(spec, normalizedSlotId, cellSize, facing)
+					basePosition += offset
+				end
+			end
+		end
+	end
+	return basePosition
 end
 
 local function computeAreaPlacementPosition(
@@ -416,6 +436,7 @@ function PlotBuilder.PlaceSelectedPreview()
 		Facing = pose.Facing,
 		Level = poseLevel,
 		SurfaceId = resolveDefaultSurfaceId(pose.ItemId),
+		SubSlotId = pose.SubSlotId or "",
 		WallMountEnabled = pose.Kind == "WallMounted" and wallPose ~= nil,
 		WallMountCellX = wallPose and wallPose.ReferenceCellX or cellX,
 		WallMountCellZ = wallPose and wallPose.ReferenceCellZ or cellZ,
@@ -448,7 +469,7 @@ function PlotBuilder.PlaceSelectedPreview()
 		local failurePosition = if pose.Kind == "WallMounted" and wallPose
 			then wallPose.WorldPosition
 			elseif pose.Kind == "Ceiling" and ceilingPose then ceilingPose.WorldPosition
-			else computeCellObjectPosition(pose.ItemId, cellX, cellZ, pose.Facing, poseLevel)
+			else computeCellObjectPosition(pose.ItemId, cellX, cellZ, pose.Facing, poseLevel, pose.SubSlotId)
 		PlacementCelebration.ShowFailure(failurePosition, pose.ItemId, message)
 		return
 	end

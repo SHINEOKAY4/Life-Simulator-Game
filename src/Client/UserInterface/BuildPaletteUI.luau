@@ -55,6 +55,8 @@ local suggestionSelectedSignal = GoodSignal.new()
 BuildPaletteUI.SuggestionSelected = suggestionSelectedSignal
 local selectModeChangedSignal = GoodSignal.new()
 BuildPaletteUI.SelectModeChanged = selectModeChangedSignal
+local visibilityChangedSignal = GoodSignal.new()
+BuildPaletteUI.VisibilityChanged = visibilityChangedSignal
 
 local CURSOR_ICON_ASSET_ID = "rbxassetid://79483268729599"
 local POPUP_HIDDEN_SCALE = 0.9
@@ -869,6 +871,7 @@ function BuildPaletteUI.Show()
 	end
 	isPaletteVisible = true
 	BuildPaletteGui.Enabled = true
+	visibilityChangedSignal:Fire(true)
 	tweenPaletteVisibility(true)
 end
 
@@ -877,6 +880,7 @@ function BuildPaletteUI.Hide()
 		return
 	end
 	isPaletteVisible = false
+	visibilityChangedSignal:Fire(false)
 	tweenPaletteVisibility(false)
 end
 
@@ -931,6 +935,13 @@ function BuildPaletteUI.OnSelectModeChanged(handler: (boolean) -> ())
 		error("BuildPaletteUI.OnSelectModeChanged requires a handler function")
 	end
 	return selectModeChangedSignal:Connect(handler)
+end
+
+function BuildPaletteUI.OnVisibilityChanged(handler: (boolean) -> ())
+	if typeof(handler) ~= "function" then
+		error("BuildPaletteUI.OnVisibilityChanged requires a handler function")
+	end
+	return visibilityChangedSignal:Connect(handler)
 end
 
 function BuildPaletteUI.IsSelectModeActive(): boolean

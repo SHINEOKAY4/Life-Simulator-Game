@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
+local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
 
 type Facing = string
 
@@ -18,6 +19,7 @@ export type MoveOriginInfo = {
 	WidthCells: number?,
 	DepthCells: number?,
 	Level: number?,
+	SubSlotId: string?,
 }
 
 local PlacementUtils = {}
@@ -231,7 +233,9 @@ function PlacementUtils.IsCellOccupiedForPreview(
 	placed: any,
 	ignorePlacement: MoveOriginInfo?,
 	activeLevel: number?,
-	previewAllowsStacking: boolean?
+	previewAllowsStacking: boolean?,
+	previewItemId: string?,
+	previewSubSlotId: string?
 ): boolean
 	if not placed or next(placed) == nil then
 		return false
@@ -240,10 +244,16 @@ function PlacementUtils.IsCellOccupiedForPreview(
 	local footprintFacing = if previewKind == "Floor" then "North" else facing
 	local myCells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, footprintFacing)
 	local previewIsOverlay = previewAllowsStacking == true
+	local previewSpec = if typeof(previewItemId) == "string" then ItemFinder.FindItemById(previewItemId) else nil
+	local previewUsesSubSlots = SubSlotResolver.UsesSubSlots(previewSpec)
+	local normalizedPreviewSlotId = if previewUsesSubSlots
+		then SubSlotResolver.NormalizeSlotId(previewSpec, previewSubSlotId)
+		else nil
 
 	for _, placedEntry in pairs(placed) do
 		local itemSpec, placementType, width, depth, facingValue, entryLevel =
 			PlacementUtils.ResolvePlacementEntry(placedEntry)
+		local occupantItemId = placedEntry.id or placedEntry.Id or placedEntry.ItemId
 		if activeLevel ~= nil and entryLevel ~= activeLevel then
 			continue
 		end
@@ -261,8 +271,55 @@ function PlacementUtils.IsCellOccupiedForPreview(
 		elseif previewKind == "CellObject" then
 			if placementType == "CellObject" then
 				local occupantIsOverlay = PlacementBehavior.allowsStacking(itemSpec)
-				local sameLayer = previewIsOverlay == occupantIsOverlay
-				if sameLayer and not shouldSkipEntry(placedEntry, placementType, facingValue, ignorePlacement) then
+				local occupantUsesSubSlots = SubSlotResolver.UsesSubSlots(itemSpec)
+				if previewUsesSubSlots then
+					if shouldSkipEntry(placedEntry, placementType, facingValue, ignorePlacement) then
+						continue
+					end
+					local otherCells =
+						grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, facingValue)
+					if not anyCellOverlap(myCells, otherCells) then
+						continue
+					end
+					if not occupantUsesSubSlots then
+						if itemSpec and PlacementBehavior.allowsStacking(itemSpec) then
+							continue
+						end
+						return true
+					end
+					if not SubSlotResolver.CanItemsShare(previewSpec, itemSpec) then
+						return true
+					end
+					local metadataPayload = placedEntry.Metadata or placedEntry.metadata
+					local occupiedSlot = SubSlotResolver.ResolveSavedSlotId(metadataPayload, itemSpec)
+					if occupiedSlot and normalizedPreviewSlotId and occupiedSlot == normalizedPreviewSlotId then
+						return true
+					end
+					continue
+				end
+
+				if previewIsOverlay then
+					if
+						occupantIsOverlay
+						and not shouldSkipEntry(placedEntry, placementType, facingValue, ignorePlacement)
+						and typeof(previewItemId) == "string"
+						and previewItemId ~= ""
+						and occupantItemId == previewItemId
+					then
+						local otherCells =
+							grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, facingValue)
+						if anyCellOverlap(myCells, otherCells) then
+							return true
+						end
+					end
+					continue
+				end
+
+				if occupantIsOverlay then
+					continue
+				end
+
+				if not shouldSkipEntry(placedEntry, placementType, facingValue, ignorePlacement) then
 					local otherCells =
 						grid:ClippedFootprintCells(placedEntry.cellX, placedEntry.cellZ, width, depth, facingValue)
 					if anyCellOverlap(myCells, otherCells) then

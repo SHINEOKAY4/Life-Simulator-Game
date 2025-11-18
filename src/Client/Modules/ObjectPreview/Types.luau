@@ -73,6 +73,7 @@ export type PreviewPose = {
 	CeilingMount: CeilingMountPose?,
 	Level: number?,
 	LevelHeight: number?,
+	SubSlotId: string?,
 }
 
 export type PoseCacheComparable = {
@@ -85,6 +86,7 @@ export type PoseCacheComparable = {
 	surfaceLocalPosition: Vector3?,
 	ceilingDrop: number?,
 	ceilingRotation: number?,
+	subSlotId: string?,
 }
 
 export type PoseCacheSnapshot = {
@@ -97,6 +99,7 @@ export type PoseCacheSnapshot = {
 	windowHeightOffset: number?,
 	ceilingDrop: number?,
 	ceilingRotation: number?,
+	subSlotId: string?,
 }
 
 return Types

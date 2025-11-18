@@ -7,16 +7,134 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
+local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
 
 type PlacementOptions = {
 	PlacementType: string?,
 	IgnoreOccupancy: boolean?,
+	Metadata: { [string]: any }?,
 }
 
 local CellObjects = {}
 
 local function normalizeDimension(value: number?): number
 	return tonumber(value) or 1
+end
+
+local function resolveFootprintSize(
+	spec: { [string]: any }?,
+	metadata: { [string]: any }?,
+	fallbackWidth: number?,
+	fallbackDepth: number?
+): (number, number)
+	local width = fallbackWidth
+	local depth = fallbackDepth
+	if typeof(metadata) == "table" then
+		width = metadata.WidthCells or metadata.widthCells or metadata.Width or metadata.width or width
+		depth = metadata.DepthCells or metadata.depthCells or metadata.Depth or metadata.depth or depth
+	end
+	if not width and spec then
+		width = spec.WidthCells or spec.Width
+	end
+	if not depth and spec then
+		depth = spec.DepthCells or spec.Depth
+	end
+	return normalizeDimension(width), normalizeDimension(depth)
+end
+
+local function buildCellSet(
+	grid: any,
+	cellX: number,
+	cellZ: number,
+	widthCells: number,
+	depthCells: number,
+	facing: Facing
+): { [number]: boolean }?
+	local ok, indices = pcall(grid.FootprintCells, grid, cellX, cellZ, widthCells, depthCells, facing)
+	if not ok then
+		return nil
+	end
+	local set: { [number]: boolean } = {}
+	for _, index in indices do
+		set[index] = true
+	end
+	return set
+end
+
+local function isOverlayPlacementType(label: string?): boolean
+	if typeof(label) ~= "string" then
+		return false
+	end
+	return string.find(label, "Overlay", 1, true) ~= nil
+end
+
+local function hasOverlayConflict(
+	self,
+	objectId: string,
+	placementType: string,
+	level: number,
+	anchorX: number,
+	anchorZ: number,
+	widthCells: number,
+	depthCells: number,
+	facing: Facing,
+	candidateMetadata: { [string]: any }?,
+	excludeKey: string?
+): boolean
+	if not isOverlayPlacementType(placementType) then
+		return false
+	end
+
+	local candidateSpec = ItemFinder.FindItemById(objectId)
+	local candidateUsesSubSlots = candidateSpec ~= nil and SubSlotResolver.UsesSubSlots(candidateSpec)
+	local candidateSlotId: string? = nil
+	if candidateUsesSubSlots and candidateSpec then
+		candidateSlotId = SubSlotResolver.ResolveSavedSlotId(candidateMetadata, candidateSpec)
+	end
+
+	local candidateSet = buildCellSet(self.Grid, anchorX, anchorZ, widthCells, depthCells, facing)
+	if not candidateSet then
+		return false
+	end
+
+	for key, saved in pairs(self.Save.PlacedObjects) do
+		if key ~= excludeKey and saved and saved.id == objectId and isOverlayPlacementType(saved.placementType) then
+			local savedLevel = saved.yLevel or self.DefaultLevel
+			if savedLevel == level then
+				local savedSpec = ItemFinder.FindItemById(saved.id)
+				if savedSpec then
+					local savedWidth, savedDepth =
+						resolveFootprintSize(savedSpec, saved.Metadata, savedSpec.WidthCells, savedSpec.DepthCells)
+					local savedFacing: Facing = PlacementKey.NormalizeFacing((saved.facing or "North") :: any)
+					local savedCells =
+						buildCellSet(self.Grid, saved.cellX, saved.cellZ, savedWidth, savedDepth, savedFacing)
+					if savedCells then
+						for index in pairs(candidateSet) do
+							if savedCells[index] then
+								if
+									candidateUsesSubSlots
+									and SubSlotResolver.UsesSubSlots(savedSpec)
+									and SubSlotResolver.CanItemsShare(candidateSpec, savedSpec)
+								then
+									local existingSlotId = SubSlotResolver.ResolveSavedSlotId(saved.Metadata, savedSpec)
+									if
+										candidateSlotId ~= nil
+										and existingSlotId ~= nil
+										and candidateSlotId ~= existingSlotId
+									then
+										continue
+									end
+								end
+								return true
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return false
 end
 
 function CellObjects.attach(PlotState)
@@ -220,28 +338,51 @@ function CellObjects.attach(PlotState)
 		facing: Facing,
 		yLevel: number?,
 		options: PlacementOptions?
-	): boolean
+	): (boolean, string?)
 		local level = self:NormalizeLevel(yLevel)
-		if not self:ReserveFootprint(anchorX, anchorZ, widthCells, depthCells, facing, level, options) then
-			return false
+		local resolvedWidth = normalizeDimension(widthCells)
+		local resolvedDepth = normalizeDimension(depthCells)
+		if not self:ReserveFootprint(anchorX, anchorZ, resolvedWidth, resolvedDepth, facing, level, options) then
+			return false, nil
 		end
 
 		local placementType = if options ~= nil and typeof(options.PlacementType) == "string"
 			then options.PlacementType :: string
 			else "CellObject"
+		local candidateMetadata = if options ~= nil then options.Metadata else nil
 		local key = self:PlacementKeyForType(anchorX, anchorZ, facing, placementType, level)
 		if self.Save.PlacedObjects[key] then
-			self:FreeFootprint(anchorX, anchorZ, widthCells, depthCells, facing, level, options)
-			return false
+			self:FreeFootprint(anchorX, anchorZ, resolvedWidth, resolvedDepth, facing, level, options)
+			return false, nil
+		end
+
+		if
+			hasOverlayConflict(
+				self,
+				objectId,
+				placementType,
+				level,
+				anchorX,
+				anchorZ,
+				resolvedWidth,
+				resolvedDepth,
+				facing,
+				candidateMetadata,
+				nil
+			)
+		then
+			self:FreeFootprint(anchorX, anchorZ, resolvedWidth, resolvedDepth, facing, level, options)
+			return false, nil
 		end
 
 		self.Save.PlacedObjects[key] = {
 			id = objectId,
 			cellX = anchorX,
 			cellZ = anchorZ,
-			facing = facing,
+			facing = tostring(facing),
 			yLevel = level,
 			placementType = placementType,
+			Metadata = if candidateMetadata ~= nil then table.clone(candidateMetadata) else nil,
 		}
 		return true, key
 	end
@@ -304,7 +445,8 @@ function CellObjects.attach(PlotState)
 		toZ: number,
 		toF: Facing,
 		fromLevel: number?,
-		toLevel: number?
+		toLevel: number?,
+		options: PlacementOptions?
 	): (boolean, string?)
 		local spec = ItemFinder.FindItemById(itemId)
 		assert(spec, ("Unknown catalog item '%s'"):format(itemId))
@@ -312,13 +454,17 @@ function CellObjects.attach(PlotState)
 		if placementType ~= "CellObject" then
 			return false, ("Item '%s' of type '%s' cannot be moved"):format(itemId, placementType)
 		end
-		local width = spec.WidthCells
-		local depth = spec.DepthCells
+		local width = normalizeDimension(spec.WidthCells)
+		local depth = normalizeDimension(spec.DepthCells)
 
 		local resolvedFromLevel = self:NormalizeLevel(fromLevel)
 		local resolvedToLevel = self:NormalizeLevel(toLevel)
-		local placementKeyType = PlacementBehavior.getPlacementKeyLabel(spec)
-		local ignoreOccupancy = PlacementBehavior.allowsStacking(spec)
+		local placementKeyType = if options ~= nil and typeof(options.PlacementType) == "string"
+			then options.PlacementType :: string
+			else PlacementBehavior.getPlacementKeyLabel(spec)
+		local ignoreOccupancy = if options ~= nil and options.IgnoreOccupancy == true
+			then true
+			else PlacementBehavior.allowsStacking(spec)
 		local fromKey = self:PlacementKeyForType(fromX, fromZ, fromF, placementKeyType, resolvedFromLevel)
 		local saved = self.Save.PlacedObjects[fromKey]
 		if not saved then
@@ -386,25 +532,39 @@ function CellObjects.attach(PlotState)
 			return false, ("Destination already has item '%s' at (%d, %d) facing %s"):format(existing.id, toX, toZ, toF)
 		end
 
-		self:FreeFootprint(fromX, fromZ, width, depth, fromF, resolvedFromLevel, {
-			IgnoreOccupancy = ignoreOccupancy,
-		})
 		if
-			not self:ReserveFootprint(toX, toZ, width, depth, toF, resolvedToLevel, {
-				IgnoreOccupancy = ignoreOccupancy,
-			})
+			hasOverlayConflict(
+				self,
+				itemId,
+				placementKeyType,
+				resolvedToLevel,
+				toX,
+				toZ,
+				width,
+				depth,
+				toF,
+				saved.Metadata,
+				fromKey
+			)
 		then
-			self:ReserveFootprint(fromX, fromZ, width, depth, fromF, resolvedFromLevel, {
-				IgnoreOccupancy = ignoreOccupancy,
-			})
+			return false, "Cannot overlap identical overlays"
+		end
+
+		local moveOptions: PlacementOptions = {
+			IgnoreOccupancy = ignoreOccupancy,
+		}
+		self:FreeFootprint(fromX, fromZ, width, depth, fromF, resolvedFromLevel, moveOptions)
+		if not self:ReserveFootprint(toX, toZ, width, depth, toF, resolvedToLevel, moveOptions) then
+			self:ReserveFootprint(fromX, fromZ, width, depth, fromF, resolvedFromLevel, moveOptions)
 			return false, "Failed to reserve destination footprint"
 		end
 
 		self.Save.PlacedObjects[fromKey] = nil
 		saved.cellX = toX
 		saved.cellZ = toZ
-		saved.facing = toF
+		saved.facing = tostring(toF)
 		saved.yLevel = resolvedToLevel
+		saved.placementType = placementKeyType
 		toKey = self:PlacementKeyForType(toX, toZ, toF, placementKeyType, resolvedToLevel)
 		self.Save.PlacedObjects[toKey] = saved
 		return true, nil
@@ -452,7 +612,23 @@ function CellObjects.attach(PlotState)
 			return false, "Invalid facing for this item"
 		end
 
-		return self:MoveCellObject(itemId, cellX, cellZ, currentFacing, cellX, cellZ, targetFacing, level, level)
+		local placementOptions: PlacementOptions = {
+			PlacementType = saved.placementType,
+			IgnoreOccupancy = PlacementBehavior.allowsStacking(spec),
+			Metadata = saved.Metadata,
+		}
+		return self:MoveCellObject(
+			itemId,
+			cellX,
+			cellZ,
+			currentFacing,
+			cellX,
+			cellZ,
+			targetFacing,
+			level,
+			level,
+			placementOptions
+		)
 	end
 end
 

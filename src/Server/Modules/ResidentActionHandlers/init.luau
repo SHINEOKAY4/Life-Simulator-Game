@@ -3,7 +3,7 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local DirectActionService = require(ServerScriptService.Server.Services.DirectActionService)
+local StationActionRegistry = require(ServerScriptService.Server.Modules.StationActionRegistry)
 local KitchenService = require(ServerScriptService.Server.Services.KitchenService)
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local FoodUtils = require(ReplicatedStorage.Shared.Utilities.FoodUtils)
@@ -409,7 +409,7 @@ local function executeStationAction(stationType: string, context: HandlerContext
 end
 
 local function registerHandler(stationType: string)
-	DirectActionService.RegisterHandler(stationType, function(context: HandlerContext, assignment: HandlerAssignment)
+	StationActionRegistry.RegisterHandler(stationType, function(context: HandlerContext, assignment: HandlerAssignment)
 		executeStationAction(stationType, context, assignment)
 	end)
 end

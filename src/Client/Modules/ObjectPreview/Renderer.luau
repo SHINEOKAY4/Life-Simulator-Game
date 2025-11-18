@@ -75,8 +75,17 @@ local function blendToward(model: Model, entry: SmoothEntry, target: CFrame)
 	model:PivotTo(blended)
 end
 
-local function applySmoothPivot(model: Model, target: CFrame)
+local function applySmoothPivot(model: Model, target: CFrame, skipSmoothing: boolean?)
 	local entry = getSmoothEntry(model, target)
+
+	if skipSmoothing == true then
+		-- Some placement previews (wall/floor/ceiling planes) must snap instantly to avoid stretching artifacts.
+		entry.current = target
+		entry.target = target
+		model:PivotTo(target)
+		return
+	end
+
 	if isPoseClose(entry.current, target) then
 		entry.current = target
 		entry.target = target
@@ -147,6 +156,7 @@ export type WindowCutoutConfig = {
 	MaxHeight: number?,
 	DefaultHeight: number?,
 	AllowVerticalSliding: boolean?,
+	PreserveModelThickness: boolean?,
 }
 
 export type WindowCutoutPose = {
@@ -288,7 +298,7 @@ function Renderer.PreviewWall(
 	local centerPosition = (startCFrame.Position + endCFrame.Position) * 0.5
 	local orientation =
 		CFrame.fromMatrix(centerPosition, anchorCFrame.RightVector, anchorCFrame.UpVector, anchorCFrame.LookVector)
-	applySmoothPivot(model, orientation * CFrame.new(0, lift, 0))
+	applySmoothPivot(model, orientation * CFrame.new(0, lift, 0), true)
 end
 
 function Renderer.PreviewFloor(
@@ -307,7 +317,7 @@ function Renderer.PreviewFloor(
 		center = center * CFrame.new(0, levelHeight, 0)
 	end
 	local aligned = alignToSurface(center, surface)
-	applySmoothPivot(model, aligned)
+	applySmoothPivot(model, aligned, true)
 end
 
 function Renderer.PreviewRoof(
@@ -358,7 +368,8 @@ function Renderer.PreviewCellObject(
 	depthCells: number,
 	levelHeight: number?,
 	lift: number,
-	pivotRotation: CFrame
+	pivotRotation: CFrame,
+	subSlotOffset: Vector3?
 )
 	local center = grid:FootprintCenterCFrame(cellX, cellZ, widthCells, depthCells, facing)
 	local resolvedLevelHeight = if typeof(levelHeight) == "number" then levelHeight else 0
@@ -369,7 +380,8 @@ function Renderer.PreviewCellObject(
 	local baseRotation = GetRotationOnly(flatAligned)
 	local yaw = CFrame.Angles(0, YawFromFacing(facing :: any), 0)
 	local orientation = baseRotation * yaw * pivotRotation
-	local liftedPosition = center.Position + surface.CFrame.UpVector * lift
+	local offset = if subSlotOffset then subSlotOffset else Vector3.new()
+	local liftedPosition = center.Position + offset + surface.CFrame.UpVector * lift
 
 	applySmoothPivot(model, CFrame.new(liftedPosition) * orientation)
 end
@@ -416,7 +428,7 @@ function Renderer.PreviewCeilingMounted(
 	local right, attachmentUp, forward = GetCeilingAttachmentAxes(resolvedNormal, upVector)
 	local baseCFrame = CFrame.fromMatrix(worldPosition, right, attachmentUp, -forward)
 	local aroundAxis = CFrame.fromAxisAngle(resolvedNormal, rotationY)
-	applySmoothPivot(model, baseCFrame * aroundAxis * pivotRotation)
+	applySmoothPivot(model, baseCFrame * aroundAxis * pivotRotation, true)
 end
 
 local WINDOW_PREVIEW_SEGMENT_NAME = "_PreviewWindowSegment"

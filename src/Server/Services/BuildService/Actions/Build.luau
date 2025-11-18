@@ -9,6 +9,9 @@ local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 local Helpers = require(ServerScriptService.Server.Services.BuildService.Helpers)
 local PlotStateModule = require(ServerScriptService.Server.Classes.PlotState)
+local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
+local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
 
 type Facing = PlotStateModule.Facing
 
@@ -204,6 +207,112 @@ local function resolveWallDimensionsFromSpec(spec: { [string]: any }?): (number,
 	local minFrame = typeof(dims.MinFrameThickness) == "number" and dims.MinFrameThickness or defaultMinFrame
 
 	return width, height, thickness, diagonalMultiplier, minFrame
+end
+
+local function collectFootprintCells(
+	grid: any,
+	cellX: number,
+	cellZ: number,
+	widthCells: number,
+	depthCells: number,
+	facing: Facing
+): { number }?
+	local ok, cells = pcall(grid.FootprintCells, grid, cellX, cellZ, widthCells, depthCells, facing)
+	if not ok then
+		return nil
+	end
+	return cells
+end
+
+local function buildCellSet(indices: { number }?): { [number]: boolean }
+	local set: { [number]: boolean } = {}
+	if not indices then
+		return set
+	end
+	for _, index in ipairs(indices) do
+		set[index] = true
+	end
+	return set
+end
+
+local function hasCellOverlap(candidate: { [number]: boolean }, other: { number }?): boolean
+	if not other then
+		return false
+	end
+	for _, index in ipairs(other) do
+		if candidate[index] then
+			return true
+		end
+	end
+	return false
+end
+
+local function validateSubSlotAvailability(
+	state: PlotStateModule.PlotState,
+	itemSpec: { [string]: any }?,
+	cellX: number,
+	cellZ: number,
+	facing: Facing,
+	level: number,
+	widthCells: number,
+	depthCells: number,
+	requestedSlotId: string?
+): (boolean, string?)
+	if not SubSlotResolver.UsesSubSlots(itemSpec) then
+		return true, nil
+	end
+	local grid = state.Grid
+	if not grid then
+		return true, nil
+	end
+	local footprintCells = collectFootprintCells(grid, cellX, cellZ, widthCells, depthCells, facing)
+	if not footprintCells then
+		return true, nil
+	end
+	local footprintSet = buildCellSet(footprintCells)
+	local normalizedSlotId = SubSlotResolver.NormalizeSlotId(itemSpec, requestedSlotId)
+	for _, existing in pairs(state.Save.PlacedObjects) do
+		if not existing then
+			continue
+		end
+		local existingLevel = if typeof(existing.yLevel) == "number" then existing.yLevel else state.DefaultLevel
+		if existingLevel ~= level then
+			continue
+		end
+		local existingSpec = ItemFinder.FindItemById(existing.id)
+		if not existingSpec then
+			continue
+		end
+		local placementType = existingSpec.PlacementType or existingSpec.Type or "CellObject"
+		if placementType ~= "CellObject" then
+			continue
+		end
+		local existingCells = collectFootprintCells(
+			grid,
+			existing.cellX,
+			existing.cellZ,
+			existing.WidthCells or existingSpec.WidthCells or existingSpec.Width or 1,
+			existing.DepthCells or existingSpec.DepthCells or existingSpec.Depth or 1,
+			PlacementKey.NormalizeFacing(existing.facing :: Facing)
+		)
+		if not hasCellOverlap(footprintSet, existingCells) then
+			continue
+		end
+		if not SubSlotResolver.UsesSubSlots(existingSpec) then
+			if PlacementBehavior.allowsStacking(existingSpec) then
+				continue
+			end
+			return false, "Cell already has an object placed"
+		end
+		if not SubSlotResolver.CanItemsShare(itemSpec, existingSpec) then
+			return false, "Cell reserved for another decor type"
+		end
+		local occupiedSlot = SubSlotResolver.ResolveSavedSlotId(existing.Metadata, existingSpec)
+		if occupiedSlot and normalizedSlotId and occupiedSlot == normalizedSlotId then
+			return false, "Sub-slot already occupied"
+		end
+	end
+	return true, nil
 end
 
 local function buildWallMetadata(spec: { [string]: any }?, facing: Facing): { [string]: any }
@@ -518,6 +627,32 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		local depthCells = itemData.DepthCells or itemData.Depth or 1
 		local placementKeyType = Helpers.getPlacementKeyLabel(itemData)
 		local allowStacking = Helpers.allowsStacking(itemData)
+		local subSlotMetadata: { [string]: any }? = nil
+		local requestedSubSlotId = if typeof(payload.SubSlotId) == "string"
+			then payload.SubSlotId
+			elseif payload.SubSlotId ~= nil then tostring(payload.SubSlotId)
+			else ""
+		local normalizedSubSlotId = SubSlotResolver.NormalizeSlotId(itemData, requestedSubSlotId)
+		if SubSlotResolver.UsesSubSlots(itemData) then
+			local slotOk, slotReason = validateSubSlotAvailability(
+				state,
+				itemData,
+				payload.CellX,
+				payload.CellZ,
+				facing,
+				level,
+				widthCells,
+				depthCells,
+				normalizedSubSlotId
+			)
+			if not slotOk then
+				return false, slotReason or "Sub-slot unavailable"
+			end
+			subSlotMetadata = {
+				SubSlotId = normalizedSubSlotId,
+			}
+			placementKeyType = Helpers.getPlacementKeyLabelForSubSlot(itemData, normalizedSubSlotId)
+		end
 
 		if itemData.Rules and itemData.Rules.RequiresFloorUnderAllCells then
 			if
@@ -536,17 +671,29 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			state:Place(payload.ItemId, payload.CellX, payload.CellZ, widthCells, depthCells, facing, level, {
 				PlacementType = placementKeyType,
 				IgnoreOccupancy = allowStacking,
+				Metadata = subSlotMetadata,
 			})
 
 		if not success or not placementKey then
 			return false, "Failed to place cell object"
 		end
 
+		local entry = state.Save.PlacedObjects[placementKey]
+		if entry then
+			if subSlotMetadata then
+				entry.Metadata = subSlotMetadata
+			else
+				entry.Metadata = nil
+			end
+		end
+
 		local stationType = if itemData.StationType then itemData.StationType else nil
 		if stationType then
 			PlotService.AddStationForPlayer(player, stationType, placementKey, payload.ItemId)
 		end
-		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing, level)
+		WorldPlacer.Spawn(player, state.Grid, payload.ItemId, payload.CellX, payload.CellZ, facing, level, {
+			metadata = subSlotMetadata,
+		})
 
 		Helpers.sendPlacementDelta(
 			player,
@@ -555,7 +702,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			payload.CellX,
 			payload.CellZ,
 			facing,
-			nil,
+			subSlotMetadata,
 			level,
 			placementKey
 		)

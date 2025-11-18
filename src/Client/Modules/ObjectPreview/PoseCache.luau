@@ -24,6 +24,10 @@ function PoseCache.ShouldSkip(kind: PreviewKind, info: PoseCacheComparable, surf
 		return false
 	end
 
+	if lastSnapshot.subSlotId ~= info.subSlotId then
+		return false
+	end
+
 	if kind == "WallMounted" then
 		if not info.wallPosition then
 			return false
@@ -87,6 +91,7 @@ local function assignSnapshot(kind: PreviewKind, info: PoseCacheComparable)
 	lastSnapshot.cellX = info.cellX
 	lastSnapshot.cellZ = info.cellZ
 	lastSnapshot.facing = info.facing
+	lastSnapshot.subSlotId = info.subSlotId
 
 	if kind == "WallMounted" then
 		lastSnapshot.wallPosition = info.wallPosition
@@ -136,6 +141,7 @@ function PoseCache.GetSnapshot(): PoseCacheSnapshot
 		windowHeightOffset = lastSnapshot.windowHeightOffset,
 		ceilingDrop = lastSnapshot.ceilingDrop,
 		ceilingRotation = lastSnapshot.ceilingRotation,
+		subSlotId = lastSnapshot.subSlotId,
 	}
 end
 

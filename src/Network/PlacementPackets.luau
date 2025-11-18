@@ -55,6 +55,7 @@ PlacementPackets.PlaceRequest = Packet("PlaceRequest", {
 	Facing = Packet.String,
 	Level = Packet.NumberU8,
 	SurfaceId = Packet.String,
+	SubSlotId = Packet.String,
 	WallMountEnabled = Packet.Boolean8,
 	WallMountCellX = Packet.NumberU16,
 	WallMountCellZ = Packet.NumberU16,
@@ -126,6 +127,7 @@ PlacementPackets.PlacementDelta = Packet("PlacementDelta", {
 		DepthCells = Packet.NumberU16,
 		Metadata = Packet.Any,
 		Level = Packet.NumberU8,
+		SubSlotId = Packet.String,
 	},
 })
 
@@ -177,6 +179,7 @@ PlacementPackets.DestroyRequest = Packet("DestroyRequest", {
 	CellZ = Packet.NumberU8,
 	Facing = Packet.String,
 	Level = Packet.NumberU8,
+	SubSlotId = Packet.String,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
 PlacementPackets.MoveRequest = Packet("MoveRequest", {
@@ -189,6 +192,7 @@ PlacementPackets.MoveRequest = Packet("MoveRequest", {
 	ToCellZ = Packet.NumberU8,
 	ToFacing = Packet.String, -- allow rotate-during-move; client can pass old facing if not rotating
 	ToLevel = Packet.NumberU8,
+	SubSlotId = Packet.String,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
 PlacementPackets.RotateRequest = Packet("RotateRequest", {

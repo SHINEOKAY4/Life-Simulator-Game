@@ -1,9 +1,13 @@
 --!strict
 
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local Helpers = require(ServerScriptService.Server.Services.BuildService.Helpers)
+local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
 
 type Facing = any
 
@@ -100,7 +104,9 @@ local function Move(player: Player, payload: Payload): (boolean, string)
 	end
 
 	local placementType = spec.PlacementType or spec.Type or "CellObject"
-	local placementKeyType = Helpers.getPlacementKeyLabel(spec)
+	local requestedSubSlotId = if typeof(payload.SubSlotId) == "string" then payload.SubSlotId else ""
+	local normalizedSubSlotId = if requestedSubSlotId ~= "" then requestedSubSlotId else nil
+	local placementKeyType = Helpers.getPlacementKeyLabelForSubSlot(spec, normalizedSubSlotId)
 	local fromFacingValue = Helpers.coerceFacing(payload.FromFacing)
 	local fromF: Facing = (fromFacingValue or "North") :: Facing
 	local toFacingValue = Helpers.coerceFacing(payload.ToFacing)
@@ -126,6 +132,38 @@ local function Move(player: Player, payload: Payload): (boolean, string)
 	local fromKey = state:PlacementKeyForType(payload.FromCellX, payload.FromCellZ, fromF, placementKeyType, fromLevel)
 	local toKey = state:PlacementKeyForType(payload.ToCellX, payload.ToCellZ, toF, placementKeyType, toLevel)
 	local sourceSaved = state.Save.PlacedObjects[fromKey]
+	if not sourceSaved and normalizedSubSlotId == nil and SubSlotResolver.UsesSubSlots(spec) then
+		for savedKey, entry in pairs(state.Save.PlacedObjects) do
+			if entry.id == resolvedId then
+				local okParse, cellX, cellZ, parsedFacing, parsedType = pcall(PlacementKey.ParseWithType, savedKey)
+				if
+					okParse
+					and parsedType == Helpers.getPlacementKeyLabelForSubSlot(
+						spec,
+						SubSlotResolver.ResolveSavedSlotId(entry.Metadata, spec)
+					)
+					and cellX == payload.FromCellX
+					and cellZ == payload.FromCellZ
+				then
+					local facingMatches = PlacementKey.NormalizeFacing(parsedFacing) == fromF
+					if facingMatches then
+						sourceSaved = entry
+						normalizedSubSlotId = SubSlotResolver.ResolveSavedSlotId(entry.Metadata, spec)
+						placementKeyType = Helpers.getPlacementKeyLabelForSubSlot(spec, normalizedSubSlotId)
+						fromKey = state:PlacementKeyForType(
+							payload.FromCellX,
+							payload.FromCellZ,
+							fromF,
+							placementKeyType,
+							fromLevel
+						)
+						break
+					end
+				end
+			end
+		end
+	end
+	toKey = state:PlacementKeyForType(payload.ToCellX, payload.ToCellZ, toF, placementKeyType, toLevel)
 	local sourceMetadata = sourceSaved and sourceSaved.Metadata
 
 	if placementType == "CellObject" then
@@ -144,7 +182,12 @@ local function Move(player: Player, payload: Payload): (boolean, string)
 			payload.ToCellZ,
 			toF,
 			fromLevel,
-			toLevel
+			toLevel,
+			{
+				PlacementType = placementKeyType,
+				IgnoreOccupancy = Helpers.allowsStacking(spec),
+				Metadata = sourceMetadata,
+			}
 		)
 	elseif placementType == "Floor" then
 		removedFacing = "North"

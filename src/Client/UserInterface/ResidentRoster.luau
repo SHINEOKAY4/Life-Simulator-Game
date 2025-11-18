@@ -23,8 +23,6 @@ local CustomizeButton = ResidentButtons:FindFirstChild("CustomizeButton") :: Tex
 local ProfileButton = ResidentButtons:WaitForChild("ProfileButton") :: TextButton
 local CareerButton = ResidentButtons:FindFirstChild("CareerButton") :: TextButton?
 
-local StationRadial = PlayerGui:WaitForChild("StationRadial") :: BillboardGui
-
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local ObjectSelectorEnabled = ActiveQueryFolder:FindFirstChild("ObjectSelectorEnabled") :: BoolValue
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled") :: BoolValue
@@ -306,7 +304,6 @@ local function deselectResident()
 	ResidentButtons.Visible = false
 	Profile.Visible = false
 	ResidentNeedsUI.Hide()
-	StationRadial.Enabled = false
 	CameraUtils.CancelFocus()
 	setPlayerMovementEnabled(true)
 end

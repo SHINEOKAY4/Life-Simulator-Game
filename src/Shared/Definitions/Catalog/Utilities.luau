@@ -4,7 +4,16 @@ local Utilities = {
 	Electrical = {
 		ElectricBox = {
 			Name = "Electric Box",
-			PlacementType = "CellObject",
+			PlacementType = "WallMounted",
+			WallMountConfig = {
+				AttachmentSurface = "Back",
+				OffsetFromWall = 0.15,
+				MinHeight = 1,
+				MaxHeight = 10,
+				RequiresFloorSupport = false,
+				CollisionCheck = true,
+				--VisualSize = Vector3.new(2.4, 1.4, 0.3),
+			},
 			WidthCells = 1,
 			DepthCells = 1,
 			Facing = { "North", "East", "South", "West" },

@@ -4,7 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
-local DirectActionService = require(ServerScriptService.Server.Services.DirectActionService)
+local StationActionRegistry = require(ServerScriptService.Server.Modules.StationActionRegistry)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
@@ -132,7 +132,7 @@ function StationManager.getStationHandler(stationType: string)
 	if cached ~= nil then
 		return cached
 	end
-	local handler = DirectActionService.GetHandler(stationType)
+	local handler = StationActionRegistry.GetHandler(stationType)
 	handlerCache[stationType] = handler
 	return handler
 end

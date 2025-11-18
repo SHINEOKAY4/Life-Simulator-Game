@@ -174,6 +174,9 @@ local function PlaceSelectedPreview(object: Model)
 		then fromFacingAttr :: string
 		else "North"
 
+	local originSlotAttr = object:GetAttribute("SubSlotId")
+	local originSubSlotId = if typeof(originSlotAttr) == "string" and originSlotAttr ~= "" then originSlotAttr else nil
+
 	local itemId = getObjectItemId(object)
 	if not itemId then
 		warn("Cannot move object without item id")
@@ -202,6 +205,7 @@ local function PlaceSelectedPreview(object: Model)
 		ToCellZ = pose.CellZ,
 		ToFacing = toFacing,
 		ToLevel = toLevel,
+		SubSlotId = pose.SubSlotId or originSubSlotId or "",
 	}
 
 	local isNoOpMove = fromCellX == pose.CellX
@@ -303,8 +307,10 @@ function ObjectAction.Move(object: Model, newPosition: Vector3)
 	local widthAttr = tonumber(object:GetAttribute("WidthCells"))
 	local depthAttr = tonumber(object:GetAttribute("DepthCells"))
 	local levelAttr = tonumber(object:GetAttribute("Level"))
+	local subSlotAttr = object:GetAttribute("SubSlotId")
 	local fromLevelValue = if levelAttr ~= nil then levelAttr else PlotStateStore.GetActiveLevel()
 	local fromLevel = math.floor(math.clamp(fromLevelValue, 0, 255) + 0.5)
+	local originSubSlotId = if typeof(subSlotAttr) == "string" and subSlotAttr ~= "" then subSlotAttr else nil
 	if cellXAttr ~= nil and cellZAttr ~= nil then
 		ObjectPreview.SetMoveOrigin({
 			ItemId = itemId,
@@ -314,6 +320,7 @@ function ObjectAction.Move(object: Model, newPosition: Vector3)
 			WidthCells = widthAttr,
 			DepthCells = depthAttr,
 			Level = fromLevel,
+			SubSlotId = originSubSlotId,
 		})
 	else
 		ObjectPreview.SetMoveOrigin(nil)
@@ -369,9 +376,17 @@ function ObjectAction.Rotate(object: Model, rotation: Vector3)
 		return
 	end
 
+	local placementKeyAttr = object:GetAttribute("PlacementKey")
 	local normalizedFacing = PlacementKey.NormalizeFacing(currentFacing :: any)
-	local fromKey =
-		PlacementKey.ForPlacementType(cellXAttr, cellZAttr, normalizedFacing :: any, placementKeyType, rotateLevel)
+	local fromKey = if typeof(placementKeyAttr) == "string" and placementKeyAttr ~= ""
+		then placementKeyAttr
+		else PlacementKey.ForPlacementType(
+			cellXAttr,
+			cellZAttr,
+			normalizedFacing :: any,
+			placementKeyType,
+			rotateLevel
+		)
 
 	local success, message = Packets.RotateRequest:Fire({
 		ItemId = itemId,
@@ -429,12 +444,16 @@ function ObjectAction.Delete(object: Model)
 	end
 	levelNumber = math.clamp(levelNumber, 0, 255)
 
+	local subSlotAttr = object:GetAttribute("SubSlotId")
+	local destroySubSlotId = if typeof(subSlotAttr) == "string" and subSlotAttr ~= "" then subSlotAttr else ""
+
 	local success, message = Packets.DestroyRequest:Fire({
 		ItemId = itemId,
 		CellX = cellXValue,
 		CellZ = cellZValue,
 		Facing = facing,
 		Level = levelNumber,
+		SubSlotId = destroySubSlotId,
 	})
 	if not success then
 		warn("Deletion failed:", message)

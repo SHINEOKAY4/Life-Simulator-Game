@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
+local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
 
 local Helpers = require(ServerScriptService.Server.Services.BuildService.Helpers)
 
@@ -40,7 +41,8 @@ local function DestroyAction(
 		return false, "Invalid item ID"
 	end
 	local placementType = spec.PlacementType or spec.Type or "CellObject"
-	local placementKeyType = Helpers.getPlacementKeyLabel(spec)
+	local requestedSubSlotId = if typeof(payload.SubSlotId) == "string" then payload.SubSlotId else ""
+	local placementKeyType = Helpers.getPlacementKeyLabelForSubSlot(spec, requestedSubSlotId)
 	local allowStacking = Helpers.allowsStacking(spec)
 	local levelHint = if typeof(payload.Level) == "number" then payload.Level else nil
 
@@ -77,11 +79,16 @@ local function DestroyAction(
 			for savedKey, entry in pairs(state.Save.PlacedObjects) do
 				if entry.id == resolvedId then
 					local ok, cellX, cellZ, _, parsedType, parsedLevel = pcall(PlacementKey.ParseWithType, savedKey)
-					if ok and parsedType == placementKeyType and cellX == payload.CellX and cellZ == payload.CellZ then
-						saved = entry
-						keyFacing = PlacementKey.NormalizeFacing(entry.facing) :: Facing
-						key = state:PlacementKeyForType(cellX, cellZ, keyFacing, placementKeyType, parsedLevel)
-						break
+					if ok and cellX == payload.CellX and cellZ == payload.CellZ then
+						local entrySlotId = SubSlotResolver.ResolveSavedSlotId(entry.Metadata, spec)
+						local entryKeyType = Helpers.getPlacementKeyLabelForSubSlot(spec, entrySlotId)
+						if parsedType == entryKeyType then
+							saved = entry
+							placementKeyType = entryKeyType
+							keyFacing = PlacementKey.NormalizeFacing(entry.facing) :: Facing
+							key = state:PlacementKeyForType(cellX, cellZ, keyFacing, placementKeyType, parsedLevel)
+							break
+						end
 					end
 				end
 			end

@@ -1,6 +1,7 @@
 --!strict
 
 local PlacementBehavior = {}
+local SubSlotResolver = require(script.Parent.SubSlotResolver)
 
 local function resolveBaseType(spec: { [string]: any }?): string
 	if typeof(spec) == "table" then
@@ -41,20 +42,51 @@ end
 function PlacementBehavior.allowsStacking(spec: { [string]: any }?): boolean
 	local rules = getRules(spec)
 	if not rules then
-		return false
+		return SubSlotResolver.UsesSubSlots(spec)
 	end
 	if rules.AllowStacking == true then
 		return true
 	end
-	return isOverlayLayer(rules)
+	if isOverlayLayer(rules) then
+		return true
+	end
+	return SubSlotResolver.UsesSubSlots(spec)
 end
 
-function PlacementBehavior.getPlacementKeyLabel(spec: { [string]: any }?): string
+local function sanitizeSlotIdForLabel(slotId: string): string
+	local sanitized = slotId:gsub("[^%w%-_]", "-")
+	if sanitized == "" then
+		return "Slot"
+	end
+	return sanitized
+end
+
+local function computePlacementKeyLabel(spec: { [string]: any }?): string
 	local baseType = resolveBaseType(spec)
 	if PlacementBehavior.allowsStacking(spec) then
 		return string.format("%sOverlay", baseType)
 	end
 	return baseType
+end
+
+function PlacementBehavior.getPlacementKeyLabel(spec: { [string]: any }?): string
+	return computePlacementKeyLabel(spec)
+end
+
+function PlacementBehavior.getPlacementKeyLabelForSubSlot(spec: { [string]: any }?, subSlotId: string?): string
+	local baseLabel = computePlacementKeyLabel(spec)
+	if not subSlotId or subSlotId == "" then
+		return baseLabel
+	end
+	if not SubSlotResolver.UsesSubSlots(spec) then
+		return baseLabel
+	end
+	local normalized = SubSlotResolver.NormalizeSlotId(spec, subSlotId)
+	if not normalized or normalized == "" then
+		return baseLabel
+	end
+	local sanitized = sanitizeSlotIdForLabel(normalized)
+	return string.format("%s-Slot-%s", baseLabel, sanitized)
 end
 
 return PlacementBehavior

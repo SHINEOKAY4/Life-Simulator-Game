@@ -728,20 +728,20 @@ function PlotState:HydrateFromSave()
 			end
 		elseif placementType == "Wall" then
 			local alignment, edgeX, edgeZ = self:EdgeOfCell(savedObject.cellX, savedObject.cellZ, facing)
+			local horizontalEdges = self:GetEdgeFreeHorizontalForLevel(yLevel)
+			local verticalEdges = self:GetEdgeFreeVerticalForLevel(yLevel)
+			local diagForwardEdges = self:GetEdgeFreeDiagonalForwardForLevel(yLevel)
+			local diagBackwardEdges = self:GetEdgeFreeDiagonalBackwardForLevel(yLevel)
 			if alignment == "Horizontal" then
-				self.EdgeFreeHorizontal[self:HorizontalEdgeIndex(edgeX, edgeZ)] = false
+				horizontalEdges[self:HorizontalEdgeIndex(edgeX, edgeZ)] = false
 			elseif alignment == "Vertical" then
-				self.EdgeFreeVertical[self:VerticalEdgeIndex(edgeX, edgeZ)] = false
+				verticalEdges[self:VerticalEdgeIndex(edgeX, edgeZ)] = false
 			elseif alignment == "DiagonalForward" then
-				if self.EdgeFreeDiagonalForward then
-					self.EdgeFreeDiagonalForward[self:DiagonalForwardEdgeIndex(edgeX, edgeZ)] = false
-				end
+				diagForwardEdges[self:DiagonalForwardEdgeIndex(edgeX, edgeZ)] = false
 				local cellOccupancy = self:GetCellFreeForLevel(yLevel)
 				cellOccupancy[self.Grid:CellToIndex(savedObject.cellX, savedObject.cellZ)] = false
 			elseif alignment == "DiagonalBackward" then
-				if self.EdgeFreeDiagonalBackward then
-					self.EdgeFreeDiagonalBackward[self:DiagonalBackwardEdgeIndex(edgeX, edgeZ)] = false
-				end
+				diagBackwardEdges[self:DiagonalBackwardEdgeIndex(edgeX, edgeZ)] = false
 				local cellOccupancy = self:GetCellFreeForLevel(yLevel)
 				cellOccupancy[self.Grid:CellToIndex(savedObject.cellX, savedObject.cellZ)] = false
 			end
@@ -770,7 +770,8 @@ function PlotState:HydrateFromSave()
 					resolvedWidth,
 					resolvedDepth,
 					facing,
-					false
+					false,
+					yLevel
 				)
 			end
 		end

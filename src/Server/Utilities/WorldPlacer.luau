@@ -9,6 +9,7 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementHelpers = require(ReplicatedStorage.Shared.Utilities.PlacementHelpers)
 local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
+local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
 local DoorWallFill = require(ReplicatedStorage.Shared.Utilities.DoorWallFill)
 local WindowWallFill = require(ReplicatedStorage.Shared.Utilities.WindowWallFill)
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
@@ -367,6 +368,38 @@ local function applyWallModelScaling(model: Model, facing: Facing, cellSize: num
 	end
 end
 
+local function applyWallThickness(model: Model, targetThickness: number?, preserveModelThickness: boolean?)
+	if typeof(targetThickness) ~= "number" or targetThickness <= 0 then
+		return
+	end
+
+	local rootPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+	if not rootPart then
+		return
+	end
+
+	local axis = rootPart:GetAttribute("WallLengthAxis")
+	if axis ~= "X" and axis ~= "Z" then
+		axis = "X"
+	end
+
+	local currentSize = rootPart.Size
+	if preserveModelThickness == true then
+		-- Leave the prefab depth untouched so art-authored proportions stay intact.
+		local recordedThickness = if axis == "X" then currentSize.Z else currentSize.X
+		rootPart:SetAttribute("WallBaseThickness", recordedThickness)
+		return
+	end
+
+	local clampedThickness = math.max(targetThickness, 0.05)
+	if axis == "X" then
+		rootPart.Size = Vector3.new(currentSize.X, currentSize.Y, clampedThickness)
+	else
+		rootPart.Size = Vector3.new(clampedThickness, currentSize.Y, currentSize.Z)
+	end
+	rootPart:SetAttribute("WallBaseThickness", clampedThickness)
+end
+
 -- Spawn a physical model for a saved/placed item.
 function WorldPlacer.Spawn(
 	player: Player,
@@ -409,6 +442,10 @@ function WorldPlacer.Spawn(
 	end
 
 	local metadata = options and options.metadata or nil
+	if metadata then
+		local resolvedSubSlotId = SubSlotResolver.ResolveSavedSlotId(metadata, spec)
+		placementKeyType = PlacementBehavior.getPlacementKeyLabelForSubSlot(spec, resolvedSubSlotId)
+	end
 	local sizeOverride = options and (options :: any).sizeCells or nil
 	local widthOverride = nil
 	local depthOverride = nil
@@ -518,6 +555,13 @@ function WorldPlacer.Spawn(
 			end
 
 			local windowConfig = spec.WindowCutoutConfig
+			local preserveModelThickness = true
+			if typeof(windowConfig) == "table" then
+				local preserveValue = windowConfig.PreserveModelThickness
+				if typeof(preserveValue) == "boolean" then
+					preserveModelThickness = preserveValue
+				end
+			end
 
 			local heightOffsetValue = extractNumber(windowData, "HeightOffset")
 			local resolvedHeightOffset: number
@@ -642,6 +686,7 @@ function WorldPlacer.Spawn(
 			model:SetAttribute("WindowHeightOffset", resolvedHeightOffset)
 			model:SetAttribute("WindowWallSizeX", resolvedEffectiveWidth)
 			model:SetAttribute("WindowWallSizeY", resolvedWallHeight)
+			applyWallThickness(model, resolvedWallThickness, preserveModelThickness)
 			model:SetAttribute("WindowWallSizeZ", resolvedWallThickness)
 			model:SetAttribute("WindowWallThickness", resolvedWallThickness)
 			model:SetAttribute("WindowCutoutWidth", resolvedCutoutWidth)
@@ -657,13 +702,43 @@ function WorldPlacer.Spawn(
 		center = center * CFrame.new(0, levelHeight, 0)
 		local yaw = CFrame.Angles(0, GetYawFromFacing(facing), 0)
 		local plotSurface: BasePart? = grid and grid.Plot
+		local surfaceUp = plotSurface and plotSurface.CFrame.UpVector or Vector3.yAxis
+		local lift = GetLiftAlongDirection(model, surfaceUp) + extraLift
+		local subSlotId: string? = nil
+		local subSlotOffset = Vector3.new()
+		if SubSlotResolver.UsesSubSlots(spec) then
+			local cellSize = grid and grid.CellSize or 4
+			subSlotId = SubSlotResolver.ResolveSavedSlotId(metadata, spec)
+			subSlotOffset = SubSlotResolver.ResolveOffset(spec, subSlotId, cellSize, facingString)
+			if subSlotOffset.Magnitude > 0 then
+				center = center * CFrame.new(subSlotOffset)
+			end
+		end
 		local aligned = GetFlatAlignedCFrame(plotSurface, center.Position)
 		local baseRotation = GetRotationOnly(aligned)
 		local pivotRotation = GetPivotRotation(model)
 		local orientation = baseRotation * yaw * pivotRotation
-		local surfaceUp = plotSurface and plotSurface.CFrame.UpVector or Vector3.yAxis
-		local lift = GetLiftAlongDirection(model, surfaceUp) + extraLift
 		target = CFrame.new(center.Position + surfaceUp * lift) * orientation
+		if subSlotId then
+			model:SetAttribute("SubSlotId", subSlotId)
+		else
+			model:SetAttribute("SubSlotId", nil)
+		end
+		local groupId = SubSlotResolver.GetGroupId(spec)
+		if groupId then
+			model:SetAttribute("SubSlotGroup", groupId)
+		else
+			model:SetAttribute("SubSlotGroup", nil)
+		end
+		if subSlotOffset.Magnitude > 0 then
+			model:SetAttribute("SubSlotOffsetX", subSlotOffset.X)
+			model:SetAttribute("SubSlotOffsetY", subSlotOffset.Y)
+			model:SetAttribute("SubSlotOffsetZ", subSlotOffset.Z)
+		else
+			model:SetAttribute("SubSlotOffsetX", nil)
+			model:SetAttribute("SubSlotOffsetY", nil)
+			model:SetAttribute("SubSlotOffsetZ", nil)
+		end
 	elseif placementType == "Roof" then
 		-- Roof placement sits above its floor level by a configurable lift
 		local center = grid:FootprintCenterCFrame(cellX, cellZ, footprintWidth, footprintDepth, facing)

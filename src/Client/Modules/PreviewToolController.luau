@@ -33,6 +33,7 @@ end
 
 local paintPreviewActive = false
 local upgradePreviewActive = false
+local paletteVisible = false
 local currentMode: "None" | "Paint" | "Upgrade" = "None"
 local headFollowEnabled = false
 local backpackSuppressed = false
@@ -85,6 +86,18 @@ local function stowTool(tool: Tool?)
 	if tool.Parent ~= ToolsFolder then
 		tool.Parent = ToolsFolder
 	end
+end
+
+local function updatePaintBucketState()
+	if currentMode == "Upgrade" then
+		stowTool(PaintBucketTool)
+		return
+	end
+	if paletteVisible or paintPreviewActive then
+		equipTool(PaintBucketTool)
+		return
+	end
+	stowTool(PaintBucketTool)
 end
 
 local function ensureRigReferences()
@@ -240,19 +253,15 @@ local function applyMode(mode: "None" | "Paint" | "Upgrade")
 	if currentMode == mode then
 		return
 	end
-	if mode ~= "Paint" then
-		stowTool(PaintBucketTool)
-	end
 	if mode ~= "Upgrade" then
 		stowTool(HammerTool)
 	end
 
 	currentMode = mode
-	if mode == "Paint" then
-		equipTool(PaintBucketTool)
-	elseif mode == "Upgrade" then
+	if mode == "Upgrade" then
 		equipTool(HammerTool)
 	end
+	updatePaintBucketState()
 
 	local previewActive = mode ~= "None"
 	setHeadFollowEnabled(previewActive)
@@ -286,6 +295,7 @@ local function onCharacterAdded(character: Model)
 				startHeadTracking()
 			end
 			task.defer(evaluateMode)
+			task.defer(updatePaintBucketState)
 		end)
 	else
 		ensureRigReferences()
@@ -293,6 +303,7 @@ local function onCharacterAdded(character: Model)
 			startHeadTracking()
 		end
 		task.defer(evaluateMode)
+		task.defer(updatePaintBucketState)
 	end
 end
 
@@ -310,10 +321,16 @@ end
 function PreviewToolController.Init()
 	paintPreviewActive = BuildPaletteUI.IsSelectModeActive()
 	upgradePreviewActive = PlotBuilderUI.IsUpgradeViewActive()
+	paletteVisible = BuildPaletteUI.IsVisible()
 
 	BuildPaletteUI.OnSelectModeChanged(function(isActive)
 		paintPreviewActive = isActive
 		evaluateMode()
+	end)
+
+	BuildPaletteUI.OnVisibilityChanged(function(isVisible)
+		paletteVisible = isVisible
+		updatePaintBucketState()
 	end)
 
 	PlotBuilderUI.OnUpgradeViewChanged(function(isActive)
@@ -330,6 +347,7 @@ function PreviewToolController.Init()
 	end
 
 	evaluateMode()
+	updatePaintBucketState()
 end
 
 return PreviewToolController

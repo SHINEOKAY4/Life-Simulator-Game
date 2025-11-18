@@ -13,6 +13,7 @@ local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBe
 local PlacementHelpers = require(ReplicatedStorage.Shared.Utilities.PlacementHelpers)
 local PlotStateStore = require(script.Parent.Parent:WaitForChild("ClientStores"):WaitForChild("PlotStateStore"))
 local CutawayViewController = require(script.Parent:WaitForChild("CutawayViewController"))
+local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
 
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 
@@ -154,6 +155,7 @@ local LastPrimaryMouseDown = false
 local CurrentWallMountPose: WallMountPose? = nil
 local CurrentSurfaceMountPose: SurfaceMountPose? = nil
 local CurrentCeilingMountPose: CeilingMountPose? = nil
+local CurrentSubSlotId: string? = nil
 
 local PLACEABLE_FILL = Color3.fromRGB(159, 234, 159)
 local PLACEABLE_OUTLINE = Color3.fromRGB(137, 255, 119)
@@ -554,7 +556,8 @@ local function previewCellObject(
 	widthCells: number,
 	depthCells: number,
 	levelHeight: number,
-	lift: number
+	lift: number,
+	subSlotOffset: Vector3?
 )
 	Renderer.PreviewCellObject(
 		model,
@@ -567,7 +570,8 @@ local function previewCellObject(
 		depthCells,
 		levelHeight,
 		lift,
-		CurrentPivotRotation
+		CurrentPivotRotation,
+		subSlotOffset
 	)
 end
 
@@ -1078,6 +1082,8 @@ local function handleRaycastMiss(kind: PreviewKind, isWindowItem: boolean)
 		CurrentCeilingMountPose = nil
 	end
 
+	CurrentSubSlotId = nil
+
 	updateHighlightForResult(false)
 	PlacementCostDisplay.Hide()
 end
@@ -1140,6 +1146,8 @@ type DefaultPreviewArgs = {
 	activeLevel: number,
 	levelHeight: number,
 	lift: number,
+	previewSubSlotId: string?,
+	subSlotOffset: Vector3?,
 }
 
 local function processWindowVariant(
@@ -1323,12 +1331,14 @@ local function renderDefaultPreview(args: DefaultPreviewArgs)
 	local baseWidthCells = args.baseWidthCells
 	local baseDepthCells = args.baseDepthCells
 	local previewFacing = args.previewFacing
+	local previewSubSlotId = args.previewSubSlotId
 	local resolvedPreviewKind = args.resolvedPreviewKind
 	local placed = args.placed
 	local ignorePlacement = args.ignorePlacement
 	local activeLevel = args.activeLevel
 	local levelHeight = args.levelHeight
 	local lift = args.lift
+	local subSlotOffset = args.subSlotOffset
 
 	withMarkerPool(function()
 		local isUnlocked = PlacementUtils.IsFootprintUnlockedWithChecker(
@@ -1355,7 +1365,9 @@ local function renderDefaultPreview(args: DefaultPreviewArgs)
 				placed,
 				ignorePlacement,
 				activeLevel,
-				previewAllowsStacking
+				previewAllowsStacking,
+				CurrentItemId,
+				previewSubSlotId
 			)
 		elseif resolvedPreviewKind == "Roof" then
 			blocked = PlacementUtils.IsCellOccupiedForPreview(
@@ -1369,7 +1381,9 @@ local function renderDefaultPreview(args: DefaultPreviewArgs)
 				placed,
 				ignorePlacement,
 				activeLevel,
-				false
+				false,
+				nil,
+				nil
 			)
 		end
 		local wallEdgeOccupant: string? = nil
@@ -1564,7 +1578,8 @@ local function renderDefaultPreview(args: DefaultPreviewArgs)
 				baseWidthCells,
 				baseDepthCells,
 				levelHeight,
-				lift
+				lift,
+				subSlotOffset
 			)
 		end
 
@@ -1712,6 +1727,11 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 	end
 
 	CurrentItemSpec = ItemFinder.FindItemById(itemId)
+	if SubSlotResolver.UsesSubSlots(CurrentItemSpec) then
+		CurrentSubSlotId = SubSlotResolver.GetDefaultSlotId(CurrentItemSpec)
+	else
+		CurrentSubSlotId = nil
+	end
 	local isWindowItem = isWindowVariant(CurrentItemSpec)
 
 	if not PlotStateStore.IsReady() then
@@ -2010,6 +2030,46 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 
 		local windowHeightOffset = windowPose and windowPose.HeightOffset or nil
 
+		local previewSubSlotId: string? = nil
+		local subSlotOffset: Vector3? = nil
+		if resolvedPreviewKind == "CellObject" then
+			local usesSubSlots = SubSlotResolver.UsesSubSlots(itemSpec)
+			if usesSubSlots then
+				local cellSizeValue = grid.CellSize
+				if typeof(cellSizeValue) ~= "number" then
+					cellSizeValue = BuildConstants.CellSize
+				end
+				local levelOffset = if typeof(levelHeight) == "number" then levelHeight else 0
+				local baseSlot = SubSlotResolver.NormalizeSlotId(itemSpec, CurrentSubSlotId)
+				if not baseSlot then
+					baseSlot = SubSlotResolver.GetDefaultSlotId(itemSpec)
+				end
+				local resolvedSlot = baseSlot
+				if typeof(cellSizeValue) == "number" then
+					local centerCFrame = grid:CellToWorldCenterCFrame(cellX, cellZ, levelOffset)
+					local localOffset = centerCFrame:PointToObjectSpace(result.Position)
+					local horizontalOffset = Vector3.new(localOffset.X, 0, localOffset.Z)
+					local nearestSlot =
+						SubSlotResolver.FindNearestSlot(itemSpec, cellSizeValue, horizontalOffset, resolvedFacing)
+					if nearestSlot then
+						resolvedSlot = nearestSlot
+					end
+				end
+				if resolvedSlot then
+					previewSubSlotId = SubSlotResolver.NormalizeSlotId(itemSpec, resolvedSlot)
+				end
+				if previewSubSlotId and typeof(cellSizeValue) == "number" then
+					subSlotOffset =
+						SubSlotResolver.ResolveOffset(itemSpec, previewSubSlotId, cellSizeValue, resolvedFacing)
+				end
+				CurrentSubSlotId = previewSubSlotId
+			else
+				CurrentSubSlotId = nil
+			end
+		else
+			CurrentSubSlotId = nil
+		end
+
 		local surfaceParentKeyForCache = surfaceMountPose and surfaceMountPose.ParentKey or nil
 		local surfaceLocalPositionForCache = surfaceMountPose and surfaceMountPose.LocalPosition or nil
 		local ceilingDropForCache = ceilingMountPose and ceilingMountPose.DropStuds or nil
@@ -2025,6 +2085,7 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 			surfaceLocalPosition = surfaceLocalPositionForCache,
 			ceilingDrop = ceilingDropForCache,
 			ceilingRotation = ceilingRotationForCache,
+			subSlotId = previewSubSlotId,
 		}
 
 		if shouldSkipPose(poseInfo) then
@@ -2124,6 +2185,8 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 			activeLevel = activeLevel,
 			levelHeight = levelHeight,
 			lift = lift,
+			previewSubSlotId = previewSubSlotId,
+			subSlotOffset = subSlotOffset,
 		})
 	end)
 end
@@ -2165,6 +2228,7 @@ function ObjectPreview.ClearPreview()
 	CurrentWallMountPose = nil
 	CurrentSurfaceMountPose = nil
 	CurrentCeilingMountPose = nil
+	CurrentSubSlotId = nil
 	CeilingPreviewState.Reset()
 	restoreCutawayAfterCeiling()
 end
@@ -2205,6 +2269,7 @@ function ObjectPreview.GetCurrentPose(): PreviewPose?
 			CeilingMount = CurrentCeilingMountPose,
 			Level = poseLevel,
 			LevelHeight = poseLevelHeight,
+			SubSlotId = nil,
 		}
 	end
 
@@ -2231,6 +2296,7 @@ function ObjectPreview.GetCurrentPose(): PreviewPose?
 				CeilingMount = CurrentCeilingMountPose,
 				Level = fallbackLevel,
 				LevelHeight = fallbackLevelHeight,
+				SubSlotId = CurrentSubSlotId or (originSignature :: any).SubSlotId,
 			}
 		end
 	end
@@ -2251,6 +2317,7 @@ function ObjectPreview.GetCurrentPose(): PreviewPose?
 		CeilingMount = CurrentCeilingMountPose,
 		Level = poseLevel,
 		LevelHeight = poseLevelHeight,
+		SubSlotId = CurrentSubSlotId,
 	}
 end
 
@@ -2370,6 +2437,7 @@ function ObjectPreview.SetMoveOrigin(originInfo: {
 	WidthCells: number?,
 	DepthCells: number?,
 	Level: number?,
+	SubSlotId: string?,
 }?)
 	if not originInfo then
 		MoveOriginSignature = nil
@@ -2418,6 +2486,15 @@ function ObjectPreview.SetMoveOrigin(originInfo: {
 		PlacementUtils.ResolvePlacementEntry(entry)
 	local placementKeyType = PlacementBehavior.getPlacementKeyLabel(itemSpec)
 
+	local normalizedOriginSubSlotId: string? = nil
+	local originSubSlotId = originInfo.SubSlotId
+	if typeof(originSubSlotId) == "string" and originSubSlotId ~= "" then
+		normalizedOriginSubSlotId = SubSlotResolver.NormalizeSlotId(itemSpec, originSubSlotId)
+	elseif SubSlotResolver.UsesSubSlots(itemSpec) then
+		normalizedOriginSubSlotId = SubSlotResolver.GetDefaultSlotId(itemSpec)
+	end
+	CurrentSubSlotId = normalizedOriginSubSlotId
+
 	local resolvedLevel = nil
 	if typeof(originInfo.Level) == "number" then
 		resolvedLevel = math.floor(originInfo.Level + 0.5)
@@ -2433,6 +2510,7 @@ function ObjectPreview.SetMoveOrigin(originInfo: {
 		WidthCells = if typeof(widthCells) == "number" and widthCells > 0 then widthCells else resolvedWidth,
 		DepthCells = if typeof(depthCells) == "number" and depthCells > 0 then depthCells else resolvedDepth,
 		Level = resolvedLevel,
+		SubSlotId = normalizedOriginSubSlotId,
 	}
 
 	MoveHoldActive = true
