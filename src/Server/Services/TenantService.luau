@@ -8,6 +8,9 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local TenantConfig = require(ReplicatedStorage.Shared.Configurations.TenantConfig)
+local TenantDefinitions = require(ReplicatedStorage.Shared.Definitions.TenantDefinitions)
+local MailboxPackets = require(ReplicatedStorage.Network.MailboxPackets)
+local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
@@ -22,6 +25,7 @@ local RentConfig = TenantConfig.Rent
 
 local UPDATE_TASK_NAME = "TenantService"
 local UPDATE_INTERVAL = 2
+local INFINITE_LEASE_END = math.huge
 
 local rng = Random.new()
 
@@ -55,9 +59,11 @@ type TenantStateSave = {
 	LastOfferUnix: number?,
 	OfferSequence: number?,
 	PendingOffer: TenantOffer? | boolean?,
-	ActiveLease: TenantLease? | boolean?,
+	ActiveLease: TenantLease? | boolean?, -- legacy single-slot lease field
+	ActiveLeases: { [string]: TenantLease }?,
 	OutstandingRent: number?,
 	LastKnownScore: number?,
+	MailboxBalance: number?,
 }
 
 type RuntimeState = {
@@ -67,10 +73,91 @@ type RuntimeState = {
 	CachedValuation: ValuationResult?,
 	NextValuationUnix: number,
 	NextOfferUnix: number,
+	MailboxOwnedPlotConn: RBXScriptConnection?,
 }
 
 local TenantService = {}
 local RuntimeByUserId: { [number]: RuntimeState } = {}
+
+local RESIDENTS_FOLDER_NAME = "Residents"
+local MAILBOX_ATTRIBUTE_NAME = "MailboxBalance"
+local MAX_MAILBOX_BALANCE = 4294967295
+
+local function clampMailboxAmount(amount: number): number
+	if amount ~= amount then
+		return 0
+	end
+	if amount <= 0 then
+		return 0
+	end
+	local clamped = math.floor(amount + 0.5)
+	if clamped < 0 then
+		clamped = 0
+	elseif clamped > MAX_MAILBOX_BALANCE then
+		clamped = MAX_MAILBOX_BALANCE
+	end
+	return clamped
+end
+
+local function findResidentsFolder(player: Player): Folder?
+	local plotIndex = player:GetAttribute("OwnedPlotIndex")
+	if typeof(plotIndex) ~= "number" then
+		return nil
+	end
+	local plotModel = PlotFinder.FindPlot(plotIndex)
+	if not plotModel then
+		return nil
+	end
+	local folder = plotModel:FindFirstChild(RESIDENTS_FOLDER_NAME)
+	if folder and folder:IsA("Folder") then
+		return folder
+	end
+	return nil
+end
+
+local function ensureResidentsFolder(player: Player): Folder?
+	local folder = findResidentsFolder(player)
+	if folder then
+		return folder
+	end
+	local plotIndex = player:GetAttribute("OwnedPlotIndex")
+	if typeof(plotIndex) ~= "number" then
+		return nil
+	end
+	local plotModel = PlotFinder.FindPlot(plotIndex)
+	if not plotModel then
+		return nil
+	end
+	local created = Instance.new("Folder")
+	created.Name = RESIDENTS_FOLDER_NAME
+	created.Parent = plotModel
+	return created
+end
+
+local function applyMailboxAttribute(player: Player, balance: number)
+	local folder = ensureResidentsFolder(player)
+	if folder then
+		folder:SetAttribute(MAILBOX_ATTRIBUTE_NAME, balance)
+	end
+end
+
+local function broadcastMailboxBalance(runtime: RuntimeState)
+	local rawValue = runtime.Save.MailboxBalance
+	local numeric = if typeof(rawValue) == "number" then rawValue else 0
+	local balance = clampMailboxAmount(numeric)
+	runtime.Save.MailboxBalance = balance
+	applyMailboxAttribute(runtime.Player, balance)
+	MailboxPackets.BalanceUpdate:FireClient(runtime.Player, {
+		Balance = balance,
+	})
+end
+
+local function clearMailboxAttribute(player: Player)
+	local folder = findResidentsFolder(player)
+	if folder then
+		folder:SetAttribute(MAILBOX_ATTRIBUTE_NAME, nil)
+	end
+end
 
 local function serverNow(): number
 	return Workspace:GetServerTimeNow()
@@ -111,25 +198,64 @@ local function sanitizeOffer(save: TenantStateSave, now: number)
 	end
 
 	pending.RentIntervalSeconds = pending.RentIntervalSeconds or RentConfig.IntervalSeconds
-	pending.LeaseSeconds = pending.LeaseSeconds or OffersConfig.DefaultLease.MaxSeconds
-	pending.Deposit = pending.Deposit or math.floor((pending.RentPerInterval or 0) * RentConfig.DepositPercent + 0.5)
+	if pending.LeaseSeconds == nil then
+		pending.LeaseSeconds = OffersConfig.DefaultLease.MaxSeconds
+	end
+	if pending.Deposit == nil then
+		pending.Deposit = math.floor((pending.RentPerInterval or 0) * RentConfig.DepositPercent + 0.5)
+	end
 	pending.ExpiresUnix = pending.ExpiresUnix or (now + OffersConfig.OfferLifetimeSeconds)
 end
 
-local function sanitizeLease(save: TenantStateSave, now: number)
-	local lease = save.ActiveLease
-	if typeof(lease) ~= "table" then
-		save.ActiveLease = nil
-		return
-	end
-
+local function sanitizeLeaseEntry(lease: TenantLease, now: number)
 	lease.RentIntervalSeconds = lease.RentIntervalSeconds or RentConfig.IntervalSeconds
-	lease.NextDueUnix = lease.NextDueUnix or (now + lease.RentIntervalSeconds)
-	lease.LeaseEndUnix = lease.LeaseEndUnix
-		or (now + math.max(OffersConfig.DefaultLease.MaxSeconds, lease.RentIntervalSeconds))
+	lease.NextDueUnix = lease.NextDueUnix or (now + (lease.RentIntervalSeconds or RentConfig.IntervalSeconds))
+	lease.LeaseEndUnix = lease.LeaseEndUnix or INFINITE_LEASE_END
 	lease.MissedPayments = lease.MissedPayments or 0
 	lease.DepositHeld = lease.DepositHeld or 0
 	lease.StartedUnix = lease.StartedUnix or now
+end
+
+local function ensureActiveLeases(save: TenantStateSave, now: number): { [string]: TenantLease }
+	local leases = save.ActiveLeases
+	if typeof(leases) ~= "table" then
+		leases = {}
+		save.ActiveLeases = leases
+	end
+	local resolved = leases :: { [string]: TenantLease }
+
+	local legacy = save.ActiveLease
+	if typeof(legacy) == "table" then
+		local tenantId = legacy.TenantId
+		if not tenantId or resolved[tenantId] then
+			tenantId = string.format("LegacyTenant-%d", math.floor(now))
+		end
+		legacy.TenantId = tenantId
+		resolved[tenantId] = legacy
+	else
+		save.ActiveLease = nil
+	end
+	save.ActiveLease = nil
+
+	for tenantId, lease in pairs(resolved) do
+		if typeof(lease) ~= "table" then
+			resolved[tenantId] = nil :: any
+		else
+			lease.TenantId = lease.TenantId or tenantId
+			sanitizeLeaseEntry(lease, now)
+		end
+	end
+
+	return resolved
+end
+
+local function getActiveLeases(runtime: RuntimeState): { [string]: TenantLease }
+	local leases = runtime.Save.ActiveLeases
+	if typeof(leases) ~= "table" then
+		leases = {}
+		runtime.Save.ActiveLeases = leases
+	end
+	return leases :: { [string]: TenantLease }
 end
 
 local function hydrateRuntime(player: Player): RuntimeState?
@@ -138,9 +264,15 @@ local function hydrateRuntime(player: Player): RuntimeState?
 		return nil
 	end
 
+	local existingRuntime = RuntimeByUserId[player.UserId]
+	if existingRuntime and existingRuntime.MailboxOwnedPlotConn then
+		existingRuntime.MailboxOwnedPlotConn:Disconnect()
+		existingRuntime.MailboxOwnedPlotConn = nil
+	end
+
 	local now = serverNow()
 	sanitizeOffer(tenantSave, now)
-	sanitizeLease(tenantSave, now)
+	ensureActiveLeases(tenantSave, now)
 	if typeof(tenantSave.LastOfferUnix) ~= "number" then
 		tenantSave.LastOfferUnix = 0
 	end
@@ -152,6 +284,12 @@ local function hydrateRuntime(player: Player): RuntimeState?
 	end
 	if typeof(tenantSave.Version) ~= "number" then
 		tenantSave.Version = 1
+	end
+	local mailboxBalance = tenantSave.MailboxBalance
+	if typeof(mailboxBalance) ~= "number" then
+		tenantSave.MailboxBalance = 0
+	else
+		tenantSave.MailboxBalance = clampMailboxAmount(mailboxBalance)
 	end
 
 	local currencyState = PlayerSession.TryGetData(player, "CurrencyState")
@@ -166,19 +304,36 @@ local function hydrateRuntime(player: Player): RuntimeState?
 		CachedValuation = nil,
 		NextValuationUnix = 0,
 		NextOfferUnix = now + OffersConfig.MinIntervalSeconds,
+		MailboxOwnedPlotConn = nil,
 	}
 
 	RuntimeByUserId[player.UserId] = runtime
+	runtime.MailboxOwnedPlotConn = player:GetAttributeChangedSignal("OwnedPlotIndex"):Connect(function()
+		task.defer(function()
+			local active = RuntimeByUserId[player.UserId]
+			if active == runtime then
+				broadcastMailboxBalance(runtime)
+			end
+		end)
+	end)
+
+	task.defer(function()
+		local active = RuntimeByUserId[player.UserId]
+		if active == runtime then
+			broadcastMailboxBalance(runtime)
+		end
+	end)
 	return runtime
 end
 
-local function concludeLease(runtime: RuntimeState, reason: string)
-	local lease = runtime.Save.ActiveLease
-	if typeof(lease) ~= "table" then
+local function concludeLease(runtime: RuntimeState, tenantId: string, reason: string)
+	local leases = getActiveLeases(runtime)
+	local lease = leases[tenantId]
+	if not lease then
 		return
 	end
 
-	runtime.Save.ActiveLease = nil
+	leases[tenantId] = nil
 	lease.LeaseEndUnix = serverNow()
 
 	local deposit = lease.DepositHeld or 0
@@ -193,34 +348,24 @@ local function concludeLease(runtime: RuntimeState, reason: string)
 end
 
 local function composeOffer(runtime: RuntimeState, valuation: ValuationResult, now: number): TenantOffer
-	local rent = valuation.RentEstimate
+	local tierDefinition, tenantName = TenantDefinitions.GetRandomDefinition(rng)
+	local baseRent = valuation.RentEstimate
 	local variance = OffersConfig.RentVariancePercent
 	if variance > 0 then
-		rent *= (1 + variance * rng:NextNumber(-1, 1))
+		baseRent *= (1 + variance * rng:NextNumber(-1, 1))
 	end
-
-	rent = math.max(ValuationConfig.MinimumRent, math.floor(rent + 0.5))
-	local tierId = valuation.TierId
-	local leaseWindow = OffersConfig.LeaseDurations[tierId] or OffersConfig.DefaultLease
-	local leaseSeconds = math.floor(rng:NextNumber(leaseWindow.MinSeconds, leaseWindow.MaxSeconds))
-	if leaseSeconds < RentConfig.IntervalSeconds then
-		leaseSeconds = RentConfig.IntervalSeconds * 2
-	end
-
-	local namePool = OffersConfig.NamePool
-	local tenantName = namePool[1] or "Tenant"
-	if #namePool > 0 then
-		tenantName = namePool[rng:NextInteger(1, #namePool)]
-	end
+	baseRent = math.max(ValuationConfig.MinimumRent, math.floor(baseRent + 0.5))
+	local rentMultiplier = 1 + (tierDefinition.RentBoostPercent or 0)
+	local rent = math.max(ValuationConfig.MinimumRent, math.floor(baseRent * rentMultiplier + 0.5))
 
 	local offerId = string.format("%d-%d", runtime.Player.UserId, (runtime.Save.OfferSequence or 0) + 1)
 
 	return {
 		OfferId = offerId,
-		TierId = tierId,
+		TierId = tierDefinition.Id,
 		RentPerInterval = rent,
-		Deposit = math.floor(rent * RentConfig.DepositPercent + 0.5),
-		LeaseSeconds = leaseSeconds,
+		Deposit = 0,
+		LeaseSeconds = 0,
 		RentIntervalSeconds = RentConfig.IntervalSeconds,
 		TenantName = tenantName,
 		CreatedUnix = now,
@@ -230,96 +375,105 @@ local function composeOffer(runtime: RuntimeState, valuation: ValuationResult, n
 end
 
 local function startLease(runtime: RuntimeState, offer: TenantOffer, now: number)
+	local leases = getActiveLeases(runtime)
+	local uniqueId = offer.OfferId
+	local suffix = 1
+	while leases[uniqueId] do
+		suffix += 1
+		uniqueId = string.format("%s-%d", offer.OfferId, suffix)
+	end
+
 	local lease: TenantLease = {
-		TenantId = offer.OfferId,
+		TenantId = uniqueId,
 		TierId = offer.TierId,
 		RentPerInterval = offer.RentPerInterval,
 		RentIntervalSeconds = offer.RentIntervalSeconds,
-		LeaseEndUnix = now + offer.LeaseSeconds,
+		LeaseEndUnix = INFINITE_LEASE_END,
 		NextDueUnix = now + offer.RentIntervalSeconds,
 		MissedPayments = 0,
 		DepositHeld = offer.Deposit,
 		StartedUnix = now,
 	}
 
-	runtime.Save.ActiveLease = lease
-	local currencyState = resolveCurrencyState(runtime)
-	if currencyState and lease.DepositHeld > 0 then
-		CurrencyService.Add(runtime.Player, "Cash", lease.DepositHeld, currencyState, { Source = "TenantDeposit" })
-	end
-
+	leases[uniqueId] = lease
 	scheduleNextOffer(runtime, now + OffersConfig.CooldownSeconds)
 end
 
 local function settleOutstanding(runtime: RuntimeState)
-	local outstanding = runtime.Save.OutstandingRent
-	if not outstanding or outstanding <= 0 then
-		return
+	if runtime.Save.OutstandingRent and runtime.Save.OutstandingRent ~= 0 then
+		runtime.Save.OutstandingRent = 0
 	end
-
-	local currencyState = resolveCurrencyState(runtime)
-	if not currencyState then
-		return
-	end
-
-	local balance = currencyState.Cash or 0
-	if balance <= 0 then
-		return
-	end
-
-	local payment = math.min(balance, outstanding)
-	if payment <= 0 then
-		return
-	end
-
-	CurrencyService.Remove(runtime.Player, "Cash", payment, currencyState)
-	runtime.Save.OutstandingRent = math.max(0, outstanding - payment)
 end
 
-local function serviceLease(runtime: RuntimeState, now: number)
-	local lease = runtime.Save.ActiveLease
-	if typeof(lease) ~= "table" then
-		return
-	end
-
-	if lease.LeaseEndUnix <= now then
-		concludeLease(runtime, "Complete")
-		return
-	end
-
-	settleOutstanding(runtime)
-
+local function serviceLeaseEntry(runtime: RuntimeState, _tenantId: string, lease: TenantLease, now: number)
 	local nextDue = lease.NextDueUnix
 	if nextDue > now then
 		return
 	end
-
-	local currencyState = resolveCurrencyState(runtime)
-	if not currencyState then
-		lease.NextDueUnix = now + RentConfig.GraceSeconds
-		return
-	end
-
-	local balance = currencyState.Cash or 0
 	local rentAmount = lease.RentPerInterval
 	if rentAmount <= 0 then
 		lease.NextDueUnix = now + lease.RentIntervalSeconds
 		return
 	end
 
-	if balance >= rentAmount then
-		CurrencyService.Remove(runtime.Player, "Cash", rentAmount, currencyState)
-		lease.NextDueUnix = now + lease.RentIntervalSeconds
-		lease.MissedPayments = 0
-	else
-		lease.MissedPayments += 1
-		runtime.Save.OutstandingRent = (runtime.Save.OutstandingRent or 0) + rentAmount
-		if lease.MissedPayments >= RentConfig.MaxMissedPayments then
-			concludeLease(runtime, "Evicted")
+	local existing = runtime.Save.MailboxBalance
+	local currentBalance = if typeof(existing) == "number" then existing else 0
+	local updatedBalance = clampMailboxAmount(currentBalance + rentAmount)
+	runtime.Save.MailboxBalance = updatedBalance
+	lease.NextDueUnix = now + lease.RentIntervalSeconds
+	lease.MissedPayments = 0
+	runtime.Save.OutstandingRent = 0
+	broadcastMailboxBalance(runtime)
+end
+
+local function serviceLease(runtime: RuntimeState, now: number)
+	local leases = runtime.Save.ActiveLeases
+	if typeof(leases) ~= "table" then
+		return
+	end
+
+	if not next(leases) then
+		return
+	end
+
+	settleOutstanding(runtime)
+
+	for tenantId, lease in pairs(leases) do
+		if lease.LeaseEndUnix <= now then
+			concludeLease(runtime, tenantId, "Complete")
 		else
-			lease.NextDueUnix = now + RentConfig.GraceSeconds
+			serviceLeaseEntry(runtime, tenantId, lease, now)
 		end
 	end
+end
+
+local function collectMailbox(runtime: RuntimeState): (boolean, number, string)
+	local rawBalance = runtime.Save.MailboxBalance
+	local balance = if typeof(rawBalance) == "number" then rawBalance else 0
+	if balance <= 0 then
+		runtime.Save.MailboxBalance = 0
+		broadcastMailboxBalance(runtime)
+		return false, 0, "Mailbox is empty."
+	end
+
+	local currencyState = resolveCurrencyState(runtime)
+	if not currencyState then
+		return false, 0, "Unable to access currency data."
+	end
+
+	local payout = clampMailboxAmount(balance)
+	if payout <= 0 then
+		runtime.Save.MailboxBalance = 0
+		broadcastMailboxBalance(runtime)
+		return false, 0, "Mailbox is empty."
+	end
+
+	runtime.Save.MailboxBalance = 0
+	broadcastMailboxBalance(runtime)
+	CurrencyService.Add(runtime.Player, "Cash", payout, currencyState, {
+		Source = "TenantMailbox",
+	})
+	return true, payout, "Collected rent from mailbox."
 end
 
 local function refreshValuation(runtime: RuntimeState, now: number)
@@ -366,10 +520,6 @@ local function tryExpireOffer(runtime: RuntimeState, now: number)
 end
 
 local function tryGenerateOffer(runtime: RuntimeState, now: number)
-	if runtime.Save.ActiveLease then
-		return
-	end
-
 	if typeof(runtime.Save.PendingOffer) == "table" then
 		return
 	end
@@ -420,27 +570,42 @@ function TenantService.GetPendingOffer(player: Player): TenantOffer?
 	return table.clone(pending)
 end
 
-function TenantService.GetActiveLease(player: Player): TenantLease?
-	local runtime = RuntimeByUserId[player.UserId]
+function TenantService.GetActiveLeases(player: Player): { [string]: TenantLease }?
+	local runtime: RuntimeState? = RuntimeByUserId[player.UserId]
 	if not runtime then
+		runtime = hydrateRuntime(player)
+	end
+	local resolvedRuntime: RuntimeState? = runtime
+	if not resolvedRuntime then
 		return nil
 	end
 
-	local lease = runtime.Save.ActiveLease
-	if typeof(lease) ~= "table" then
-		return nil
+	local leases = resolvedRuntime.Save.ActiveLeases
+	if typeof(leases) ~= "table" then
+		return {}
 	end
 
-	return table.clone(lease)
+	local cloned: { [string]: TenantLease } = {}
+	for tenantId, lease in pairs(leases) do
+		cloned[tenantId] = table.clone(lease)
+	end
+	return cloned
+end
+
+function TenantService.GetActiveLease(player: Player): TenantLease?
+	local leases = TenantService.GetActiveLeases(player)
+	if not leases then
+		return nil
+	end
+	for _, lease in pairs(leases) do
+		return lease
+	end
+	return nil
 end
 
 function TenantService.AcceptOffer(player: Player): boolean
 	local runtime = RuntimeByUserId[player.UserId]
 	if not runtime then
-		return false
-	end
-
-	if runtime.Save.ActiveLease then
 		return false
 	end
 
@@ -450,8 +615,8 @@ function TenantService.AcceptOffer(player: Player): boolean
 	end
 
 	runtime.Save.PendingOffer = nil
-	startLease(runtime, pending, serverNow())
-	return true
+	local success = TenantService.BeginLeaseFromOffer(player, pending)
+	return success
 end
 
 function TenantService.DeclineOffer(player: Player): boolean
@@ -478,6 +643,44 @@ function TenantService.GetValuation(player: Player): ValuationResult?
 	return runtime.CachedValuation
 end
 
+function TenantService.GenerateProspectOffer(player: Player): TenantOffer?
+	local runtime: RuntimeState? = RuntimeByUserId[player.UserId]
+	if not runtime then
+		runtime = hydrateRuntime(player)
+	end
+	if not runtime then
+		return nil
+	end
+	local resolvedRuntime: RuntimeState = runtime
+	refreshValuation(resolvedRuntime, serverNow())
+	local valuation = resolvedRuntime.CachedValuation
+	if not valuation then
+		return nil
+	end
+	local now = serverNow()
+	local offer = composeOffer(resolvedRuntime, valuation, now)
+	local sequence = resolvedRuntime.Save.OfferSequence or 0
+	sequence += 1
+	resolvedRuntime.Save.OfferSequence = sequence
+	resolvedRuntime.Save.LastOfferUnix = now
+	resolvedRuntime.NextOfferUnix = math.max(resolvedRuntime.NextOfferUnix, now + OffersConfig.CooldownSeconds)
+	return offer
+end
+
+function TenantService.BeginLeaseFromOffer(player: Player, offer: TenantOffer): (boolean, string?)
+	local runtime: RuntimeState? = RuntimeByUserId[player.UserId]
+	if not runtime then
+		runtime = hydrateRuntime(player)
+	end
+	if not runtime then
+		return false, "Tenant data unavailable."
+	end
+	local resolvedRuntime: RuntimeState = runtime
+	startLease(resolvedRuntime, offer, serverNow())
+	resolvedRuntime.Save.LastOfferUnix = serverNow()
+	return true, nil
+end
+
 local function onPlayerAdded(player: Player)
 	task.defer(function()
 		if not player.Parent then
@@ -488,10 +691,60 @@ local function onPlayerAdded(player: Player)
 end
 
 local function onPlayerRemoving(player: Player)
+	local runtime = RuntimeByUserId[player.UserId]
+	if runtime and runtime.MailboxOwnedPlotConn then
+		runtime.MailboxOwnedPlotConn:Disconnect()
+		runtime.MailboxOwnedPlotConn = nil
+	end
 	RuntimeByUserId[player.UserId] = nil
+	clearMailboxAttribute(player)
 end
 
 function TenantService.Init()
+	MailboxPackets.CollectRequest.OnServerInvoke = function(player: Player)
+		local runtime: RuntimeState? = RuntimeByUserId[player.UserId]
+		if not runtime then
+			runtime = hydrateRuntime(player)
+		end
+		local resolvedRuntime: RuntimeState? = runtime
+		if not resolvedRuntime then
+			return false, 0, "Mailbox unavailable."
+		end
+
+		local success, amount, message = collectMailbox(resolvedRuntime)
+		if success then
+			MailboxPackets.CollectionEffect:FireClient(player, {
+				Amount = amount,
+			})
+		else
+			MailboxPackets.CollectionEffect:FireClient(player, {
+				Amount = 0,
+			})
+		end
+		return success, amount, message
+	end
+
+	PlotService.PlotClaimed:Connect(function(player: Player)
+		local runtime: RuntimeState? = RuntimeByUserId[player.UserId]
+		if not runtime then
+			runtime = hydrateRuntime(player)
+		end
+		local resolvedRuntime: RuntimeState? = runtime
+		if not resolvedRuntime then
+			return
+		end
+		task.defer(function()
+			local active = RuntimeByUserId[player.UserId]
+			if active == resolvedRuntime then
+				broadcastMailboxBalance(resolvedRuntime)
+			end
+		end)
+	end)
+
+	PlotService.PlotUnclaimed:Connect(function(player: Player)
+		clearMailboxAttribute(player)
+	end)
+
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
 	for _, player in ipairs(Players:GetPlayers()) do

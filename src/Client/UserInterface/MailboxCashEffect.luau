@@ -8,7 +8,7 @@ local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
---local PayrollPackets = require(ReplicatedStorage.Network.PayrollPackets)
+local MailboxPackets = require(ReplicatedStorage.Network.MailboxPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 
 local LocalPlayer = Players.LocalPlayer
@@ -81,6 +81,7 @@ local EffectContainer: Frame = (function()
 end)()
 
 local cachedMailboxPart: BasePart? = nil
+local isInitialized = false
 
 local function playSound(sound: Sound)
 	sound.TimePosition = 0
@@ -223,32 +224,37 @@ local function spawnMoneyBurst(amount: number)
 	playSound(CollectSound)
 end
 
-local function onPayrollUpdate(payload: any)
-	if typeof(payload) ~= "table" then
-		return
+local function handleCollectionPayload(payload: any)
+	local amount = 0
+	if typeof(payload) == "table" then
+		local extracted = payload.Amount
+		if typeof(extracted) == "number" then
+			amount = extracted
+		end
+	elseif typeof(payload) == "number" then
+		amount = payload
 	end
 
-	local collectedAmount = payload.CollectedAmount
-	local mailboxEmptyFlag = payload.MailboxEmpty
-
-	if typeof(mailboxEmptyFlag) == "boolean" and mailboxEmptyFlag then
+	if amount <= 0 then
 		playSound(EmptyClickSound)
 		return
 	end
 
-	if typeof(collectedAmount) ~= "number" or collectedAmount <= 0 then
-		return
-	end
-
-	spawnMoneyBurst(collectedAmount)
+	spawnMoneyBurst(amount)
 end
 
 local MailboxCashEffect = {}
 
 function MailboxCashEffect.Init()
+	if isInitialized then
+		return
+	end
+	isInitialized = true
 	refreshMailboxReference()
 
 	LocalPlayer:GetAttributeChangedSignal("OwnedPlotIndex"):Connect(refreshMailboxReference)
+
+	MailboxPackets.CollectionEffect.OnClientEvent:Connect(handleCollectionPayload)
 end
 
 return MailboxCashEffect

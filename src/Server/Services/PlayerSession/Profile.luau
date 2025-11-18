@@ -20,7 +20,9 @@ local Profile = {
 		OfferSequence = 0,
 		PendingOffer = false,
 		ActiveLease = false,
+		ActiveLeases = {},
 		OutstandingRent = 0,
+		MailboxBalance = 0,
 	},
 	WorldEventState = {
 		RotationId = "",
