@@ -9,6 +9,8 @@ export type CycleState = "Active" | "Grace" | "Overdue"
 type OutstandingBreakdown = {
 	PlotTax: number,
 	Electric: number,
+	Water: number,
+	Internet: number,
 	Interest: number,
 }
 
@@ -61,6 +63,8 @@ local function sanitizeOutstandingBreakdown(raw: any): OutstandingBreakdown
 	local normalized: OutstandingBreakdown = {
 		PlotTax = 0,
 		Electric = 0,
+		Water = 0,
+		Internet = 0,
 		Interest = 0,
 	}
 	if typeof(raw) ~= "table" then
@@ -70,6 +74,8 @@ local function sanitizeOutstandingBreakdown(raw: any): OutstandingBreakdown
 	local candidate = raw :: { [string]: any }
 	normalized.PlotTax = sanitizeOutstandingValue(candidate.PlotTax)
 	normalized.Electric = sanitizeOutstandingValue(candidate.Electric)
+	normalized.Water = sanitizeOutstandingValue(candidate.Water)
+	normalized.Internet = sanitizeOutstandingValue(candidate.Internet)
 	normalized.Interest = sanitizeOutstandingValue(candidate.Interest)
 	return normalized
 end
@@ -86,6 +92,8 @@ function BillingState.new(durationSeconds: number, gracePeriodSeconds: number, s
 			OutstandingBreakdown = {
 				PlotTax = 0,
 				Electric = 0,
+				Water = 0,
+				Internet = 0,
 				Interest = 0,
 			},
 		}

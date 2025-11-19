@@ -17,8 +17,12 @@ local State = require(script.State)
 local Utils = require(script.Utils)
 local NeedEvaluator = require(script.NeedEvaluator)
 local SocialCoordinator = require(script.SocialCoordinator)
-local FallbackActions = require(script.FallbackActions)
 local ActionQueue = require(script.ActionQueue)
+local FallbackActions = require(script.FallbackActions)
+local TipsService = require(ServerScriptService.Server.Services.TipsService)
+local TenantTraits = require(ReplicatedStorage.Shared.Definitions.TenantTraits)
+
+local TenantService -- Lazy loaded to avoid circular dependency
 
 export type ResidentState = any
 
@@ -37,15 +41,6 @@ function ResidentAutonomyService.EvaluateResidentNeeds(
 	stationCache: { [string]: any }?
 )
 	return NeedEvaluator.evaluate(player, residentName, resident, nowClock, clockTime, stationCache)
-end
-
-function ResidentAutonomyService.EvaluateResidentJob(
-	player: Player,
-	residentName: string,
-	resident: ResidentState,
-	stationCache: { [string]: any }?
-): boolean
-	return FallbackActions.evaluateResidentJob(player, residentName, resident, stationCache)
 end
 
 function ResidentAutonomyService.TrySatisfyNeedsForResident(
@@ -116,12 +111,14 @@ function ResidentAutonomyService.TrySatisfyNeedsForResident(
 				return true
 			end
 		end
-		local jobQueued = ResidentAutonomyService.EvaluateResidentJob(player, residentName, residentState, stationCache)
-		if not jobQueued then
-			local delay = State.computeNextEvaluationDelay(residentState)
-			State.setNextEvaluation(residentState, evaluationClock + delay)
+
+		if FallbackActions.evaluateFallback(player, residentName, residentState, stationCache) then
+			return true
 		end
-		return jobQueued
+
+		local delay = State.computeNextEvaluationDelay(residentState)
+		State.setNextEvaluation(residentState, evaluationClock + delay)
+		return false
 	end
 	if ActionQueue.enqueueNeedAction(player, residentName, residentState, decision) then
 		State.clearNextEvaluation(residentState)
@@ -130,6 +127,25 @@ function ResidentAutonomyService.TrySatisfyNeedsForResident(
 	local delay = State.computeNextEvaluationDelay(residentState)
 	State.setNextEvaluation(residentState, evaluationClock + delay)
 	return false
+end
+
+local function updatePassiveFun(residents: { [string]: ResidentState }, stationCache: { [string]: any })
+	local funStations = stationCache["FunStation"]
+	local funScore = 0
+	if funStations then
+		-- Simple logic: each fun station adds 25% to the passive fun score
+		-- This could be expanded to check item quality/tier in the future
+		local count = 0
+		for _ in pairs(funStations) do
+			count += 1
+		end
+		funScore = count * 25
+	end
+	funScore = math.clamp(funScore, 0, 100)
+
+	for _, resident in pairs(residents) do
+		resident:SetNeed("Fun", funScore)
+	end
 end
 
 local function handleStationRemoved(player: Player, _stationType: string, _uniqueId: string, residentNames: { string })
@@ -163,7 +179,7 @@ local function handleStationRemoved(player: Player, _stationType: string, _uniqu
 	end
 end
 
-function ResidentAutonomyService.Decide()
+function ResidentAutonomyService.Decide(dt: number)
 	local nowClock = os.clock()
 	local clockTime = TimeScale.GetClockTime()
 	local allResidents = ResidentService.GetResidents()
@@ -171,7 +187,84 @@ function ResidentAutonomyService.Decide()
 		local player = getPlayerByUserId(userId)
 		if player then
 			local stationCache = PlotService.GetStationsForPlayer(player)
+
+			-- Update passive fun based on plot contents
+			updatePassiveFun(residents, stationCache)
+
 			for residentName, residentState in pairs(residents) do
+				-- Update dissatisfaction
+				local satisfaction = residentState:GetSatisfaction()
+
+				-- Resolve tenant traits
+				local tipMultiplier = 1
+				local dissatisfactionMultiplier = 1
+				local tenantId = residentState.Save.TenantId
+				local lease = nil
+
+				if tenantId then
+					if not TenantService then
+						TenantService = require(ServerScriptService.Server.Services.TenantService)
+					end
+					local leases = TenantService.GetActiveLeases(player)
+					if leases and leases[tenantId] then
+						lease = leases[tenantId]
+						if lease.Traits then
+							for _, traitId in ipairs(lease.Traits) do
+								local trait = TenantTraits.GetTrait(traitId)
+								if trait and trait.Effects then
+									if trait.Effects.TipMultiplier then
+										tipMultiplier *= trait.Effects.TipMultiplier
+									end
+									if trait.Effects.DissatisfactionMultiplier then
+										dissatisfactionMultiplier *= trait.Effects.DissatisfactionMultiplier
+									end
+								end
+							end
+						end
+					end
+				end
+
+				-- Tip Logic: Detect transition from Not Satisfied (< 0.5) to Satisfied (>= 0.5)
+				local isSatisfied = satisfaction >= 0.5
+				local wasSatisfied = residentState.WasSatisfied
+
+				if wasSatisfied == nil then
+					residentState.WasSatisfied = isSatisfied
+				elseif not wasSatisfied and isSatisfied then
+					residentState.WasSatisfied = true
+					local root = residentState.Model and residentState.Model.PrimaryPart
+					if root then
+						local tipAmount = 50
+						if lease then
+							local tierId = lease.TierId
+							if tierId == "Cozy" then
+								tipAmount = 100
+							elseif tierId == "Upgraded" then
+								tipAmount = 250
+							elseif tierId == "Premium" then
+								tipAmount = 500
+							end
+						end
+
+						tipAmount = math.floor(tipAmount * tipMultiplier)
+						TipsService.AwardTip(player, residentName, tipAmount, root.Position)
+					end
+				elseif wasSatisfied and not isSatisfied then
+					residentState.WasSatisfied = false
+				end
+
+				-- Apply dissatisfaction multiplier to dt
+				residentState:UpdateDissatisfaction(dt * dissatisfactionMultiplier, satisfaction, 0.35) -- 35% threshold
+
+				if residentState:GetDissatisfactionTime() > 1200 then -- 20 minutes tolerance
+					if tenantId then
+						task.defer(function()
+							TenantService.EvictTenant(player, tenantId)
+							-- Notification could be handled here or in TenantService
+						end)
+					end
+				end
+
 				ResidentAutonomyService.TrySatisfyNeedsForResident(
 					player,
 					residentName,
@@ -187,8 +280,8 @@ end
 
 local function startTask()
 	if not WorldUpdate.IsSubscribed(Constants.AUTONOMY_TASK) then
-		WorldUpdate.Subscribe(Constants.AUTONOMY_TASK, Constants.AUTONOMY_INTERVAL, function()
-			ResidentAutonomyService.Decide()
+		WorldUpdate.Subscribe(Constants.AUTONOMY_TASK, Constants.AUTONOMY_INTERVAL, function(dt)
+			ResidentAutonomyService.Decide(dt)
 		end)
 	end
 end

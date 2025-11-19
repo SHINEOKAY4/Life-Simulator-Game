@@ -7,7 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local Formatter = require(ReplicatedStorage.Shared.Utilities.Formatter)
 local MailboxPackets = require(ReplicatedStorage.Network.MailboxPackets)
-local PromptWidgetBinder = require(script.Parent.PromptWidgetBinder)
+local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 local MailboxCashEffect = require(script.Parent.Parent.UserInterface.MailboxCashEffect)
 
 local LocalPlayer = Players.LocalPlayer
@@ -16,17 +16,20 @@ local MailboxInteractionController = {}
 
 local RESIDENTS_FOLDER_NAME = "Residents"
 local MAILBOX_ATTRIBUTE_NAME = "MailboxBalance"
+local PROPERTY_VALUE_ATTRIBUTE_NAME = "PropertyValue"
 local MAILBOX_NAME = "Mailbox"
 local PROMPT_NAME = "MailboxCollectPrompt"
 local PROMPT_OBJECT_TEXT = "Mailbox"
 local COLLECTION_TEMPLATE = "Collect: %s"
-local EMPTY_ACTION_TEXT = "Mailbox Empty"
+local EMPTY_ACTION_TEXT = "Empty"
 local BUSY_ACTION_TEXT = "Collecting..."
 local MAX_PROMPT_DISTANCE = 7
 local MAX_BALANCE = 4294967295
 
 local MAILBOX_BILLBOARD_NAME = "BillboardGui"
 local MAILBOX_LABEL_NAME = "TimeTextLabel"
+local PROPERTY_LABEL_NAME = "PropertyValueLabel"
+local PROPERTY_VALUE_TEMPLATE = "Property Value: %s"
 
 local CURRENCY_DISPLAY_OPTIONS = {
 	currencySymbol = "$",
@@ -53,9 +56,11 @@ local promptConnections: { RBXScriptConnection } = {}
 local promptCreatedByController = false
 
 local mailboxLabel: TextLabel? = nil
+local propertyValueLabel: TextLabel? = nil
 local mailboxLabelConnections: { RBXScriptConnection } = {}
 
 local currentBalance = 0
+local currentPropertyValue = 0
 local isCollecting = false
 
 local function disconnectConnectionList(connectionList: { RBXScriptConnection })
@@ -77,7 +82,7 @@ local function clampBalance(value: number): number
 	return numericValue
 end
 
-local function getMailboxLabelFromMailboxPart(part: BasePart?): TextLabel?
+local function getLabelFromMailboxPart(part: BasePart?, labelName: string): TextLabel?
 	if not part then
 		return nil
 	end
@@ -87,7 +92,7 @@ local function getMailboxLabelFromMailboxPart(part: BasePart?): TextLabel?
 		return nil
 	end
 
-	local label = billboardGui:FindFirstChild(MAILBOX_LABEL_NAME)
+	local label = billboardGui:FindFirstChild(labelName)
 	if label and label:IsA("TextLabel") then
 		return label
 	end
@@ -98,6 +103,9 @@ end
 local function refreshDisplays()
 	local formattedAmount = Formatter.formatCurrency(currentBalance, CURRENCY_DISPLAY_OPTIONS)
 	local collectText = string.format(COLLECTION_TEMPLATE, formattedAmount)
+
+	local formattedPropertyValue = Formatter.formatCurrency(currentPropertyValue, CURRENCY_DISPLAY_OPTIONS)
+	local propertyValueText = string.format(PROPERTY_VALUE_TEMPLATE, formattedPropertyValue)
 
 	local prompt = promptInstance
 	if prompt then
@@ -112,12 +120,17 @@ local function refreshDisplays()
 		prompt.ObjectText = PROMPT_OBJECT_TEXT
 		prompt.Enabled = true
 
-		PromptWidgetBinder.Refresh(prompt)
+		MinimalPromptUI.Refresh(prompt)
 	end
 
 	local label = mailboxLabel
 	if label then
 		label.Text = collectText
+	end
+
+	local propertyLabel = propertyValueLabel
+	if propertyLabel then
+		propertyLabel.Text = propertyValueText
 	end
 end
 
@@ -134,11 +147,28 @@ local function setBalanceFromAttribute(value: any)
 	end
 end
 
+local function setPropertyValue(value: number)
+	if value ~= value then
+		currentPropertyValue = 0
+	else
+		currentPropertyValue = math.max(0, math.floor(value + 0.5))
+	end
+	refreshDisplays()
+end
+
+local function setPropertyValueFromAttribute(value: any)
+	if typeof(value) == "number" then
+		setPropertyValue(value)
+	else
+		setPropertyValue(0)
+	end
+end
+
 local function disconnectPrompt()
 	disconnectConnectionList(promptConnections)
 
 	if promptInstance then
-		PromptWidgetBinder.Detach(promptInstance)
+		MinimalPromptUI.Detach(promptInstance)
 
 		if promptCreatedByController then
 			promptInstance:Destroy()
@@ -152,6 +182,7 @@ end
 local function disconnectMailboxLabel()
 	disconnectConnectionList(mailboxLabelConnections)
 	mailboxLabel = nil
+	propertyValueLabel = nil
 end
 
 local function bindMailboxLabelFromPart(part: BasePart?)
@@ -162,20 +193,30 @@ local function bindMailboxLabelFromPart(part: BasePart?)
 		return
 	end
 
-	local label = getMailboxLabelFromMailboxPart(part)
-	if not label then
-		refreshDisplays()
-		return
+	mailboxLabel = getLabelFromMailboxPart(part, MAILBOX_LABEL_NAME)
+	propertyValueLabel = getLabelFromMailboxPart(part, PROPERTY_LABEL_NAME)
+
+	if mailboxLabel then
+		local trackedLabel = mailboxLabel
+		mailboxLabelConnections[#mailboxLabelConnections + 1] = trackedLabel.AncestryChanged:Connect(function(_, parent)
+			if parent == nil then
+				mailboxLabel = nil
+				refreshDisplays()
+			end
+		end)
 	end
 
-	mailboxLabel = label
-
-	mailboxLabelConnections[#mailboxLabelConnections + 1] = label.AncestryChanged:Connect(function(_, parent)
-		if parent == nil then
-			disconnectMailboxLabel()
-			refreshDisplays()
-		end
-	end)
+	if propertyValueLabel then
+		local trackedPropertyLabel = propertyValueLabel
+		mailboxLabelConnections[#mailboxLabelConnections + 1] = trackedPropertyLabel.AncestryChanged:Connect(
+			function(_, parent)
+				if parent == nil then
+					propertyValueLabel = nil
+					refreshDisplays()
+				end
+			end
+		)
+	end
 
 	refreshDisplays()
 end
@@ -217,7 +258,7 @@ local function attachPromptToPart(part: BasePart)
 	promptInstance = prompt
 	promptCreatedByController = createdByController
 
-	PromptWidgetBinder.Attach(prompt)
+	MinimalPromptUI.Attach(prompt)
 	refreshDisplays()
 
 	promptConnections[#promptConnections + 1] = prompt.Destroying:Connect(function()
@@ -335,6 +376,7 @@ local function setResidentsFolder(folder: Folder?)
 	if residentsFolder == folder then
 		if folder then
 			setBalanceFromAttribute(folder:GetAttribute(MAILBOX_ATTRIBUTE_NAME))
+			setPropertyValueFromAttribute(folder:GetAttribute(PROPERTY_VALUE_ATTRIBUTE_NAME))
 		end
 		return
 	end
@@ -344,6 +386,7 @@ local function setResidentsFolder(folder: Folder?)
 
 	if not folder then
 		setBalance(0)
+		setPropertyValue(0)
 		return
 	end
 
@@ -353,6 +396,12 @@ local function setResidentsFolder(folder: Folder?)
 			setBalanceFromAttribute(folder:GetAttribute(MAILBOX_ATTRIBUTE_NAME))
 		end)
 
+	residentsConnections[#residentsConnections + 1] = folder
+		:GetAttributeChangedSignal(PROPERTY_VALUE_ATTRIBUTE_NAME)
+		:Connect(function()
+			setPropertyValueFromAttribute(folder:GetAttribute(PROPERTY_VALUE_ATTRIBUTE_NAME))
+		end)
+
 	residentsConnections[#residentsConnections + 1] = folder.AncestryChanged:Connect(function(_, parent)
 		if parent == nil then
 			setResidentsFolder(nil)
@@ -360,6 +409,7 @@ local function setResidentsFolder(folder: Folder?)
 	end)
 
 	setBalanceFromAttribute(folder:GetAttribute(MAILBOX_ATTRIBUTE_NAME))
+	setPropertyValueFromAttribute(folder:GetAttribute(PROPERTY_VALUE_ATTRIBUTE_NAME))
 end
 
 local function disconnectPlotConnections()

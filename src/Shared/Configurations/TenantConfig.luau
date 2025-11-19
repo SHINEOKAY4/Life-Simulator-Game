@@ -26,6 +26,11 @@ export type ValuationConfig = {
 	AmenitySoftCaps: { [string]: number },
 	ExcessAmenityMultiplier: number,
 	TagWeights: { [string]: number },
+	DiminishingReturnFactor: number,
+	VarietyBonusPerCategory: number,
+	ThemeSynergyBonus: number,
+	LuxuryThreshold: number,
+	LuxuryBonusMultiplier: number,
 }
 
 export type OffersConfig = {
@@ -55,11 +60,11 @@ export type TenantConfig = {
 
 local Valuation: ValuationConfig = {
 	RefreshIntervalSeconds = 30,
-	ChunkValue = 250,
+	ChunkValue = 150,
 	CostWeight = 0.35,
 	DecorWeight = 0.25,
-	MinimumRent = 120,
-	RentPerPoint = 0.65,
+	MinimumRent = 40,
+	RentPerPoint = 0.12,
 	DefaultTierId = "Barebones",
 	ScoreTiers = {
 		{ Id = "Barebones", MinScore = 0, RentMultiplier = 0.85 },
@@ -68,12 +73,12 @@ local Valuation: ValuationConfig = {
 		{ Id = "Premium", MinScore = 1900, RentMultiplier = 1.28 },
 	},
 	AmenityWeights = {
-		RestStation = 180,
-		HygieneStation = 140,
-		FunStation = 135,
-		ComfortStation = 110,
-		SocialStation = 100,
-		SkillStation = 115,
+		RestStation = 150,
+		HygieneStation = 120,
+		FunStation = 115,
+		ComfortStation = 90,
+		SocialStation = 80,
+		SkillStation = 100,
 	},
 	AmenitySoftCaps = {
 		RestStation = 2,
@@ -90,6 +95,11 @@ local Valuation: ValuationConfig = {
 		Outdoor = 12,
 		Utility = 10,
 	},
+	DiminishingReturnFactor = 0.85, -- Each subsequent item of same ID is worth 85% of previous
+	VarietyBonusPerCategory = 0.05, -- +5% score per unique amenity category present
+	ThemeSynergyBonus = 0.15, -- +15% score if >50% of decor shares a theme
+	LuxuryThreshold = 500, -- Items costing more than this get a bonus
+	LuxuryBonusMultiplier = 1.2, -- 20% bonus for luxury items
 }
 
 local Offers: OffersConfig = {
@@ -122,7 +132,7 @@ local Offers: OffersConfig = {
 }
 
 local Rent: RentConfig = {
-	IntervalSeconds = 300,
+	IntervalSeconds = 360,
 	GraceSeconds = 120,
 	MaxMissedPayments = 2,
 	DepositPercent = 0.6,

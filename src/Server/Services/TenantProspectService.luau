@@ -14,6 +14,7 @@ local ResidentService = require(ServerScriptService.Server.Services.ResidentServ
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 local TenantPackets = require(ReplicatedStorage.Network.TenantPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 
 local MAX_PROSPECTS = 4
 local TARGET_ATTRIBUTE_NAMES = {
@@ -27,7 +28,11 @@ local ROAM_MAX_SECONDS = 9
 local SPAWN_DELAY_MIN = 35
 local SPAWN_DELAY_MAX = 80
 local PROSPECT_LIFETIME = 210
+local EXIT_WALK_SECONDS = 3
 local UPDATE_TASK_NAME = "TenantProspects"
+
+local REST_STATION_TYPE = "RestStation"
+local BED_TAG = "Bed"
 
 local rng = Random.new()
 
@@ -39,19 +44,25 @@ type TenantOffer = {
 	LeaseSeconds: number,
 	Deposit: number,
 	TenantName: string?,
+	RentBoostPercent: number?,
+	Traits: { string }?,
 }
 
 export type ProspectRecord = {
 	Id: string,
 	Slot: number,
 	Player: Player,
-	Part: BasePart,
+	Part: Part,
 	Offer: TenantOffer,
 	CreatedUnix: number,
 	ExpireUnix: number,
 	NextMoveUnix: number,
 	TargetPosition: Vector3,
 	ClickConnection: RBXScriptConnection?,
+	SpawnCFrame: CFrame,
+	Leaving: boolean,
+	ExitDeadline: number,
+	ExitReason: string?,
 }
 
 export type PlayerProspectState = {
@@ -60,18 +71,56 @@ export type PlayerProspectState = {
 	NextSpawnUnix: { number },
 	ResidentsFolder: Folder?,
 	PlotModel: Model?,
-	SpawnCFrame: CFrame?,
+	SpawnPoints: { CFrame },
+	RoamCenter: Vector3?,
+	RoamForward: Vector3?,
+	RoamRight: Vector3?,
+	RoamForwardRadius: number,
+	RoamRightRadius: number,
 }
 
 local TenantProspectService = {}
 local TrackedPlayers: { [number]: PlayerProspectState } = {}
+local ProspectPool: { Part } = {}
 
 local function serverNow(): number
 	return Workspace:GetServerTimeNow()
 end
 
+local function getProspectPart(): Part
+	local pooled = table.remove(ProspectPool)
+	if pooled then
+		return pooled
+	end
+
+	local part = Instance.new("Part")
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.Size = Vector3.new(2, 5, 2)
+	part.Transparency = 1
+	return part
+end
+
+local function returnProspectPart(part: Part)
+	part.Parent = nil
+	table.insert(ProspectPool, part)
+end
+
 local function randomBetween(minValue: number, maxValue: number): number
 	return minValue + rng:NextNumber() * (maxValue - minValue)
+end
+
+local function chooseSpawnCFrame(points: { CFrame }): CFrame?
+	local count = #points
+	if count == 0 then
+		return nil
+	end
+	if count == 1 then
+		return points[1]
+	end
+	local index = rng:NextInteger(1, count)
+	return points[index]
 end
 
 local function ensureResidentsFolder(plotModel: Model?): Folder?
@@ -88,20 +137,130 @@ local function ensureResidentsFolder(plotModel: Model?): Folder?
 	return folder
 end
 
-local function resolveSpawnCFrame(plotModel: Model?): CFrame?
+local function computeHorizontalUnit(vector: Vector3, fallback: Vector3): Vector3
+	local horizontal = Vector3.new(vector.X, 0, vector.Z)
+	if horizontal.Magnitude < 1e-3 then
+		local fallbackHorizontal = Vector3.new(fallback.X, 0, fallback.Z)
+		if fallbackHorizontal.Magnitude < 1e-3 then
+			return Vector3.new(0, 0, -1)
+		end
+		return fallbackHorizontal.Unit
+	end
+	return horizontal.Unit
+end
+
+local function hasBedTag(spec: { [string]: any }): boolean
+	local tags = spec and spec.Tags
+	if typeof(tags) ~= "table" then
+		return false
+	end
+	for _, tagName in pairs(tags) do
+		if tagName == BED_TAG then
+			return true
+		end
+	end
+	return false
+end
+
+local function normalizeOccupancy(value: any): number
+	if typeof(value) ~= "number" then
+		return 1
+	end
+	local rounded = math.floor(value + 0.5)
+	if rounded < 1 then
+		rounded = 1
+	elseif rounded > 16 then
+		rounded = 16
+	end
+	return rounded
+end
+
+local function computeBedCapacity(player: Player): number
+	local stationCache = PlotService.GetStationsForPlayer(player)
+	local restStations = stationCache[REST_STATION_TYPE]
+	if not restStations then
+		return 0
+	end
+
+	local capacity = 0
+	for _, record in pairs(restStations) do
+		if type(record.Id) ~= "string" then
+			continue
+		end
+
+		local spec = ItemFinder.FindItemById(record.Id)
+		if not spec or not hasBedTag(spec) then
+			continue
+		end
+
+		capacity += normalizeOccupancy(spec.maxOccupancy or spec.MaxOccupancy)
+	end
+
+	return capacity
+end
+
+local function resolveSpawnPoints(plotModel: Model?): ({ CFrame }, Vector3?, Vector3?, Vector3?, number, number)
+	local spawnPoints = {} :: { CFrame }
 	if not plotModel then
-		return nil
+		return spawnPoints, nil, nil, nil, 0, 0
 	end
-	local spawnPart = plotModel:FindFirstChild("Spawn")
-	if spawnPart and spawnPart:IsA("BasePart") then
-		return spawnPart.CFrame
+
+	-- Collect spawn points
+	for _, name in ipairs({ "SpawnA", "SpawnB" }) do
+		local part = plotModel:FindFirstChild(name)
+		if part and part:IsA("BasePart") then
+			table.insert(spawnPoints, part.CFrame)
+		end
 	end
-	local surface = plotModel:FindFirstChild("Surface")
-	if surface and surface:IsA("BasePart") then
-		local up = surface.CFrame.UpVector
-		return CFrame.new(surface.Position + up * 4)
+
+	if #spawnPoints == 0 then
+		local spawn = plotModel:FindFirstChild("Spawn")
+		if spawn and spawn:IsA("BasePart") then
+			table.insert(spawnPoints, spawn.CFrame)
+		end
 	end
-	return nil
+
+	if #spawnPoints == 0 then
+		local surface = plotModel:FindFirstChild("Surface")
+		if surface and surface:IsA("BasePart") then
+			table.insert(spawnPoints, CFrame.new(surface.Position + surface.CFrame.UpVector * 4))
+		end
+	end
+
+	if #spawnPoints == 0 then
+		return spawnPoints, nil, nil, nil, 0, 0
+	end
+
+	-- Calculate center
+	local positionAccumulator = Vector3.zero
+	for _, cf in ipairs(spawnPoints) do
+		positionAccumulator += cf.Position
+	end
+	local center = positionAccumulator / #spawnPoints
+
+	-- Calculate orientation basis
+	local forward
+	local forwardRadius, rightRadius = 6, 4
+
+	if #spawnPoints >= 2 then
+		local diff = spawnPoints[2].Position - spawnPoints[1].Position
+		forward = computeHorizontalUnit(diff, spawnPoints[1].LookVector)
+
+		local separation = Vector3.new(diff.X, 0, diff.Z).Magnitude
+		forwardRadius = math.max(3, separation * 0.25)
+		rightRadius = math.max(3, forwardRadius * 0.5)
+	else
+		forward = computeHorizontalUnit(spawnPoints[1].LookVector, Vector3.new(0, 0, -1))
+	end
+
+	local up = Vector3.yAxis
+	local rightCandidate = up:Cross(forward)
+	if rightCandidate.Magnitude < 1e-3 then
+		rightCandidate = Vector3.xAxis
+	end
+	local right = rightCandidate.Unit
+
+	return spawnPoints, center, forward, right, forwardRadius, rightRadius
 end
 
 local function setTargetAttribute(state: PlayerProspectState, slot: number, position: Vector3?)
@@ -117,37 +276,103 @@ local function setTargetAttribute(state: PlayerProspectState, slot: number, posi
 	end
 end
 
-local function pickRoamTarget(spawnCFrame: CFrame?): Vector3?
-	if not spawnCFrame then
-		return nil
+local function pickRoamTarget(state: PlayerProspectState): Vector3?
+	local center = state.RoamCenter
+	local forward = state.RoamForward
+	local right = state.RoamRight
+	local forwardRadius = state.RoamForwardRadius
+	local rightRadius = state.RoamRightRadius
+
+	if not center then
+		local firstSpawn = state.SpawnPoints[1]
+		if not firstSpawn then
+			return nil
+		end
+		center = firstSpawn.Position
+		local computedForward = computeHorizontalUnit(firstSpawn.LookVector, Vector3.new(0, 0, -1))
+		local up = Vector3.new(0, 1, 0)
+		local rightCandidate = up:Cross(computedForward)
+		if rightCandidate.Magnitude < 1e-3 then
+			rightCandidate = Vector3.new(1, 0, 0)
+		end
+		forward = computedForward
+		right = rightCandidate.Unit
+		forwardRadius = 6
+		rightRadius = 4
 	end
-	local forward = spawnCFrame.LookVector
-	local right = spawnCFrame.RightVector
-	local origin = spawnCFrame.Position
-	local forwardOffset = rng:NextNumber(4, 12)
-	local lateralOffset = rng:NextNumber(-7, 7)
+
+	local finalCenter = center or Vector3.zero
+	local finalForward = forward or Vector3.new(0, 0, -1)
+	if finalForward.Magnitude > 1e-3 then
+		finalForward = finalForward.Unit
+	end
+	local finalRight = right or Vector3.new(1, 0, 0)
+	if finalRight.Magnitude > 1e-3 then
+		finalRight = finalRight.Unit
+	end
+	local finalForwardRadius = if forwardRadius > 0 then forwardRadius else 6
+	local finalRightRadius = if rightRadius > 0 then rightRadius else 4
+
+	local forwardOffset = rng:NextNumber(-finalForwardRadius * 0.6, finalForwardRadius * 0.6)
+	local lateralOffset = rng:NextNumber(-finalRightRadius * 0.6, finalRightRadius * 0.6)
 	local height = rng:NextNumber(1.5, 2.5)
-	return origin + forward * forwardOffset + right * lateralOffset + Vector3.new(0, height, 0)
+	return finalCenter + finalForward * forwardOffset + finalRight * lateralOffset + Vector3.new(0, height, 0)
 end
 
-local function destroyProspect(state: PlayerProspectState, slot: number, reason: string)
-	local record = state.Prospects[slot]
-	if not record then
-		return
+local function finalizeProspectRemoval(state: PlayerProspectState, slot: number, record: ProspectRecord, reason: string)
+	if state.Prospects[slot] == record then
+		state.Prospects[slot] = nil
 	end
-	state.Prospects[slot] = nil
 	if record.ClickConnection then
 		record.ClickConnection:Disconnect()
 		record.ClickConnection = nil
 	end
-	record.Part:Destroy()
+
 	setTargetAttribute(state, slot, nil)
+
+	if record.Part then
+		returnProspectPart(record.Part)
+	end
+
 	TenantPackets.ProspectRemoved:FireClient(state.Player, {
 		ProspectId = record.Id,
 		Slot = record.Slot,
 		Reason = reason,
 	})
 	state.NextSpawnUnix[slot] = serverNow() + randomBetween(SPAWN_DELAY_MIN, SPAWN_DELAY_MAX)
+end
+
+local function destroyProspect(state: PlayerProspectState, slot: number, reason: string, skipExit: boolean?)
+	local record = state.Prospects[slot]
+	if not record then
+		return
+	end
+	if skipExit then
+		finalizeProspectRemoval(state, slot, record, reason)
+		return
+	end
+	if record.Leaving then
+		record.ExitReason = record.ExitReason or reason
+		return
+	end
+	record.Leaving = true
+	record.ExitReason = reason
+	record.ExitDeadline = serverNow() + EXIT_WALK_SECONDS
+	record.NextMoveUnix = record.ExitDeadline + 5
+	if record.ClickConnection then
+		record.ClickConnection:Disconnect()
+		record.ClickConnection = nil
+	end
+	local clickDetector = record.Part:FindFirstChildOfClass("ClickDetector")
+	if clickDetector then
+		clickDetector.MaxActivationDistance = 0
+	end
+	if record.Part.Parent then
+		record.Part:PivotTo(record.SpawnCFrame)
+	end
+	local spawnPosition = record.SpawnCFrame.Position
+	record.TargetPosition = spawnPosition
+	setTargetAttribute(state, slot, spawnPosition)
 end
 
 local function buildProspectSpawnPayload(record: ProspectRecord)
@@ -160,11 +385,9 @@ local function buildProspectSpawnPayload(record: ProspectRecord)
 		RentIntervalSeconds = record.Offer.RentIntervalSeconds,
 		Deposit = record.Offer.Deposit,
 		LeaseSeconds = 0,
+		RentBoostPercent = record.Offer.RentBoostPercent or 0,
+		Traits = record.Offer.Traits,
 	}
-end
-
-local function onProspectClicked(record: ProspectRecord)
-	TenantPackets.ProspectPrompt:FireClient(record.Player, buildProspectSpawnPayload(record))
 end
 
 local function spawnProspect(state: PlayerProspectState, slot: number)
@@ -179,26 +402,16 @@ local function spawnProspect(state: PlayerProspectState, slot: number)
 		state.NextSpawnUnix[slot] = serverNow() + 10
 		return
 	end
-	local spawnCFrame = state.SpawnCFrame
+	local spawnCFrame = chooseSpawnCFrame(state.SpawnPoints)
 	if not spawnCFrame then
 		state.NextSpawnUnix[slot] = serverNow() + 10
 		return
 	end
 
-	local part = Instance.new("Part")
+	local part = getProspectPart()
 	part.Name = string.format("TenantProspectSlot%d", slot)
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanQuery = false
-	part.Size = Vector3.new(2, 5, 2)
-	part.Transparency = 1
 	part.CFrame = spawnCFrame
 	part.Parent = residentsFolder
-
-	local clickDetector = Instance.new("ClickDetector")
-	clickDetector.MaxActivationDistance = 18
-	clickDetector.CursorIcon = "rbxassetid://11828380792"
-	clickDetector.Parent = part
 
 	local now = serverNow()
 	local targetPosition = spawnCFrame.Position
@@ -213,14 +426,11 @@ local function spawnProspect(state: PlayerProspectState, slot: number)
 		NextMoveUnix = now + randomBetween(ROAM_MIN_SECONDS, ROAM_MAX_SECONDS),
 		TargetPosition = targetPosition,
 		ClickConnection = nil,
+		SpawnCFrame = spawnCFrame,
+		Leaving = false,
+		ExitDeadline = 0,
+		ExitReason = nil,
 	}
-
-	record.ClickConnection = clickDetector.MouseClick:Connect(function(clickedPlayer: Player)
-		if clickedPlayer ~= player then
-			return
-		end
-		onProspectClicked(record)
-	end)
 
 	state.Prospects[slot] = record
 	setTargetAttribute(state, slot, targetPosition)
@@ -239,7 +449,12 @@ local function ensureStateForPlayer(player: Player): PlayerProspectState
 		NextSpawnUnix = table.create(MAX_PROSPECTS),
 		ResidentsFolder = nil,
 		PlotModel = nil,
-		SpawnCFrame = nil,
+		SpawnPoints = {},
+		RoamCenter = nil,
+		RoamForward = nil,
+		RoamRight = nil,
+		RoamForwardRadius = 0,
+		RoamRightRadius = 0,
 	}
 	for slot = 1, MAX_PROSPECTS do
 		newState.NextSpawnUnix[slot] = serverNow() + randomBetween(SPAWN_DELAY_MIN, SPAWN_DELAY_MAX)
@@ -254,7 +469,12 @@ local function refreshPlotContext(state: PlayerProspectState)
 	if type(plotIndex) ~= "number" then
 		state.PlotModel = nil
 		state.ResidentsFolder = nil
-		state.SpawnCFrame = nil
+		state.SpawnPoints = {}
+		state.RoamCenter = nil
+		state.RoamForward = nil
+		state.RoamRight = nil
+		state.RoamForwardRadius = 0
+		state.RoamRightRadius = 0
 		return
 	end
 	local plotModel = PlotFinder.FindPlot(plotIndex)
@@ -263,7 +483,13 @@ local function refreshPlotContext(state: PlayerProspectState)
 	end
 	state.PlotModel = plotModel
 	state.ResidentsFolder = ensureResidentsFolder(plotModel)
-	state.SpawnCFrame = resolveSpawnCFrame(plotModel)
+	local spawnPoints, center, forward, right, forwardRadius, rightRadius = resolveSpawnPoints(plotModel)
+	state.SpawnPoints = spawnPoints
+	state.RoamCenter = center
+	state.RoamForward = forward
+	state.RoamRight = right
+	state.RoamForwardRadius = forwardRadius
+	state.RoamRightRadius = rightRadius
 end
 
 local function cleanupPlayer(userId: number)
@@ -272,17 +498,16 @@ local function cleanupPlayer(userId: number)
 		return
 	end
 	for slot = 1, MAX_PROSPECTS do
-		destroyProspect(state, slot, "Cleanup")
+		destroyProspect(state, slot, "Cleanup", true)
 	end
 	TrackedPlayers[userId] = nil
 end
 
 local function moveProspect(state: PlayerProspectState, record: ProspectRecord, now: number)
-	local spawnCFrame = state.SpawnCFrame
-	if not spawnCFrame then
+	if record.Leaving then
 		return
 	end
-	local target = pickRoamTarget(spawnCFrame)
+	local target = pickRoamTarget(state)
 	if not target then
 		return
 	end
@@ -300,13 +525,17 @@ local function onStep(_dt: number)
 			cleanupPlayer(userId)
 			continue
 		end
-		if not state.SpawnCFrame then
+		if not state.ResidentsFolder or (#state.SpawnPoints == 0 and state.RoamCenter == nil) then
 			refreshPlotContext(state)
 		end
 		for slot = 1, MAX_PROSPECTS do
 			local record = state.Prospects[slot]
 			if record then
-				if now >= record.ExpireUnix then
+				if record.Leaving then
+					if now >= record.ExitDeadline then
+						destroyProspect(state, slot, record.ExitReason or "Removed", true)
+					end
+				elseif now >= record.ExpireUnix then
 					destroyProspect(state, slot, "Expired")
 				elseif now >= record.NextMoveUnix then
 					moveProspect(state, record, now)
@@ -318,6 +547,77 @@ local function onStep(_dt: number)
 			end
 		end
 	end
+end
+
+local function canAcceptTenant(player: Player): (boolean, string?)
+	local householdState = PlayerSession.TryGetData(player, "HouseholdState")
+	if householdState and householdState.MaxResidents and householdState.ResidentsCount then
+		if householdState.ResidentsCount >= householdState.MaxResidents then
+			return false, "Household capacity reached."
+		end
+	end
+
+	local residentsCount = 0
+	if householdState and typeof(householdState.ResidentsCount) == "number" then
+		residentsCount = householdState.ResidentsCount
+	else
+		local residentsMap = ResidentService.GetResidents(player)
+		if residentsMap then
+			for _ in pairs(residentsMap) do
+				residentsCount += 1
+			end
+		end
+	end
+
+	local bedCapacity = computeBedCapacity(player)
+	if bedCapacity < residentsCount + 1 then
+		return false, "You need more beds before inviting another tenant."
+	end
+
+	return true
+end
+
+local function acceptProspect(player: Player, record: ProspectRecord): (boolean, string)
+	local prospectSpawnCFrame = record.Part.CFrame
+	local desiredName = record.Offer.TenantName or "Tenant"
+
+	local existing = ResidentService.GetResidents(player)
+	local candidateName = desiredName
+	local nameIndex = 1
+	while existing and existing[candidateName] do
+		nameIndex += 1
+		candidateName = string.format("%s %d", desiredName, nameIndex)
+	end
+
+	local residentData = {
+		Name = candidateName,
+		Traits = { "Balanced" },
+		Needs = {
+			Hunger = 100,
+			Bladder = 100,
+			Energy = 100,
+			Hygiene = 100,
+			Fun = 100,
+			Social = 100,
+		},
+	}
+
+	local created, createMessage = ResidentService.CreateResident(player, residentData, prospectSpawnCFrame)
+	if not created then
+		return false, createMessage or "Unable to add tenant as resident."
+	end
+
+	local leaseStarted, leaseMessage, tenantId = TenantService.BeginLeaseFromOffer(player, record.Offer)
+	if not leaseStarted then
+		ResidentService.DeleteResident(player, residentData.Name)
+		return false, leaseMessage or "Unable to start lease."
+	end
+
+	if tenantId then
+		ResidentService.SetResidentTenantData(player, residentData.Name, tenantId)
+	end
+
+	return true, "Tenant joined your household!"
 end
 
 local function onDecision(player: Player, prospectId: string, decision: string): (boolean, string)
@@ -338,56 +638,16 @@ local function onDecision(player: Player, prospectId: string, decision: string):
 
 	local lowerDecision = string.lower(decision)
 	if lowerDecision == "accept" then
-		local householdState = PlayerSession.TryGetData(player, "HouseholdState")
-		if householdState and householdState.MaxResidents and householdState.ResidentsCount then
-			if householdState.ResidentsCount >= householdState.MaxResidents then
-				return false, "Household capacity reached."
-			end
+		local canAccept, reason = canAcceptTenant(player)
+		if not canAccept then
+			return false, reason or "Cannot accept tenant."
 		end
 
-		local desiredName = record.Offer.TenantName or "Tenant"
-		local existing = ResidentService.GetResidents(player)
-		local candidateName = desiredName
-		local nameIndex = 1
-		while existing and existing[candidateName] do
-			nameIndex += 1
-			candidateName = string.format("%s %d", desiredName, nameIndex)
+		local success, msg = acceptProspect(player, record)
+		if success then
+			destroyProspect(state, targetSlot, "Accepted", true)
 		end
-
-		local residentData = {
-			Name = candidateName,
-			Age = 2,
-			Gender = "Male",
-			Traits = { "Balanced" },
-			Statistics = {
-				Intelligence = 1,
-				Discipline = 1,
-				Creativity = 1,
-				Fitness = 1,
-			},
-			Needs = {
-				Hunger = 100,
-				Bladder = 100,
-				Energy = 100,
-				Hygiene = 100,
-				Fun = 100,
-				Social = 100,
-			},
-		}
-
-		local created, createMessage = ResidentService.CreateResident(player, residentData)
-		if not created then
-			return false, createMessage or "Unable to add tenant as resident."
-		end
-
-		local leaseStarted, leaseMessage = TenantService.BeginLeaseFromOffer(player, record.Offer)
-		if not leaseStarted then
-			ResidentService.DeleteResident(player, residentData.Name)
-			return false, leaseMessage or "Unable to start lease."
-		end
-
-		destroyProspect(state, targetSlot, "Accepted")
-		return true, "Tenant joined your household!"
+		return success, msg
 	elseif lowerDecision == "decline" then
 		destroyProspect(state, targetSlot, "Declined")
 		return true, "You declined the tenant."

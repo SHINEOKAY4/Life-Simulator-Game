@@ -15,12 +15,11 @@ export type NeedDef = {
 export type NeedConfig = { [string]: NeedDef }
 
 local Needs: NeedConfig = {
-	Hunger = { Min = 0, Max = 100, DecayPerHour = 8, Low = 45, Critical = 18, Hysteresis = 10, CooldownMinutes = 60 },
-	Bladder = { Min = 0, Max = 100, DecayPerHour = 7, Low = 48, Critical = 14, Hysteresis = 12, CooldownMinutes = 75 },
-	Energy = { Min = 0, Max = 100, DecayPerHour = 5, Low = 35, Critical = 12, Hysteresis = 12, CooldownMinutes = 240 },
-	Hygiene = { Min = 0, Max = 100, DecayPerHour = 5, Low = 35, Critical = 12, Hysteresis = 12, CooldownMinutes = 75 },
-	Social = { Min = 0, Max = 100, DecayPerHour = 8, Low = 45, Critical = 18, Hysteresis = 12, CooldownMinutes = 90 },
-	Fun = { Min = 0, Max = 100, DecayPerHour = 9, Low = 45, Critical = 20, Hysteresis = 12, CooldownMinutes = 90 },
+	Hunger = { Min = 0, Max = 100, DecayPerHour = 8, Low = 90, Critical = 18, Hysteresis = 10, CooldownMinutes = 60 },
+	Bladder = { Min = 0, Max = 100, DecayPerHour = 7, Low = 90, Critical = 14, Hysteresis = 10, CooldownMinutes = 75 },
+	Energy = { Min = 0, Max = 100, DecayPerHour = 5, Low = 85, Critical = 12, Hysteresis = 15, CooldownMinutes = 240 },
+	Hygiene = { Min = 0, Max = 100, DecayPerHour = 5, Low = 90, Critical = 12, Hysteresis = 10, CooldownMinutes = 75 },
+	Social = { Min = 0, Max = 100, DecayPerHour = 8, Low = 90, Critical = 18, Hysteresis = 10, CooldownMinutes = 90 },
 }
 
 export type Circadian = {

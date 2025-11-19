@@ -12,23 +12,24 @@
 ```
 src/
 ├── Server/           # ServerScriptService - game logic authority
-│   ├── Services/     # Singleton services (PlotService, ResidentService, etc.)
+│   ├── Services/     # Singleton services (PlotService, ResidentService, MiningService, TenantService, etc.)
 │   ├── Classes/      # Stateful objects (ResidentState, PlotState, ActionQueue)
-│   ├── Modules/      # ResidentActionHandlers (behavior specs)
-│   └── Utilities/    # Helpers (ResidentMovement, WorldPlacer, etc.)
+│   ├── Modules/      # ResidentActionHandlers, TenantValuation
+│   └── Utilities/    # Helpers (ResidentMovement, WorldPlacer, WorldUpdate)
 ├── Client/           # StarterPlayerScripts - UI and visuals only
 │   ├── Modules/      # Client-side managers (PlotBuilder, ObjectSelector)
 │   ├── ClientStores/ # Replicated state caches (PlotStateStore, ResidentsStore)
 │   └── UserInterface/ # UI components (MainHUD, ResidentRoster, etc.)
 ├── Shared/           # ReplicatedStorage - definitions, utilities, configs
-│   ├── Configurations/ # NeedConfig, CareerShiftConfig, JobCatalog, TraitConfig
-│   ├── Definitions/  # Static game data (items, billing constants)
+│   ├── Configurations/ # NeedConfig, MiningConfig, TenantConfig, JobCatalog
+│   ├── Definitions/  # Static game data (items, billing constants, tenant traits)
 │   └── Utilities/    # ItemFinder, PlotFinder, TimeScale, TraitUtils
 └── Network/          # ReplicatedStorage - Packet definitions (typed remotes)
     ├── ResidentsPackets.luau    # Resident creation/deletion/sync
     ├── PlacementPackets.luau    # Plot claiming/building/unlocking
-    ├── JobPackets.luau          # Career management
-  ├── WorldEventPackets.luau   # World event sync and boosts
+    ├── MiningPackets.luau       # Resource gathering & state
+    ├── TenantPackets.luau       # Tenant offers/evictions
+    ├── ChorePackets.luau        # Interactive tasks (messes/repairs)
     └── BillingPackets.luau      # Payment/billing info
 ```
 
@@ -74,28 +75,28 @@ src/
 ### 5. **Data Persistence: PlayerSession & DataStore Wrapper**
 - **PlayerSession** (`Server/Services/PlayerSession/`):
   - Wraps `ServerPackages/DataStore` (custom session manager with auto-save, locking, compression)
-  - Profile schema in `PlayerSession/Profile.luau`: `PlotState`, `HouseholdState`, `CurrencyState`, etc.
+  - Profile schema in `PlayerSession/Profile.luau`: `PlotState`, `HouseholdState`, `CurrencyState`, `InventoryState`, `TenantState`
   - **Always use `PlayerSession.GetDataAwait(player, "Category")`** - blocks until DataStore ready
   - **Non-blocking**: `PlayerSession.TryGetData(player, "Category")` returns nil if not ready
 - **DataStore wrapper** features:
   - Auto-save intervals, manual `dataStore:Save()`, session locking (prevents multi-server corruption)
   - Reconciles template on first load, handles retries, exposes signals (`Saving`, `Saved`, `StateChanged`)
 
-### 6. **Career vs Gig Duality**
-- **Careers** (resident passive income): `CareerService` + `JobListingService`
-  - Residents auto-work shifts when `AutoJobEnabled`, earn hourly pay scaled by mood/stats/momentum
-  - Shift lifecycle: `StartShift()` → tracks energy decay → `EndShift()` → payout via `PayrollService`
-- **Gigs** (player active income): `GigService` (not yet fully implemented)
-  - Player-controlled minigames with cooldowns, daily slot limits, performance tiers (Bronze/Silver/Gold)
-  - Successful gigs grant `MomentumBoost` (+10% career payout for 1 in-game hour)
+### 6. **Resource Gathering (Mining/Woodcutting)**
+- **Runtime Objects**: `MiningService` and `WoodcuttingService` track world objects via `Runtime` tables (e.g., `RockRuntime`).
+  - **State**: `Ready` -> `Busy` (player interaction) -> `Regrowing` (hidden in Storage).
+  - **Replication**: Uses **Attributes** on the physical `Instance` (`RockStateAttributes`) for visual state (clients listen to AttributeChanged).
+  - **WorldUpdate**: Uses `WorldUpdate.Subscribe` to check regrow timers efficiently.
+  - **Inventory**: Yields items directly to `InventoryState` in `PlayerSession`.
 
-### 7. **Billing & Economy**
-- **BillingService** (`Server/Services/BillingService.luau`):
-  - Recurring bills every 480s real-time: plot tax, electricity (tracked via `EnergyUsageTracker`), food usage
-  - Grace period → overdue → power outage escalation (disables energy stations)
-  - `BillingState` class tracks cycle state, grace elapsed, overdue count
-- **CurrencyService**: Atomic currency operations, rate limiting, transaction logging
-  - `AddCurrency(player, amount, source)` / `DeductCurrency(player, amount, reason)`
+### 7. **Tenant System & Economy**
+- **TenantService** (`Server/Services/TenantService.luau`):
+  - Manages `TenantState` (Offers, ActiveLeases, MailboxBalance).
+  - **Valuation**: `TenantValuation` scores the plot to determine rent offers.
+  - **Mailbox**: Rent accumulates in `MailboxBalance`. Visuals use Attributes on a `Residents` folder in the plot model.
+  - **Resident Link**: Residents can be linked to Tenants via `ResidentService` (`TenantToResidentMap`), implying the resident *is* the tenant.
+- **BillingService**: Recurring bills (tax, electricity) tracked via `BillingState`.
+- **ChoreService**: Spawns interactive tasks (trash/repairs) for active income.
 
 ## Key Workflows
 
@@ -109,6 +110,11 @@ src/
    ```
 3. Add to `ResidentAutonomyService/State.luau`: `NeedToStationType`, evaluation order
 4. Update `NeedConfig.luau` if introducing new need
+
+### Adding a New Resource Node
+1. Define node in `Shared/Definitions/MiningConfig.luau` (or Woodcutting).
+2. Create Model/Part in `Workspace/World/...` and tag with `RockStateAttributes.TypeId`.
+3. `MiningService` automatically binds to tagged instances on Init.
 
 ### Debugging Residents
 - Enable channels in `Server/Main.server.luau`:
@@ -128,10 +134,8 @@ src/
 - **ActionQueue is serial**: Residents execute one action at a time. Queueing multiple actions requires understanding `EnqueueAction()` and `CancelToken` propagation.
 - **Station versioning**: `PlotService.GetStationVersion()` invalidates cache on build changes. Always refresh cache when evaluating needs after placement.
 - **Manual override disables autonomy**: `DirectActionService.AssignStationToResident()` calls `DisableAutomation()` - must re-enable after action completes.
-- **Collapse system**: `ResidentCollapseService` auto-queues rest when Energy ≤ threshold. Interrupting requires `EnergyCollapseRelease()` check.
-- **Time scales**: In-game time (`TimeScale.GetClockTime()`) vs real-time (`os.clock()`). Needs decay per in-game hour; billing cycles use real-time.
+- **WorldUpdate Loops**: `ResidentAutonomyService`, `MiningService`, and `TenantService` all use `WorldUpdate.Subscribe`. Ensure new loops are performant.
+- **Time scales**: In-game time (`TimeScale.GetClockTime()`) vs real-time (`os.clock()`). Needs decay per in-game hour; billing/regrow cycles use real-time.
 
 ## Related Docs
-- [GameDesign.md](../GameDesign.md) - Career/gig split, progression spine, economy tuning
-- [GameSystems.md](../GameSystems.md) - High-level system descriptions
-- [TODO.md](../TODO.md) - Active work items and known issues
+- [README.md](../README.md)

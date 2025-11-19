@@ -5,6 +5,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local StationActionRegistry = require(ServerScriptService.Server.Modules.StationActionRegistry)
 local KitchenService = require(ServerScriptService.Server.Services.KitchenService)
+local ChoreService = require(ServerScriptService.Server.Services.ChoreService)
+local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local FoodUtils = require(ReplicatedStorage.Shared.Utilities.FoodUtils)
 local MealRecipesModule = require(ReplicatedStorage.Shared.Definitions.MealRecipes)
@@ -406,6 +408,19 @@ local function executeStationAction(stationType: string, context: HandlerContext
 		Resident = assignment.ResidentName,
 		StationType = stationType,
 	})
+
+	-- Chance to spawn a mess
+	if
+		assignment.Player
+		and (stationType == "CookStation" or stationType == "MealStation" or stationType == "HygieneStation")
+	then
+		if math.random() < 0.2 then
+			local residentState = ResidentService.GetResident(assignment.Player, assignment.ResidentName)
+			if residentState and residentState.Model and residentState.Model.PrimaryPart then
+				ChoreService.SpawnMess(assignment.Player, residentState.Model.PrimaryPart.Position)
+			end
+		end
+	end
 end
 
 local function registerHandler(stationType: string)
@@ -413,6 +428,28 @@ local function registerHandler(stationType: string)
 		executeStationAction(stationType, context, assignment)
 	end)
 end
+
+StationActionRegistry.RegisterHandler("Wander", function(context: HandlerContext, assignment: any)
+	local residentState = assignment.ResidentState
+	local itemSpec = assignment.ItemSpec
+	local targetPosition = itemSpec and itemSpec.TargetPosition
+
+	if not targetPosition then
+		return
+	end
+
+	local ResidentMovement = require(ServerScriptService.Server.Utilities.ResidentMovement)
+	ResidentMovement.GoToWorldPosition(residentState, targetPosition, {
+		CancelToken = context.CancelToken,
+		DebugName = "Wander",
+		TimeoutSeconds = 15,
+	})
+
+	-- Small idle wait after arriving
+	if not context.CancelToken.Cancelled then
+		task.wait(math.random(2, 5))
+	end
+end)
 
 registerHandler("RestStation")
 registerHandler("CookStation")

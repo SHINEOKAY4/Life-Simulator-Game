@@ -10,6 +10,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
+local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
+local Formatter = require(ReplicatedStorage.Shared.Utilities.Formatter)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -56,6 +58,24 @@ local function BuildParams(coversFolder: Folder): RaycastParams
 	params.RespectCanCollide = false
 	params.IgnoreWater = true
 	return params
+end
+
+local function getExpansionCost(): number
+	local snapshot = PlotStateStore.GetStateSnapshot()
+	if not snapshot or not snapshot.ChunkUnlocked then
+		return BuildConstants.ExpansionBaseCost or 400
+	end
+
+	local unlockedCount = 0
+	for _, unlocked in pairs(snapshot.ChunkUnlocked) do
+		if unlocked then
+			unlockedCount += 1
+		end
+	end
+
+	local baseCost = BuildConstants.ExpansionBaseCost or 400
+	local increment = BuildConstants.ExpansionCostIncrement or 200
+	return baseCost + math.max(0, unlockedCount - 1) * increment
 end
 
 function PlotExpansion.Init()
@@ -163,7 +183,10 @@ function PlotExpansion.Show()
 		_HoveredCover = hitCover
 		ChunkHighlight.Adornee = hitCover
 		PriceTag.Adornee = hitCover
-		PriceLabel.Text = if not success then message else "$" .. "400" -- #TODO: pricing logic
+
+		local cost = getExpansionCost()
+		local formattedCost = Formatter.formatNumber(cost)
+		PriceLabel.Text = if not success then message else "$" .. formattedCost
 		ChunkHighlight.FillColor = if success then Color3.fromRGB(0, 255, 0) else Color3.fromRGB(255, 0, 0)
 		ChunkHighlight.OutlineColor = if success then Color3.fromRGB(0, 100, 0) else Color3.fromRGB(100, 0, 0)
 	end)

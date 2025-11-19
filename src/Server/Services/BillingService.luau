@@ -24,6 +24,8 @@ local StationManager = require(ServerScriptService.Server.Services.ResidentAuton
 type OutstandingBreakdown = {
 	PlotTax: number,
 	Electric: number,
+	Water: number,
+	Internet: number,
 	Interest: number,
 }
 
@@ -40,11 +42,13 @@ local EARLY_PAYMENT_WINDOW_SECONDS =
 local CHECK_INTERVAL_SECONDS = 2
 local BASE_CYCLE_CHARGE = 100
 local POWER_OUTAGE_OVERRIDE = BillingConstants.PowerOutageOverrideKey or "BillingPowerOutage"
+local WATER_SHUTOFF_OVERRIDE = BillingConstants.WaterShutoffOverrideKey or "BillingWaterShutoff"
+local INTERNET_DISCONNECT_OVERRIDE = BillingConstants.InternetDisconnectOverrideKey or "BillingInternetDisconnect"
 local EARLY_PAYMENT_WINDOW_HOURS =
 	math.max(1, math.floor(TimeScale.GameHoursFromRealDelta(EARLY_PAYMENT_WINDOW_SECONDS) + 0.5))
 
-local CATEGORY_KEYS = { "PlotTax", "Electric" }
-local OUTSTANDING_KEYS = { "PlotTax", "Electric", "Interest" }
+local CATEGORY_KEYS = { "PlotTax", "Electric", "Water", "Internet" }
+local OUTSTANDING_KEYS = { "PlotTax", "Electric", "Water", "Internet", "Interest" }
 
 local rawInterestRate = BillingConstants.OverdueInterestRate
 local OVERDUE_INTEREST_RATE = if typeof(rawInterestRate) == "number" then math.max(0, rawInterestRate) else 0.1
@@ -80,6 +84,8 @@ local function sanitizeChargeAmount(amount: number): number
 end
 
 local energyStationCache: { [string]: boolean } = {}
+local waterStationCache: { [string]: boolean } = {}
+local internetStationCache: { [string]: boolean } = {}
 
 local function isEnergyConsumingStationId(itemId: string?): boolean
 	if typeof(itemId) ~= "string" or itemId == "" then
@@ -104,50 +110,114 @@ local function isEnergyConsumingStationId(itemId: string?): boolean
 	return result
 end
 
-local function enforcePowerOutage(player: Player)
+local function isWaterConsumingStationId(itemId: string?): boolean
+	if typeof(itemId) ~= "string" or itemId == "" then
+		return false
+	end
+
+	local cached = waterStationCache[itemId]
+	if cached ~= nil then
+		return cached
+	end
+
+	local itemSpec = ItemFinder.FindItemById(itemId)
+	local result = false
+	if itemSpec then
+		local waterPerHour = itemSpec.WaterConsumptionPerHour
+		if typeof(waterPerHour) == "number" and waterPerHour > 0 then
+			result = true
+		end
+	end
+
+	waterStationCache[itemId] = result
+	return result
+end
+
+local function isInternetConsumingStationId(itemId: string?): boolean
+	if typeof(itemId) ~= "string" or itemId == "" then
+		return false
+	end
+
+	local cached = internetStationCache[itemId]
+	if cached ~= nil then
+		return cached
+	end
+
+	local itemSpec = ItemFinder.FindItemById(itemId)
+	local result = false
+	if itemSpec then
+		if itemSpec.RequiresInternet then
+			result = true
+		end
+	end
+
+	internetStationCache[itemId] = result
+	return result
+end
+
+local function interruptStation(player: Player, station: any, overrideKey: string)
+	local occupants: { string } = {}
+	if typeof(station.Residents) == "table" then
+		for _, residentName in ipairs(station.Residents) do
+			if typeof(residentName) == "string" and residentName ~= "" then
+				occupants[#occupants + 1] = residentName
+			end
+		end
+	end
+
+	for _, residentName in ipairs(occupants) do
+		StationManager.releaseStationOccupancy(station, residentName)
+		local residentState = ResidentService.GetResident(player, residentName)
+		if residentState then
+			local cancelAction = residentState.CancelCurrentAction
+			if typeof(cancelAction) == "function" then
+				cancelAction(residentState, "ServiceInterruption")
+			end
+			local clearOverride = residentState.ClearManualOverrideState
+			if typeof(clearOverride) == "function" then
+				clearOverride(residentState)
+			end
+			local enableAutomation = residentState.EnableAutomation
+			if typeof(enableAutomation) == "function" then
+				enableAutomation(residentState)
+			end
+		end
+	end
+
+	station.ActiveOverride = overrideKey
+end
+
+local function enforceServiceInterruptions(player: Player)
 	local stationCache = PlotService.GetStationsForPlayer(player)
 	for _, stationScope in pairs(stationCache) do
 		for _, station in pairs(stationScope) do
+			-- Power Outage
 			if isEnergyConsumingStationId(station.Id) then
-				local occupants: { string } = {}
-				if typeof(station.Residents) == "table" then
-					for _, residentName in ipairs(station.Residents) do
-						if typeof(residentName) == "string" and residentName ~= "" then
-							occupants[#occupants + 1] = residentName
-						end
-					end
-				end
+				interruptStation(player, station, POWER_OUTAGE_OVERRIDE)
+			end
 
-				for _, residentName in ipairs(occupants) do
-					StationManager.releaseStationOccupancy(station, residentName)
-					local residentState = ResidentService.GetResident(player, residentName)
-					if residentState then
-						local cancelAction = residentState.CancelCurrentAction
-						if typeof(cancelAction) == "function" then
-							cancelAction(residentState, "PowerOutage")
-						end
-						local clearOverride = residentState.ClearManualOverrideState
-						if typeof(clearOverride) == "function" then
-							clearOverride(residentState)
-						end
-						local enableAutomation = residentState.EnableAutomation
-						if typeof(enableAutomation) == "function" then
-							enableAutomation(residentState)
-						end
-					end
-				end
+			-- Water Shutoff
+			if isWaterConsumingStationId(station.Id) then
+				interruptStation(player, station, WATER_SHUTOFF_OVERRIDE)
+			end
 
-				station.ActiveOverride = POWER_OUTAGE_OVERRIDE
+			-- Internet Disconnect
+			if isInternetConsumingStationId(station.Id) then
+				interruptStation(player, station, INTERNET_DISCONNECT_OVERRIDE)
 			end
 		end
 	end
 end
 
-local function clearPowerOutage(player: Player)
+local function clearServiceInterruptions(player: Player)
 	local stationCache = PlotService.GetStationsForPlayer(player)
 	for _, stationScope in pairs(stationCache) do
 		for _, station in pairs(stationScope) do
-			if station.ActiveOverride == POWER_OUTAGE_OVERRIDE then
+			if
+				station.ActiveOverride == POWER_OUTAGE_OVERRIDE
+				or station.ActiveOverride == WATER_SHUTOFF_OVERRIDE
+				or station.ActiveOverride == INTERNET_DISCONNECT_OVERRIDE
+			then
 				station.ActiveOverride = nil
 			end
 		end
@@ -160,12 +230,14 @@ local function createEmptyBreakdown(): OutstandingBreakdown
 	return {
 		PlotTax = 0,
 		Electric = 0,
+		Water = 0,
+		Internet = 0,
 		Interest = 0,
 	}
 end
 
 local function sumBreakdownAmounts(breakdown: OutstandingBreakdown): number
-	return breakdown.PlotTax + breakdown.Electric + breakdown.Interest
+	return breakdown.PlotTax + breakdown.Electric + breakdown.Water + breakdown.Internet + breakdown.Interest
 end
 
 local function sanitizeBreakdown(breakdown: OutstandingBreakdown)
@@ -271,6 +343,8 @@ local function computeCurrentCycleCharges(player: Player, plotStateData: any?): 
 		charges.PlotTax = BASE_CYCLE_CHARGE
 	else
 		charges.PlotTax = sanitizeChargeAmount(BillingCalculator.CalculatePlotTax(resolvedPlotState))
+		charges.Water = sanitizeChargeAmount(BillingCalculator.CalculateWaterCost(resolvedPlotState))
+		charges.Internet = sanitizeChargeAmount(BillingCalculator.CalculateInternetCost(resolvedPlotState))
 	end
 
 	return charges
@@ -380,6 +454,8 @@ broadcastBillingUpdate = function(player: Player, billingState: BillingState.Bil
 	BillingPackets.BillingBreakdownUpdate:FireClient(player, {
 		PlotTax = breakdown.PlotTax,
 		Electric = breakdown.Electric,
+		Water = breakdown.Water,
+		Internet = breakdown.Internet,
 		Overdue = breakdown.Overdue,
 		OutstandingTotal = breakdown.OutstandingTotal,
 		Total = breakdown.Total,
@@ -413,7 +489,7 @@ local function applyOverdueState(
 	if player:GetAttribute("BillingOverdueActive") == true then
 		EnergyUsageTracker.SetOutage(player, true)
 		player:SetAttribute("BillingPowerOutageActive", true)
-		enforcePowerOutage(player)
+		enforceServiceInterruptions(player)
 		return
 	end
 
@@ -421,7 +497,7 @@ local function applyOverdueState(
 	player:SetAttribute("BillingOverdueActive", true)
 	player:SetAttribute("BillingOverdueCount", overdueCount)
 	player:SetAttribute("BillingPowerOutageActive", true)
-	enforcePowerOutage(player)
+	enforceServiceInterruptions(player)
 	if isNewState then
 		BillingService.OnOverdueTriggered(player, billingState, overdueCount)
 	end
@@ -429,7 +505,7 @@ end
 
 local function clearOverdueState(player: Player, billingState: BillingState.BillingState)
 	player:SetAttribute("BillingPowerOutageActive", false)
-	clearPowerOutage(player)
+	clearServiceInterruptions(player)
 	if player:GetAttribute("BillingOverdueActive") ~= true then
 		return
 	end
@@ -684,6 +760,8 @@ function BillingService.Init()
 		return {
 			PlotTax = breakdown.PlotTax,
 			Electric = breakdown.Electric,
+			Water = breakdown.Water,
+			Internet = breakdown.Internet,
 			Overdue = breakdown.Overdue,
 			OutstandingTotal = breakdown.OutstandingTotal,
 			Total = breakdown.Total,
@@ -749,6 +827,8 @@ end
 function BillingService.GetBillingBreakdown(player: Player): {
 	PlotTax: number,
 	Electric: number,
+	Water: number,
+	Internet: number,
 	Overdue: number,
 	Total: number,
 	OutstandingTotal: number,
@@ -779,18 +859,24 @@ function BillingService.GetBillingBreakdown(player: Player): {
 
 	local plotTotal = sanitizeChargeAmount(outstandingBreakdown.PlotTax)
 	local electricTotal = sanitizeChargeAmount(outstandingBreakdown.Electric)
+	local waterTotal = sanitizeChargeAmount(outstandingBreakdown.Water)
+	local internetTotal = sanitizeChargeAmount(outstandingBreakdown.Internet)
 	local interestTotal = sanitizeChargeAmount(outstandingBreakdown.Interest)
 
 	if includeCurrentCycle then
 		plotTotal += sanitizeChargeAmount(currentCharges.PlotTax)
 		electricTotal += sanitizeChargeAmount(currentCharges.Electric)
+		waterTotal += sanitizeChargeAmount(currentCharges.Water)
+		internetTotal += sanitizeChargeAmount(currentCharges.Internet)
 	end
 
-	local totalDue = plotTotal + electricTotal + interestTotal
+	local totalDue = plotTotal + electricTotal + waterTotal + internetTotal + interestTotal
 
 	return {
 		PlotTax = plotTotal,
 		Electric = electricTotal,
+		Water = waterTotal,
+		Internet = internetTotal,
 		Overdue = interestTotal,
 		Total = totalDue,
 		OutstandingTotal = sanitizeChargeAmount(outstandingTotal),

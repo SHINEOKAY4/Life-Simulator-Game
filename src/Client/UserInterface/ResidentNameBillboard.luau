@@ -16,6 +16,7 @@ type BillboardTextHandle = BillboardText.BillboardTextHandle
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local DISABLE_BILLBOARD_ATTR = "DisableResidentBillboard"
 
 export type NameplateEntry = {
 	Model: Model,
@@ -85,8 +86,6 @@ local ACTION_LABEL_OVERRIDES: { [string]: string } = {
 	["hang out"] = "Hanging Out",
 	["check mail"] = "Checking Mail",
 	["pay bills"] = "Paying Bills",
-	["beg"] = "Begging",
-	["auto beg"] = "Begging",
 	["roam"] = "Roaming",
 	["auto roam"] = "Roaming",
 	["look around"] = "Looking Around",
@@ -334,6 +333,9 @@ local function attachResident(model: Model)
 		return
 	end
 	if not model:FindFirstChildOfClass("Humanoid") then
+		return
+	end
+	if model:GetAttribute(DISABLE_BILLBOARD_ATTR) then
 		return
 	end
 

@@ -146,4 +146,46 @@ function ActionQueue.enqueueNeedAction(
 	return true
 end
 
+function ActionQueue.enqueueFallbackAction(
+	player: Player,
+	residentName: string,
+	resident: ResidentState,
+	actionType: string,
+	itemSpec: { [string]: any }
+): boolean
+	local handler = StationManager.getStationHandler(actionType)
+	if not handler then
+		return false
+	end
+
+	local actionName = string.format("Fallback:%s", actionType)
+	State.clearNextEvaluation(resident)
+
+	resident:EnqueueAction(actionName, function(context)
+		if context.CancelToken.Cancelled then
+			return
+		end
+
+		local assignment = {
+			Player = player,
+			ResidentName = residentName,
+			ResidentState = resident,
+			StationType = actionType,
+			StationId = "Fallback",
+			ItemSpec = itemSpec,
+			StationRecord = nil,
+			StationModel = nil,
+			NeedName = nil,
+			ManualOverride = false,
+		}
+
+		local ok, result = (xpcall :: any)(handler, debug.traceback, context, assignment)
+		if not ok then
+			warn(string.format("[ResidentAutonomy] Fallback handler for %s failed: %s", actionType, tostring(result)))
+		end
+	end)
+
+	return true
+end
+
 return ActionQueue

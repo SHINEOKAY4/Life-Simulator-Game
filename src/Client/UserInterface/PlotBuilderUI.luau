@@ -917,18 +917,23 @@ end
 local function resolveItemDescription(entry: ItemEntry, categoryName: string?): string
 	local spec = entry.Spec
 	local description = spec.Description
-	if typeof(description) == "string" and description ~= "" then
-		return description
+
+	local finalDescription = description
+	if typeof(finalDescription) ~= "string" or finalDescription == "" then
+		local categoryPath = formatCategoryPath(categoryName, entry.Path)
+		if categoryPath then
+			finalDescription = string.format("Available under %s.", categoryPath)
+		else
+			local tagsLine = formatTags(spec)
+			if tagsLine then
+				finalDescription = tagsLine
+			else
+				finalDescription = "Preview this item to see how it reshapes your plot."
+			end
+		end
 	end
-	local categoryPath = formatCategoryPath(categoryName, entry.Path)
-	if categoryPath then
-		return string.format("Available under %s.", categoryPath)
-	end
-	local tagsLine = formatTags(spec)
-	if tagsLine then
-		return tagsLine
-	end
-	return "Preview this item to see how it reshapes your plot."
+
+	return finalDescription
 end
 
 local NEED_EMOJI: { [string]: string } = {
@@ -952,20 +957,33 @@ local REST_MODE_SUMMARY: { [string]: { DurationSeconds: number?, RatePerHour: nu
 	Ground = { DurationSeconds = 420, RatePerHour = 6 },
 }
 
-type DetailSegment = {
-	label: string,
-	value: string,
-}
-
 local function formatNeedLabel(needName: string): string
 	if needName == "" then
 		return "Need"
 	end
-	local emoji = NEED_EMOJI[needName]
-	if emoji then
-		return string.format("%s %s", emoji, needName)
-	end
 	return needName
+end
+
+local function getNeedColor(needName: string): string
+	if needName == "Hunger" then
+		return "#e67e22" -- Carrot
+	end
+	if needName == "Energy" then
+		return "#f1c40f" -- Sun Flower
+	end
+	if needName == "Hygiene" then
+		return "#3498db" -- Peter River
+	end
+	if needName == "Social" then
+		return "#e74c3c" -- Alizarin
+	end
+	if needName == "Fun" then
+		return "#9b59b6" -- Amethyst
+	end
+	if needName == "Bladder" then
+		return "#95a5a6" -- Concrete
+	end
+	return "#7f8c8d"
 end
 
 local function formatEffectValue(rateValue: number?, amountValue: number?): string?
@@ -982,16 +1000,18 @@ local function formatEffectValue(rateValue: number?, amountValue: number?): stri
 	return nil
 end
 
-local function collectDetailSegments(entry: ItemEntry): { DetailSegment }
+local function collectDetailSegments(entry: ItemEntry)
 	local spec = entry.Spec
-	local segments: { DetailSegment } = {}
+	local segments = {}
 
 	local cost = spec.Cost
 	if typeof(cost) == "number" then
-		segments[#segments + 1] = {
-			label = "Cost",
-			value = string.format("$%d", math.floor(cost + 0.5)),
-		}
+		table.insert(segments, {
+			Label = "Cost",
+			Value = string.format("$%d", math.floor(cost + 0.5)),
+			Color = Color3.fromHex("#2ecc71"),
+			Icon = "💰",
+		})
 	end
 
 	local stationEffects = spec.StationEffects
@@ -1007,10 +1027,12 @@ local function collectDetailSegments(entry: ItemEntry): { DetailSegment }
 			duration = restDefaults.DurationSeconds
 		end
 		if typeof(duration) == "number" then
-			segments[#segments + 1] = {
-				label = string.format("%s Duration", DURATION_EMOJI),
-				value = string.format("%ds", math.floor(duration + 0.5)),
-			}
+			table.insert(segments, {
+				Label = "Duration",
+				Value = string.format("%ds", math.floor(duration + 0.5)),
+				Color = Color3.fromHex("#3498db"),
+				Icon = DURATION_EMOJI,
+			})
 		end
 
 		local effectsList = stationEffects.Effects
@@ -1021,10 +1043,12 @@ local function collectDetailSegments(entry: ItemEntry): { DetailSegment }
 				if typeof(needName) == "string" and needName ~= "" then
 					local displayValue = formatEffectValue(effect.RatePerHour, effect.Amount or effect.Instant)
 					if displayValue then
-						segments[#segments + 1] = {
-							label = formatNeedLabel(needName),
-							value = displayValue,
-						}
+						table.insert(segments, {
+							Label = formatNeedLabel(needName),
+							Value = displayValue,
+							Color = Color3.fromHex(getNeedColor(needName)),
+							Icon = NEED_EMOJI[needName] or "✨",
+						})
 						addedEffectLine = true
 					end
 				end
@@ -1034,72 +1058,62 @@ local function collectDetailSegments(entry: ItemEntry): { DetailSegment }
 		if not addedEffectLine and restDefaults and typeof(restDefaults.RatePerHour) == "number" then
 			local restValue = formatEffectValue(restDefaults.RatePerHour, nil)
 			if restValue then
-				segments[#segments + 1] = {
-					label = formatNeedLabel("Energy"),
-					value = restValue,
-				}
+				table.insert(segments, {
+					Label = formatNeedLabel("Energy"),
+					Value = restValue,
+					Color = Color3.fromHex(getNeedColor("Energy")),
+					Icon = NEED_EMOJI["Energy"],
+				})
 			end
 		end
 	end
 
 	local energyUse = spec.EnergyConsumptionPerHour
 	if typeof(energyUse) == "number" and energyUse > 0 then
-		segments[#segments + 1] = {
-			label = string.format("%s Power", POWER_EMOJI),
-			value = string.format("-%d/hr", math.floor(energyUse + 0.5)),
-		}
+		table.insert(segments, {
+			Label = "Power",
+			Value = string.format("-%d/hr", math.floor(energyUse + 0.5)),
+			Color = Color3.fromHex("#f39c12"),
+			Icon = POWER_EMOJI,
+		})
 	end
 
 	local storage = spec.StorageConfig
 	if typeof(storage) == "table" then
 		local capacity = storage.Capacity
 		if typeof(capacity) == "number" and capacity > 0 then
-			segments[#segments + 1] = {
-				label = string.format("%s Storage", STORAGE_EMOJI),
-				value = string.format("%d slots", math.floor(capacity + 0.5)),
-			}
+			table.insert(segments, {
+				Label = "Storage",
+				Value = string.format("%d slots", math.floor(capacity + 0.5)),
+				Color = Color3.fromHex("#95a5a6"),
+				Icon = STORAGE_EMOJI,
+			})
 		end
 	end
 
 	return segments
 end
 
-local function buildDetailLine(entry: ItemEntry): string
-	local segments = collectDetailSegments(entry)
-	if #segments == 0 then
-		return ""
-	end
-
-	local parts = table.create(#segments)
-	for index, segment in ipairs(segments) do
-		parts[index] = string.format("%s %s", segment.label, segment.value)
-	end
-
-	return table.concat(parts, "    ")
-end
-
 local function attachItemTooltip(button: GuiButton, entry: ItemEntry, categoryName: string?)
 	local spec = entry.Spec
 	local itemName = typeof(spec.Name) == "string" and spec.Name or entry.Id
 	local description = resolveItemDescription(entry, categoryName)
-	local detailText = buildDetailLine(entry)
+	local stats = collectDetailSegments(entry)
 	local thumbnail = buildThumbnail(spec)
 
 	local tooltip = Tooltip.new(button, {
 		title = itemName,
 		description = description,
-		detailText = detailText,
 		thumbnail = thumbnail,
-		delay = 0.1,
-		maxWidth = 360,
-		detailTextSize = 16,
+		delay = 0.05,
+		maxWidth = 280,
 	})
 
 	tooltip:SetItemContent({
 		Title = itemName,
 		Description = description,
-		Detail = detailText,
 		Thumbnail = thumbnail,
+		Stats = stats,
 	})
 
 	button.Destroying:Connect(function()

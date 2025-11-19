@@ -1,40 +1,8 @@
 -- TooltipModule.lua
-
---[[
-    TooltipModule.lua
-
-    A lightweight, reusable tooltip system for Roblox GUI elements.
-
-    ## Overview
-
-    This module provides a simple way to attach tooltips to any `GuiObject`. A tooltip
-    is a small popup that appears near the mouse pointer when the player hovers over
-    a UI element. Each tooltip instance maintains its own state and connections so
-    that multiple tooltips can coexist without interfering with one another.
-
-    ### Features
-
-    * **Stateless and modular** – each tooltip returned by the constructor manages
-      its own events and can be disposed of independently.
-    * **Customisable appearance** – colours, padding, fonts, corner radii and
-      optional borders can all be overridden via an options table.
-    * **Automatic sizing** – uses `TextService:GetTextSize` to calculate width and height,
-      avoiding one‑frame size jumps:contentReference[oaicite:4]{index=4}.
-    * **Position clamping** – the tooltip stays on screen by clamping its position
-      within the current camera’s viewport.
-    * **Delayed display** – specify a delay before the tooltip appears after hovering.
-    * **Smooth transitions** – fade‑in and fade‑out animations via `TweenService`.
-    * **Safe top bar handling** – sets `IgnoreGuiInset` on the internal `ScreenGui`
-      to ignore the Roblox top bar:contentReference[oaicite:5]{index=5}.
-    * **Robust hover logic** – tracks the currently hovered element to avoid
-      premature hiding:contentReference[oaicite:6]{index=6}.
-
-    See the comments in the module for usage examples and configuration details.
---]]
+-- Revamped for modern UI with structured stats support
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
-local GuiService = game:GetService("GuiService")
 local TextService = game:GetService("TextService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
@@ -42,48 +10,38 @@ local RunService = game:GetService("RunService")
 local TooltipModule = {}
 TooltipModule.__index = TooltipModule
 
--- Tracks the currently hovered tooltip instance.
 local currentHoverInstance = nil
 
--- Default configuration values.
 local DEFAULT_OPTIONS = {
 	text = "Tooltip",
-	title = nil,
-	description = nil,
-	detailText = nil,
+	title = "",
+	description = "",
 	thumbnail = nil,
-	delay = 0.0, -- Seconds before tooltip shows
-	offset = Vector2.new(28, 0), -- Pixels to offset from the mouse; positive X keeps spacing when placing to the left
-	padding = Vector2.new(16, 14), -- Padding (x, y) in pixels
-	maxWidth = nil, -- Maximum pixel width; nil uses 32% of viewport width
-	backgroundColor3 = Color3.fromRGB(255, 255, 255),
-	backgroundTransparency = 0,
-	cornerRadius = UDim.new(0, 10),
-	strokeColor3 = Color3.fromRGB(220, 226, 233),
-	strokeTransparency = 0.2,
+	delay = 0.0,
+	offset = Vector2.new(20, 20),
+	padding = Vector2.new(12, 12),
+	maxWidth = 280,
+	backgroundColor3 = Color3.fromRGB(30, 33, 36),
+	backgroundTransparency = 0.05,
+	cornerRadius = UDim.new(0, 8),
+	strokeColor3 = Color3.fromRGB(60, 63, 66),
+	strokeTransparency = 0,
 	strokeThickness = 1,
-	accentColor3 = Color3.fromRGB(45, 170, 255),
-	fadeInDuration = 0.14,
-	fadeOutDuration = 0.12,
-	zIndex = 10,
+	fadeInDuration = 0.15,
+	fadeOutDuration = 0.1,
+	zIndex = 100,
 	allowMultiple = false,
-	parent = nil, -- Optional ScreenGui parent; defaults to PlayerGui
-	imageSize = Vector2.new(108, 108),
-	contentSpacing = 14,
-	textSpacing = 6,
-	detailSpacing = 4,
+	parent = nil,
+	imageSize = Vector2.new(48, 48),
+	contentSpacing = 8,
 	titleFont = Enum.Font.GothamBold,
-	titleTextSize = 18,
-	titleColor3 = Color3.fromRGB(23, 28, 43),
+	titleTextSize = 16,
+	titleColor3 = Color3.fromRGB(255, 255, 255),
 	descriptionFont = Enum.Font.Gotham,
-	descriptionTextSize = 14,
-	descriptionColor3 = Color3.fromRGB(72, 82, 96),
-	detailFont = Enum.Font.GothamMedium,
-	detailTextSize = 13,
-	detailColor3 = Color3.fromRGB(135, 145, 160),
+	descriptionTextSize = 13,
+	descriptionColor3 = Color3.fromRGB(200, 200, 200),
 }
 
--- Merge user options with defaults.
 local function mergeOptions(options)
 	local result = table.clone(DEFAULT_OPTIONS)
 	if options then
@@ -93,37 +51,24 @@ local function mergeOptions(options)
 			end
 		end
 	end
-	if result.title == nil then
-		result.title = ""
-	end
-	if result.description == nil then
-		result.description = typeof(result.text) == "string" and result.text or ""
-	end
-	if result.detailText == nil then
-		result.detailText = ""
-	end
 	return result
 end
 
--- Create a ScreenGui containing the tooltip frame and label.
 local function createGui(options)
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "TooltipGui"
 	gui.IgnoreGuiInset = true
-	gui.ResetOnSpawn = false
-	gui.DisplayOrder = 2147483647
-	gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+	gui.DisplayOrder = 1000
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 	local frame = Instance.new("Frame")
 	frame.Name = "TooltipFrame"
-	frame.AnchorPoint = Vector2.new(0, 0)
 	frame.BackgroundColor3 = options.backgroundColor3
 	frame.BackgroundTransparency = options.backgroundTransparency
 	frame.BorderSizePixel = 0
-	frame.ClipsDescendants = true
-	frame.Size = UDim2.fromOffset(0, 0)
+	frame.Size = UDim2.fromOffset(options.maxWidth, 0)
+	frame.AutomaticSize = Enum.AutomaticSize.Y
 	frame.Visible = false
-	frame.ZIndex = options.zIndex
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = options.cornerRadius
@@ -135,379 +80,98 @@ local function createGui(options)
 	stroke.Transparency = options.strokeTransparency
 	stroke.Parent = frame
 
-	local content = Instance.new("Frame")
-	content.Name = "Content"
-	content.BackgroundTransparency = 1
-	content.Position = UDim2.fromOffset(options.padding.X, options.padding.Y)
-	content.Size = UDim2.new(1, -options.padding.X * 2, 1, -options.padding.Y * 2)
-	content.ZIndex = options.zIndex + 1
-	content.Parent = frame
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0, options.padding.Y)
+	padding.PaddingBottom = UDim.new(0, options.padding.Y)
+	padding.PaddingLeft = UDim.new(0, options.padding.X)
+	padding.PaddingRight = UDim.new(0, options.padding.X)
+	padding.Parent = frame
 
 	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.FillDirection = Enum.FillDirection.Vertical
 	layout.Padding = UDim.new(0, options.contentSpacing)
-	layout.Parent = content
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = frame
 
-	local imageHolder = Instance.new("Frame")
-	imageHolder.Name = "ThumbnailHolder"
-	imageHolder.BackgroundTransparency = 1
-	imageHolder.Size = UDim2.fromOffset(options.imageSize.X, options.imageSize.Y)
-	imageHolder.Visible = false
-	imageHolder.Parent = content
-
-	local imageCorner = Instance.new("UICorner")
-	imageCorner.CornerRadius = UDim.new(0, math.floor(math.min(options.imageSize.X, options.imageSize.Y) / 6))
-	imageCorner.Parent = imageHolder
-
-	local imageStroke = Instance.new("UIStroke")
-	imageStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	imageStroke.Color = options.strokeColor3
-	imageStroke.Thickness = 1
-	imageStroke.Transparency = 0.2
-	imageStroke.Parent = imageHolder
-
-	local imageLabel = Instance.new("ImageLabel")
-	imageLabel.Name = "Thumbnail"
-	imageLabel.BackgroundTransparency = 1
-	imageLabel.ImageTransparency = 1
-	imageLabel.ScaleType = Enum.ScaleType.Fit
-	imageLabel.Size = UDim2.fromScale(1, 1)
-	imageLabel.ZIndex = options.zIndex + 1
-	imageLabel.Parent = imageHolder
-
-	local textContainer = Instance.new("Frame")
-	textContainer.Name = "TextContainer"
-	textContainer.BackgroundTransparency = 1
-	textContainer.Size = UDim2.fromScale(1, 1)
-	textContainer.Parent = content
-
-	local textLayout = Instance.new("UIListLayout")
-	textLayout.FillDirection = Enum.FillDirection.Vertical
-	textLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-	textLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-	textLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	textLayout.Padding = UDim.new(0, options.textSpacing)
-	textLayout.Parent = textContainer
-
+	-- Header (Title)
 	local titleLabel = Instance.new("TextLabel")
 	titleLabel.Name = "Title"
 	titleLabel.BackgroundTransparency = 1
-	titleLabel.LayoutOrder = 1
-	titleLabel.RichText = false
 	titleLabel.TextColor3 = options.titleColor3
-	titleLabel.TextSize = options.titleTextSize
 	titleLabel.Font = options.titleFont
+	titleLabel.TextSize = options.titleTextSize
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-	titleLabel.TextYAlignment = Enum.TextYAlignment.Top
 	titleLabel.TextWrapped = true
-	titleLabel.AutomaticSize = Enum.AutomaticSize.None
-	titleLabel.ZIndex = options.zIndex + 1
-	titleLabel.Parent = textContainer
+	titleLabel.Size = UDim2.new(1, 0, 0, 0)
+	titleLabel.AutomaticSize = Enum.AutomaticSize.Y
+	titleLabel.LayoutOrder = 1
+	titleLabel.Parent = frame
+
+	-- Body (Thumbnail + Description)
+	local bodyFrame = Instance.new("Frame")
+	bodyFrame.Name = "Body"
+	bodyFrame.BackgroundTransparency = 1
+	bodyFrame.Size = UDim2.new(1, 0, 0, 0)
+	bodyFrame.AutomaticSize = Enum.AutomaticSize.Y
+	bodyFrame.LayoutOrder = 2
+	bodyFrame.Parent = frame
+
+	local bodyLayout = Instance.new("UIListLayout")
+	bodyLayout.FillDirection = Enum.FillDirection.Horizontal
+	bodyLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+	bodyLayout.Padding = UDim.new(0, 8)
+	bodyLayout.Parent = bodyFrame
+
+	local thumbnailHolder = Instance.new("Frame")
+	thumbnailHolder.Name = "ThumbnailHolder"
+	thumbnailHolder.BackgroundTransparency = 1
+	thumbnailHolder.Size = UDim2.fromOffset(options.imageSize.X, options.imageSize.Y)
+	thumbnailHolder.Visible = false
+	thumbnailHolder.Parent = bodyFrame
+
+	local thumbImage = Instance.new("ImageLabel")
+	thumbImage.Name = "Image"
+	thumbImage.BackgroundTransparency = 1
+	thumbImage.Size = UDim2.fromScale(1, 1)
+	thumbImage.ScaleType = Enum.ScaleType.Fit
+	thumbImage.Parent = thumbnailHolder
 
 	local descriptionLabel = Instance.new("TextLabel")
 	descriptionLabel.Name = "Description"
 	descriptionLabel.BackgroundTransparency = 1
-	descriptionLabel.LayoutOrder = 2
-	descriptionLabel.RichText = true
 	descriptionLabel.TextColor3 = options.descriptionColor3
-	descriptionLabel.TextSize = options.descriptionTextSize
 	descriptionLabel.Font = options.descriptionFont
-	descriptionLabel.TextXAlignment = Enum.TextXAlignment.Left
-	descriptionLabel.TextYAlignment = Enum.TextYAlignment.Top
+	descriptionLabel.TextSize = options.descriptionTextSize
 	descriptionLabel.TextWrapped = true
-	descriptionLabel.AutomaticSize = Enum.AutomaticSize.None
-	descriptionLabel.ZIndex = options.zIndex + 1
-	descriptionLabel.Parent = textContainer
+	descriptionLabel.TextXAlignment = Enum.TextXAlignment.Left
+	descriptionLabel.AutomaticSize = Enum.AutomaticSize.Y
+	descriptionLabel.Size = UDim2.new(1, 0, 0, 0)
+	descriptionLabel.Parent = bodyFrame
 
-	local detailLabel = Instance.new("TextLabel")
-	detailLabel.Name = "Detail"
-	detailLabel.BackgroundTransparency = 1
-	detailLabel.LayoutOrder = 3
-	detailLabel.RichText = true
-	detailLabel.TextColor3 = options.detailColor3
-	detailLabel.TextSize = options.detailTextSize
-	detailLabel.Font = options.detailFont
-	detailLabel.TextXAlignment = Enum.TextXAlignment.Left
-	detailLabel.TextYAlignment = Enum.TextYAlignment.Top
-	detailLabel.TextWrapped = true
-	detailLabel.AutomaticSize = Enum.AutomaticSize.None
-	detailLabel.ZIndex = options.zIndex + 1
-	detailLabel.Parent = textContainer
+	-- Stats Container
+	local statsFrame = Instance.new("Frame")
+	statsFrame.Name = "Stats"
+	statsFrame.BackgroundTransparency = 1
+	statsFrame.Size = UDim2.new(1, 0, 0, 0)
+	statsFrame.AutomaticSize = Enum.AutomaticSize.Y
+	statsFrame.LayoutOrder = 3
+	statsFrame.Parent = frame
+
+	local statsLayout = Instance.new("UIListLayout")
+	statsLayout.FillDirection = Enum.FillDirection.Vertical
+	statsLayout.Padding = UDim.new(0, 4)
+	statsLayout.Parent = statsFrame
 
 	frame.Parent = gui
-	return gui, frame, titleLabel, descriptionLabel, detailLabel, imageHolder, imageLabel, textContainer
+	return gui, frame, titleLabel, descriptionLabel, thumbnailHolder, thumbImage, statsFrame
 end
 
--- Compute tooltip size based on its text and configuration.
-
-function TooltipModule:_syncContent()
-	if self._titleLabel then
-		self._titleLabel.Text = self._titleText
-		self._titleLabel.Visible = self._titleText ~= ""
-	end
-
-	if self._descriptionLabel then
-		self._descriptionLabel.Text = self._descriptionText
-		self._descriptionLabel.Visible = self._descriptionText ~= ""
-	end
-
-	if self._detailLabel then
-		self._detailLabel.Text = self._detailText
-		self._detailLabel.Visible = self._detailText ~= ""
-	end
-
-	local thumbnail = self._thumbnailAsset
-	local hasThumbnail = typeof(thumbnail) == "string" and thumbnail ~= ""
-	self._hasThumbnail = hasThumbnail
-	if hasThumbnail then
-		self._thumbnailHolder.Visible = true
-		self._thumbnailImage.Image = thumbnail
-	else
-		self._thumbnailHolder.Visible = false
-		self._thumbnailImage.Image = ""
-	end
-end
-
-function TooltipModule:_calculateLayout(): {
-	width: number,
-	height: number,
-	textWidth: number,
-	textHeight: number,
-	titleHeight: number,
-	descriptionHeight: number,
-	detailHeight: number,
-	hasTitle: boolean,
-	hasDescription: boolean,
-	hasDetail: boolean,
-	hasThumbnail: boolean,
-}
-	local cam = workspace.CurrentCamera
-	if not cam then
-		return {
-			width = 240,
-			height = 120,
-			textWidth = 160,
-			textHeight = 80,
-			titleHeight = 0,
-			descriptionHeight = 80,
-			detailHeight = 0,
-			hasTitle = self._titleText ~= "",
-			hasDescription = self._descriptionText ~= "",
-			hasDetail = self._detailText ~= "",
-			hasThumbnail = self._hasThumbnail == true,
-		}
-	end
-
-	local viewport = cam.ViewportSize
-	local padX = self._options.padding.X
-	local padY = self._options.padding.Y
-	local maxWidth = self._options.maxWidth or math.floor(viewport.X * 0.32)
-	local hasTitle = self._titleText ~= ""
-	local hasDescription = self._descriptionText ~= ""
-	local hasDetail = self._detailText ~= ""
-	local hasThumbnail = self._hasThumbnail == true
-
-	local thumbnailWidth = hasThumbnail and self._options.imageSize.X or 0
-	local thumbnailHeight = hasThumbnail and self._options.imageSize.Y or 0
-	local reservedWidth = hasThumbnail and (thumbnailWidth + self._options.contentSpacing) or 0
-
-	local maxContentWidth = math.max(maxWidth - padX * 2, 120)
-	local tentativeTextWidth = math.max(maxContentWidth - reservedWidth, 120)
-	local totalWidth = padX * 2 + reservedWidth + tentativeTextWidth
-	if totalWidth > maxWidth then
-		totalWidth = maxWidth
-		tentativeTextWidth = math.max(totalWidth - padX * 2 - reservedWidth, 100)
-	end
-
-	local textWidth = tentativeTextWidth
-	local textSpace = Vector2.new(textWidth, math.huge)
-
-	local titleHeight = 0
-	if hasTitle then
-		titleHeight =
-			TextService:GetTextSize(self._titleText, self._options.titleTextSize, self._options.titleFont, textSpace).Y
-	end
-
-	local descriptionHeight = 0
-	if hasDescription then
-		descriptionHeight = TextService:GetTextSize(
-			self._descriptionText,
-			self._options.descriptionTextSize,
-			self._options.descriptionFont,
-			textSpace
-		).Y
-	end
-
-	local detailHeight = 0
-	if hasDetail then
-		detailHeight = TextService:GetTextSize(
-			self._detailText,
-			self._options.detailTextSize,
-			self._options.detailFont,
-			textSpace
-		).Y
-	end
-
-	local textHeight = 0
-	local spacingAccumulator = 0
-	if hasTitle then
-		textHeight += titleHeight
-	end
-	if hasDescription then
-		if textHeight > 0 then
-			spacingAccumulator += self._options.textSpacing
-		end
-		textHeight += descriptionHeight
-	end
-	if hasDetail then
-		if textHeight > 0 then
-			spacingAccumulator += self._options.detailSpacing
-		end
-		textHeight += detailHeight
-	end
-	textHeight += spacingAccumulator
-
-	local contentHeight = math.max(textHeight, thumbnailHeight)
-	if contentHeight == 0 then
-		contentHeight = math.floor(self._options.imageSize.Y * 0.75)
-	end
-
-	local totalHeight = padY * 2 + contentHeight
-	return {
-		width = totalWidth,
-		height = totalHeight,
-		textWidth = textWidth,
-		textHeight = textHeight,
-		titleHeight = titleHeight,
-		descriptionHeight = descriptionHeight,
-		detailHeight = detailHeight,
-		hasTitle = hasTitle,
-		hasDescription = hasDescription,
-		hasDetail = hasDetail,
-		hasThumbnail = hasThumbnail,
-		thumbnailWidth = thumbnailWidth,
-		thumbnailHeight = thumbnailHeight,
-		contentHeight = contentHeight,
-	}
-end
-
-function TooltipModule:_applyLayout(layoutInfo)
-	if self._thumbnailHolder then
-		self._thumbnailHolder.Visible = layoutInfo.hasThumbnail
-		local width = layoutInfo.hasThumbnail and layoutInfo.thumbnailWidth or 0
-		local height = layoutInfo.hasThumbnail and layoutInfo.thumbnailHeight or 0
-		self._thumbnailHolder.Size = UDim2.fromOffset(width, height)
-	end
-
-	if self._textContainer then
-		local height = math.max(layoutInfo.textHeight, 0)
-		self._textContainer.Size = UDim2.fromOffset(layoutInfo.textWidth, height)
-	end
-
-	if self._titleLabel then
-		self._titleLabel.Visible = layoutInfo.hasTitle
-		local titleHeight = layoutInfo.hasTitle and layoutInfo.titleHeight or 0
-		self._titleLabel.Size = UDim2.fromOffset(layoutInfo.textWidth, titleHeight)
-	end
-
-	if self._descriptionLabel then
-		self._descriptionLabel.Visible = layoutInfo.hasDescription
-		local descHeight = layoutInfo.hasDescription and layoutInfo.descriptionHeight or 0
-		self._descriptionLabel.Size = UDim2.fromOffset(layoutInfo.textWidth, descHeight)
-	end
-
-	if self._detailLabel then
-		self._detailLabel.Visible = layoutInfo.hasDetail
-		local detailHeight = layoutInfo.hasDetail and layoutInfo.detailHeight or 0
-		self._detailLabel.Size = UDim2.fromOffset(layoutInfo.textWidth, detailHeight)
-	end
-end
-
--- Update the tooltip’s position to follow the mouse while staying on-screen.
-function TooltipModule:_updatePosition(mouseX, mouseY)
-	local layoutInfo = self:_calculateLayout()
-	self:_applyLayout(layoutInfo)
-	local width = layoutInfo.width
-	local height = layoutInfo.height
-	local cam = workspace.CurrentCamera
-	if not cam then
-		return
-	end
-	local viewport = cam.ViewportSize
-	local offsetX = self._options.offset.X
-	local offsetY = self._options.offset.Y
-	local targetX = mouseX - offsetX - width
-	local targetY = mouseY - (height * 0.5) + offsetY
-	targetX = math.clamp(targetX, 0, viewport.X - width)
-	targetY = math.clamp(targetY, 0, viewport.Y - height)
-	self._frame.Position = UDim2.fromOffset(targetX, targetY)
-	self._frame.Size = UDim2.fromOffset(width, height)
-end
-
--- Handle MouseEnter: start a delay timer before showing.
-function TooltipModule:_onMouseEnter()
-	currentHoverInstance = self
-	if self._pendingShow then
-		task.cancel(self._pendingShow)
-	end
-	if self._options.delay > 0 then
-		self._pendingShow = task.delay(self._options.delay, function()
-			if currentHoverInstance == self then
-				self:Show()
-			end
-		end)
-	else
-		self:Show()
-	end
-end
-
--- Handle MouseLeave: hide if this is the currently hovered tooltip.
-function TooltipModule:_onMouseLeave()
-	if currentHoverInstance == self then
-		currentHoverInstance = nil
-		self:Hide()
-	end
-end
-
--- Handle MouseMoved: reposition the tooltip.
-function TooltipModule:_onMouseMoved(x, y)
-	if currentHoverInstance == self then
-		self:_updatePosition(x, y)
-	end
-end
-
--- Create a new tooltip attached to the given GuiObject.
 function TooltipModule.new(object, options)
-	assert(
-		typeof(object) == "Instance" and object:IsA("GuiObject"),
-		"TooltipModule.new requires a GuiObject as the first argument"
-	)
 	local self = setmetatable({}, TooltipModule)
 	self._options = mergeOptions(options)
-	self._titleText = typeof(self._options.title) == "string" and self._options.title or ""
-	self._descriptionText = typeof(self._options.description) == "string" and self._options.description or ""
-	self._detailText = typeof(self._options.detailText) == "string" and self._options.detailText or ""
-	self._thumbnailAsset = typeof(self._options.thumbnail) == "string" and self._options.thumbnail or ""
-	self._text = self._descriptionText ~= "" and self._descriptionText or self._titleText
-	self._gui, self._frame, self._titleLabel, self._descriptionLabel, self._detailLabel, self._thumbnailHolder, self._thumbnailImage, self._textContainer =
+	self._gui, self._frame, self._titleLabel, self._descriptionLabel, self._thumbnailHolder, self._thumbnailImage, self._statsFrame =
 		createGui(self._options)
-	self._contentFrame = self._frame:FindFirstChild("Content")
-	self._contentLayout = self._contentFrame and self._contentFrame:FindFirstChildWhichIsA("UIListLayout")
-	self._textLayout = self._textContainer:FindFirstChildWhichIsA("UIListLayout")
-	self._frameStroke = self._frame:FindFirstChildWhichIsA("UIStroke")
-	self._textLabels = {
-		self._titleLabel,
-		self._descriptionLabel,
-		self._detailLabel,
-	}
-	self._isVisible = false
-	self._pendingShow = nil
-	self._fadeTween = nil
-	self._activeTextTweens = {}
-	self._imageTween = nil
-	self._object = object
+
 	self._connections = {}
 	table.insert(
 		self._connections,
@@ -528,330 +192,187 @@ function TooltipModule.new(object, options)
 		end)
 	)
 
-	self:_syncContent()
 	return self
 end
 
--- Show the tooltip. Hides any other tooltips if allowMultiple is false.
-function TooltipModule:Show()
-	if self._isVisible then
+function TooltipModule:_renderStats(stats)
+	for _, child in ipairs(self._statsFrame:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+
+	if not stats or #stats == 0 then
+		self._statsFrame.Visible = false
 		return
 	end
-	self._isVisible = true
-	if not self._options.allowMultiple and currentHoverInstance and currentHoverInstance ~= self then
-		currentHoverInstance:Hide()
-	end
-	local parent = self._options.parent
-	if not parent then
-		local player = Players.LocalPlayer
-		local playerGui = player and player:FindFirstChild("PlayerGui")
-		parent = playerGui or game:GetService("CoreGui")
-	end
-	self._gui.Parent = parent
-	self:_syncContent()
-	local mousePos = UserInputService:GetMouseLocation()
-	self:_updatePosition(mousePos.X, mousePos.Y)
-	self._frame.Visible = true
-	if self._fadeTween then
-		self._fadeTween:Cancel()
-	end
-	for _, tween in ipairs(self._activeTextTweens) do
-		tween:Cancel()
-	end
-	table.clear(self._activeTextTweens)
-	if self._imageTween then
-		self._imageTween:Cancel()
-		self._imageTween = nil
-	end
-	-- Set initial transparency for fade-in
-	self._frame.BackgroundTransparency = 1
-	if self._frameStroke then
-		self._frameStroke.Transparency = 1
-	end
-	for _, label in ipairs(self._textLabels) do
-		if label and label.Visible then
-			label.TextTransparency = 1
-		end
-	end
-	if self._thumbnailHolder and self._thumbnailHolder.Visible then
-		self._thumbnailImage.ImageTransparency = 1
-	end
-	local tweenInfo = TweenInfo.new(self._options.fadeInDuration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
-	self._fadeTween = TweenService:Create(self._frame, tweenInfo, {
-		BackgroundTransparency = self._options.backgroundTransparency,
-	})
-	self._fadeTween:Play()
-	if self._frameStroke then
-		local strokeTween = TweenService:Create(self._frameStroke, tweenInfo, {
-			Transparency = self._options.strokeTransparency,
-		})
-		strokeTween:Play()
-		self._activeTextTweens[#self._activeTextTweens + 1] = strokeTween
-	end
-	for _, label in ipairs(self._textLabels) do
-		if label and label.Visible then
-			local textTween = TweenService:Create(label, tweenInfo, {
-				TextTransparency = 0,
-			})
-			textTween:Play()
-			self._activeTextTweens[#self._activeTextTweens + 1] = textTween
-		end
-	end
-	if self._thumbnailHolder and self._thumbnailHolder.Visible then
-		self._imageTween = TweenService:Create(self._thumbnailImage, tweenInfo, {
-			ImageTransparency = 0,
-		})
-		self._imageTween:Play()
-	end
-end
+	self._statsFrame.Visible = true
 
--- Hide the tooltip with a fade-out.
-function TooltipModule:Hide()
-	if not self._isVisible and not self._pendingShow then
-		return
-	end
-	if self._pendingShow then
-		task.cancel(self._pendingShow)
-		self._pendingShow = nil
-	end
-	if self._isVisible then
-		self._isVisible = false
-		if self._fadeTween then
-			self._fadeTween:Cancel()
-		end
-		for _, tween in ipairs(self._activeTextTweens) do
-			tween:Cancel()
-		end
-		table.clear(self._activeTextTweens)
-		if self._imageTween then
-			self._imageTween:Cancel()
-			self._imageTween = nil
-		end
-		local tweenInfo =
-			TweenInfo.new(self._options.fadeOutDuration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
-		local fadeOut = TweenService:Create(self._frame, tweenInfo, {
-			BackgroundTransparency = 1,
-		})
-		local strokeFade
-		if self._frameStroke then
-			strokeFade = TweenService:Create(self._frameStroke, tweenInfo, {
-				Transparency = 1,
-			})
-			strokeFade:Play()
-		end
-		for _, label in ipairs(self._textLabels) do
-			if label then
-				local textFade = TweenService:Create(label, tweenInfo, {
-					TextTransparency = 1,
-				})
-				textFade:Play()
-			end
-		end
-		if self._thumbnailHolder and self._thumbnailHolder.Visible then
-			local imageFade = TweenService:Create(self._thumbnailImage, tweenInfo, {
-				ImageTransparency = 1,
-			})
-			imageFade:Play()
-		end
-		fadeOut.Completed:Connect(function()
-			self._frame.Visible = false
-			self._gui.Parent = nil
-		end)
-		fadeOut:Play()
-	end
-end
+	for _, stat in ipairs(stats) do
+		local row = Instance.new("Frame")
+		row.Name = "StatRow"
+		row.BackgroundColor3 = Color3.fromRGB(45, 48, 52)
+		row.BorderSizePixel = 0
+		row.Size = UDim2.new(1, 0, 0, 24)
+		row.Parent = self._statsFrame
 
--- Destroy the tooltip and disconnect all events.
-function TooltipModule:Destroy()
-	if self._pendingShow then
-		task.cancel(self._pendingShow)
-		self._pendingShow = nil
-	end
-	if self._fadeTween then
-		self._fadeTween:Cancel()
-	end
-	for _, tween in ipairs(self._activeTextTweens) do
-		tween:Cancel()
-	end
-	self._activeTextTweens = {}
-	if self._imageTween then
-		self._imageTween:Cancel()
-		self._imageTween = nil
-	end
-	self._gui.Parent = nil
-	self._gui:Destroy()
-	for _, conn in ipairs(self._connections) do
-		conn:Disconnect()
-	end
-	table.clear(self._connections)
-	if currentHoverInstance == self then
-		currentHoverInstance = nil
-	end
-end
+		local rowCorner = Instance.new("UICorner")
+		rowCorner.CornerRadius = UDim.new(0, 4)
+		rowCorner.Parent = row
 
--- Update the tooltip text and reposition if visible.
-function TooltipModule:SetText(newText)
-	assert(type(newText) == "string", "SetText expects a string")
-	self._text = newText
-	self._descriptionText = newText
-	self._options.description = newText
-	if self._isVisible then
-		self:_syncContent()
-		local mousePos = UserInputService:GetMouseLocation()
-		self:_updatePosition(mousePos.X, mousePos.Y)
+		local rowLayout = Instance.new("UIListLayout")
+		rowLayout.FillDirection = Enum.FillDirection.Horizontal
+		rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+		rowLayout.Padding = UDim.new(0, 8)
+		rowLayout.Parent = row
+
+		local rowPadding = Instance.new("UIPadding")
+		rowPadding.PaddingLeft = UDim.new(0, 8)
+		rowPadding.PaddingRight = UDim.new(0, 8)
+		rowPadding.Parent = row
+
+		-- Icon/Label
+		local labelText = (stat.Icon or "") .. " " .. (stat.Label or "")
+		local label = Instance.new("TextLabel")
+		label.BackgroundTransparency = 1
+		label.Text = labelText
+		label.TextColor3 = Color3.fromRGB(180, 180, 180)
+		label.Font = Enum.Font.GothamMedium
+		label.TextSize = 12
+		label.AutomaticSize = Enum.AutomaticSize.X
+		label.Size = UDim2.new(0, 0, 1, 0)
+		label.Parent = row
+
+		-- Spacer
+		local spacer = Instance.new("Frame")
+		spacer.BackgroundTransparency = 1
+		spacer.Size = UDim2.new(1, 0, 1, 0) -- Will fill remaining space? No, UIListLayout doesn't fill.
+		-- We can use a flexible frame if we want right alignment.
+		-- Actually, let's just put Value on the right.
+		-- Since UIListLayout stacks left-to-right, we can't easily right-align the last item without a wrapper or script.
+		-- But we can set the Label size to expand? No.
+		-- Let's just put the Value next to it for now, or use a different layout.
+		-- Better: Use a Frame for Value with AnchorPoint/Position?
+		-- Let's keep it simple: Label [Space] Value.
+		-- To push Value to the right, we can make the Label take up available space? No.
+		-- We can insert a "Spring" frame.
+		spacer.LayoutOrder = 2
+		spacer.Parent = row
+
+		-- Value
+		local value = Instance.new("TextLabel")
+		value.BackgroundTransparency = 1
+		value.Text = stat.Value or ""
+		value.TextColor3 = stat.Color or Color3.fromRGB(255, 255, 255)
+		value.Font = Enum.Font.GothamBold
+		value.TextSize = 12
+		value.AutomaticSize = Enum.AutomaticSize.X
+		value.Size = UDim2.new(0, 0, 1, 0)
+		value.LayoutOrder = 3
+		value.Parent = row
+
+		-- Make spacer fill space
+		-- In UIListLayout, we can't easily fill space.
+		-- Hack: Set spacer Size to UDim2.new(1, - (labelWidth + valueWidth), 1, 0) ? Hard to calculate.
+		-- Alternative: Don't use UIListLayout for the row. Use direct positioning.
+		rowLayout:Destroy()
+
+		label.Position = UDim2.new(0, 0, 0, 0)
+		label.Size = UDim2.new(0.6, 0, 1, 0)
+		label.TextXAlignment = Enum.TextXAlignment.Left
+
+		value.Position = UDim2.new(0.6, 0, 0, 0)
+		value.Size = UDim2.new(0.4, 0, 1, 0)
+		value.TextXAlignment = Enum.TextXAlignment.Right
 	end
 end
 
 function TooltipModule:SetItemContent(content)
-	assert(type(content) == "table", "SetItemContent expects a table")
-	if content.Title ~= nil then
-		self._titleText = tostring(content.Title)
-		self._options.title = self._titleText
+	self._titleLabel.Text = content.Title or ""
+	self._titleLabel.Visible = (content.Title ~= nil and content.Title ~= "")
+
+	self._descriptionLabel.Text = content.Description or ""
+	self._descriptionLabel.Visible = (content.Description ~= nil and content.Description ~= "")
+
+	if content.Thumbnail then
+		self._thumbnailHolder.Visible = true
+		self._thumbnailImage.Image = content.Thumbnail
+		self._descriptionLabel.Size = UDim2.new(1, -(self._options.imageSize.X + 8), 0, 0)
+	else
+		self._thumbnailHolder.Visible = false
+		self._descriptionLabel.Size = UDim2.new(1, 0, 0, 0)
 	end
-	if content.Description ~= nil then
-		self._descriptionText = tostring(content.Description)
-		self._text = self._descriptionText
-		self._options.description = self._descriptionText
+
+	self:_renderStats(content.Stats)
+
+	self:_updatePosition(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
+end
+
+function TooltipModule:_updatePosition(mouseX, mouseY)
+	local viewport = workspace.CurrentCamera.ViewportSize
+	local size = self._frame.AbsoluteSize
+	local offset = self._options.offset
+
+	local targetX = mouseX + offset.X
+	local targetY = mouseY + offset.Y
+
+	if targetX + size.X > viewport.X then
+		targetX = mouseX - size.X - offset.X
 	end
-	local detailText = self._detailText
-	if content.Detail ~= nil then
-		detailText = tostring(content.Detail)
+	if targetY + size.Y > viewport.Y then
+		targetY = viewport.Y - size.Y - offset.Y -- Clamp bottom
 	end
-	if typeof(content.Highlights) == "table" then
-		local bulletLines = table.create(#content.Highlights)
-		for _, entry in ipairs(content.Highlights) do
-			if typeof(entry) == "string" and entry ~= "" then
-				bulletLines[#bulletLines + 1] = entry
+
+	self._frame.Position = UDim2.fromOffset(targetX, targetY)
+end
+
+function TooltipModule:_onMouseEnter()
+	currentHoverInstance = self
+	if self._options.delay > 0 then
+		task.delay(self._options.delay, function()
+			if currentHoverInstance == self then
+				self:Show()
 			end
-		end
-		if #bulletLines > 0 then
-			local highlights = table.concat(bulletLines, "\n")
-			if detailText ~= nil and detailText ~= "" then
-				detailText = detailText .. "\n" .. highlights
-			else
-				detailText = highlights
-			end
-		end
-	end
-	if detailText ~= nil then
-		self._detailText = detailText
-		self._options.detailText = detailText
-	end
-	if content.Thumbnail ~= nil then
-		if typeof(content.Thumbnail) == "string" then
-			self._thumbnailAsset = content.Thumbnail
-		else
-			self._thumbnailAsset = ""
-		end
-		self._options.thumbnail = self._thumbnailAsset
-	end
-	if self._thumbnailHolder then
-		local thumbStroke = self._thumbnailHolder:FindFirstChildWhichIsA("UIStroke")
-		if thumbStroke then
-			thumbStroke.Color = self._options.strokeColor3
-		end
-	end
-	self:_syncContent()
-	if self._isVisible then
-		local mousePos = UserInputService:GetMouseLocation()
-		self:_updatePosition(mousePos.X, mousePos.Y)
+		end)
+	else
+		self:Show()
 	end
 end
 
--- Update one or more options on an existing tooltip.
-function TooltipModule:UpdateOptions(options)
-	assert(type(options) == "table", "UpdateOptions expects a table")
-	for k, v in pairs(options) do
-		if DEFAULT_OPTIONS[k] ~= nil then
-			self._options[k] = v
-		end
-		if k == "title" and typeof(v) == "string" then
-			self._titleText = v
-		elseif k == "description" and typeof(v) == "string" then
-			self._descriptionText = v
-			self._text = v
-		elseif k == "detailText" and typeof(v) == "string" then
-			self._detailText = v
-		elseif k == "thumbnail" then
-			if typeof(v) == "string" then
-				self._thumbnailAsset = v
-			else
-				self._thumbnailAsset = ""
-			end
-		end
-	end
-
-	self._frame.BackgroundColor3 = self._options.backgroundColor3
-	if not self._isVisible then
-		self._frame.BackgroundTransparency = 1
-		if self._frameStroke then
-			self._frameStroke.Transparency = 1
-		end
-		for _, label in ipairs(self._textLabels) do
-			if label then
-				label.TextTransparency = 1
-			end
-		end
-		if self._thumbnailHolder then
-			self._thumbnailImage.ImageTransparency = 1
-		end
-	end
-	if self._frameStroke then
-		self._frameStroke.Color = self._options.strokeColor3
-		self._frameStroke.Transparency = self._options.strokeTransparency
-		self._frameStroke.Thickness = self._options.strokeThickness
-	end
-	if self._frame:FindFirstChildOfClass("UICorner") then
-		self._frame.UICorner.CornerRadius = self._options.cornerRadius
-	end
-	if self._contentFrame then
-		self._contentFrame.Position = UDim2.fromOffset(self._options.padding.X, self._options.padding.Y)
-		self._contentFrame.Size = UDim2.new(1, -self._options.padding.X * 2, 1, -self._options.padding.Y * 2)
-	end
-	if self._contentLayout then
-		self._contentLayout.Padding = UDim.new(0, self._options.contentSpacing)
-	end
-	if self._textLayout then
-		self._textLayout.Padding = UDim.new(0, self._options.textSpacing)
-	end
-	if self._thumbnailHolder then
-		self._thumbnailHolder.Size = UDim2.fromOffset(self._options.imageSize.X, self._options.imageSize.Y)
-		local corner = self._thumbnailHolder:FindFirstChildWhichIsA("UICorner")
-		if corner then
-			corner.CornerRadius =
-				UDim.new(0, math.floor(math.min(self._options.imageSize.X, self._options.imageSize.Y) / 6))
-		end
-		local thumbStroke = self._thumbnailHolder:FindFirstChildWhichIsA("UIStroke")
-		if thumbStroke then
-			thumbStroke.Color = self._options.strokeColor3
-		end
-	end
-	if self._titleLabel then
-		self._titleLabel.TextColor3 = self._options.titleColor3
-		self._titleLabel.Font = self._options.titleFont
-		self._titleLabel.TextSize = self._options.titleTextSize
-	end
-	if self._descriptionLabel then
-		self._descriptionLabel.TextColor3 = self._options.descriptionColor3
-		self._descriptionLabel.Font = self._options.descriptionFont
-		self._descriptionLabel.TextSize = self._options.descriptionTextSize
-	end
-	if self._detailLabel then
-		self._detailLabel.TextColor3 = self._options.detailColor3
-		self._detailLabel.Font = self._options.detailFont
-		self._detailLabel.TextSize = self._options.detailTextSize
-	end
-
-	self:_syncContent()
-	if self._isVisible then
-		local mousePos = UserInputService:GetMouseLocation()
-		self:_updatePosition(mousePos.X, mousePos.Y)
+function TooltipModule:_onMouseLeave()
+	if currentHoverInstance == self then
+		currentHoverInstance = nil
+		self:Hide()
 	end
 end
 
--- Return whether the tooltip is currently visible.
-function TooltipModule:IsVisible()
-	return self._isVisible
+function TooltipModule:_onMouseMoved(x, y)
+	if currentHoverInstance == self then
+		self:_updatePosition(x, y)
+	end
+end
+
+function TooltipModule:Show()
+	if self._frame.Visible then
+		return
+	end
+	local parent = self._options.parent or game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+	self._gui.Parent = parent
+	self._frame.Visible = true
+	self:_updatePosition(UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y)
+end
+
+function TooltipModule:Hide()
+	self._frame.Visible = false
+	self._gui.Parent = nil
+end
+
+function TooltipModule:Destroy()
+	self:Hide()
+	self._gui:Destroy()
+	for _, conn in ipairs(self._connections) do
+		conn:Disconnect()
+	end
 end
 
 return TooltipModule

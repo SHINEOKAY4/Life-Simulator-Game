@@ -38,6 +38,11 @@ local ChunkValue = Valuation.ChunkValue
 local RentPerPoint = Valuation.RentPerPoint
 local MinimumRent = Valuation.MinimumRent
 local DefaultTierId = Valuation.DefaultTierId
+local DiminishingReturnFactor = Valuation.DiminishingReturnFactor or 0.85
+local VarietyBonusPerCategory = Valuation.VarietyBonusPerCategory or 0.05
+local ThemeSynergyBonus = Valuation.ThemeSynergyBonus or 0.15
+local LuxuryThreshold = Valuation.LuxuryThreshold or 500
+local LuxuryBonusMultiplier = Valuation.LuxuryBonusMultiplier or 1.2
 
 local TenantValuation = {}
 
@@ -69,7 +74,7 @@ local function getLeaseTier(score: number): ScoreTier
 	return currentTier
 end
 
-local function accumulateTags(spec: { [string]: any }): number
+local function accumulateTags(spec: { [string]: any }, tagCounts: { [string]: number }): number
 	local tags = spec.Tags
 	if typeof(tags) ~= "table" then
 		return 0
@@ -81,6 +86,7 @@ local function accumulateTags(spec: { [string]: any }): number
 		if weight then
 			total += weight
 		end
+		tagCounts[tagName] = (tagCounts[tagName] or 0) + 1
 	end
 
 	return total
@@ -103,6 +109,9 @@ function TenantValuation.Evaluate(plotState: any): ValuationResult?
 	local decorScoreRaw = 0
 	local amenityDetails: { [string]: number } = {}
 	local amenityCounts: { [string]: number } = {}
+	local itemCountsById: { [string]: number } = {}
+	local tagCounts: { [string]: number } = {}
+	local totalDecorItems = 0
 
 	local placedObjects = save.PlacedObjects
 	if typeof(placedObjects) == "table" then
@@ -111,20 +120,41 @@ function TenantValuation.Evaluate(plotState: any): ValuationResult?
 			if itemId then
 				local spec = ItemFinder.FindItemById(itemId)
 				if spec then
+					-- Track item counts for diminishing returns
+					local currentItemCount = itemCountsById[itemId] or 0
+					itemCountsById[itemId] = currentItemCount + 1
+
+					-- Calculate diminishing return multiplier for this specific instance
+					-- 1st item: 1.0
+					-- 2nd item: 0.85
+					-- 3rd item: 0.7225
+					local diminishingMult = math.pow(DiminishingReturnFactor, currentItemCount)
+
 					local stationType = spec.StationType
 					if typeof(stationType) == "string" and stationType ~= "" then
 						local weight = AmenityWeights[stationType]
 						if weight then
 							local occupancy = normalizeOccupancy(spec)
+							-- Soft caps are now handled by diminishing returns per item ID + category variety bonus
+							-- But we keep soft cap logic for "bulk" spam of different items in same category if needed
+							-- For now, let's rely on diminishing returns per item ID primarily,
+							-- and maybe a lighter category soft cap if needed.
+							-- The original code had a hard multiplier step down.
+							-- Let's keep the original soft cap logic as a "Category Saturation" check on top of item diminishing returns.
+
 							local softCap = AmenitySoftCaps[stationType]
-							local currentCount = amenityCounts[stationType] or 0
-							local multiplier = 1
-							if softCap and currentCount >= softCap then
-								multiplier = ExcessAmenityMultiplier
+							local currentCategoryCount = amenityCounts[stationType] or 0
+							local categoryMult = 1
+							if softCap and currentCategoryCount >= softCap then
+								categoryMult = ExcessAmenityMultiplier
 							end
 
-							amenityCounts[stationType] = currentCount + occupancy
-							local contribution = weight * occupancy * multiplier
+							amenityCounts[stationType] = currentCategoryCount + occupancy
+
+							-- Combined multiplier: Item Diminishing * Category Saturation
+							local finalMult = diminishingMult * categoryMult
+
+							local contribution = weight * occupancy * finalMult
 							amenityScore += contribution
 							amenityDetails[stationType] = (amenityDetails[stationType] or 0) + contribution
 						end
@@ -134,15 +164,56 @@ function TenantValuation.Evaluate(plotState: any): ValuationResult?
 					if typeof(cost) ~= "number" or cost <= 0 then
 						cost = 0
 					end
-					costScore += cost * CostWeight
 
-					decorScoreRaw += accumulateTags(spec)
+					-- Luxury Bonus
+					local luxuryMult = 1
+					if cost >= LuxuryThreshold then
+						luxuryMult = LuxuryBonusMultiplier
+					end
+
+					costScore += (cost * CostWeight * luxuryMult)
+
+					local decorValue = accumulateTags(spec, tagCounts)
+					decorScoreRaw += (decorValue * diminishingMult)
+					if decorValue > 0 then
+						totalDecorItems += 1
+					end
 				end
 			end
 		end
 	end
 
+	-- Variety Bonus
+	local uniqueCategories = 0
+	for _, count in pairs(amenityCounts) do
+		if count > 0 then
+			uniqueCategories += 1
+		end
+	end
+	local varietyMultiplier = 1 + (uniqueCategories * VarietyBonusPerCategory)
+
+	-- Theme Synergy Bonus
+	local synergyMultiplier = 1
+	if totalDecorItems > 0 then
+		local maxTagCount = 0
+		for _, count in pairs(tagCounts) do
+			if count > maxTagCount then
+				maxTagCount = count
+			end
+		end
+
+		local synergyRatio = maxTagCount / totalDecorItems
+		if synergyRatio >= 0.5 then
+			synergyMultiplier = 1 + ThemeSynergyBonus
+		end
+	end
+
 	local decorScore = decorScoreRaw * DecorWeight
+
+	-- Apply global multipliers to relevant sections
+	amenityScore *= varietyMultiplier
+	decorScore *= synergyMultiplier
+
 	local totalScore = basePlotScore + amenityScore + costScore + decorScore
 
 	local tier = getLeaseTier(totalScore)

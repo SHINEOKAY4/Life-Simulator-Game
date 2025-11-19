@@ -6,12 +6,13 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ResidentAutonomyService = require(ServerScriptService.Server.Services.ResidentAutonomyService)
-local FallbackActions = require(ServerScriptService.Server.Services.ResidentAutonomyService.FallbackActions)
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local TraitUtils = require(ReplicatedStorage.Shared.Utilities.TraitUtils)
 local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
+local TenantService = require(ServerScriptService.Server.Services.TenantService)
+local TenantTraits = require(ReplicatedStorage.Shared.Definitions.TenantTraits)
 
 type ResidentState = any
 
@@ -107,8 +108,7 @@ function ResidentNeedService.Start()
 		for _, entry in ipairs(Residents) do
 			local residentState = entry.State
 			if residentState ~= nil then
-				ResidentNeedService.Decay(residentState, gameHours)
-				FallbackActions.TriggerImmediateBladderEmergency(residentState)
+				ResidentNeedService.Decay(entry.Player, residentState, gameHours)
 				ResidentAutonomyService.TrySatisfyNeedsForResident(
 					entry.Player,
 					entry.ResidentName,
@@ -129,7 +129,7 @@ function ResidentNeedService.Stop()
 	WorldUpdate.Unsubscribe(SubscriberId)
 end
 
-function ResidentNeedService.Decay(resident: ResidentState, gameHours: number)
+function ResidentNeedService.Decay(player: Player, resident: ResidentState, gameHours: number)
 	if gameHours <= 0 then
 		return
 	end
@@ -140,6 +140,26 @@ function ResidentNeedService.Decay(resident: ResidentState, gameHours: number)
 	if globalPaused then
 		return
 	end
+
+	-- Resolve tenant traits for decay multipliers
+	local tenantMultipliers = {}
+	if resident.Save and resident.Save.TenantId then
+		local leases = TenantService.GetActiveLeases(player)
+		if leases and leases[resident.Save.TenantId] then
+			local lease = leases[resident.Save.TenantId]
+			if lease.Traits then
+				for _, traitId in ipairs(lease.Traits) do
+					local trait = TenantTraits.GetTrait(traitId)
+					if trait and trait.Effects and trait.Effects.NeedDecayMultipliers then
+						for need, mult in pairs(trait.Effects.NeedDecayMultipliers) do
+							tenantMultipliers[need] = (tenantMultipliers[need] or 1) * mult
+						end
+					end
+				end
+			end
+		end
+	end
+
 	local hasNeedPauseCheck = resident and typeof(resident.IsNeedPaused) == "function"
 	for needName, definition in pairs(NeedConfig.Needs) do
 		if hasNeedPauseCheck and resident:IsNeedPaused(needName) then
@@ -148,6 +168,11 @@ function ResidentNeedService.Decay(resident: ResidentState, gameHours: number)
 		local value = resident:GetNeed(needName)
 		local traits = if resident.GetTraits then resident:GetTraits() else nil
 		local decayMultiplier = TraitUtils.GetNeedDecayMultiplier(traits, needName)
+
+		if tenantMultipliers[needName] then
+			decayMultiplier *= tenantMultipliers[needName]
+		end
+
 		local decayRate = definition.DecayPerHour * decayMultiplier
 		local newValue = math.clamp(value - decayRate * gameHours, definition.Min, definition.Max)
 		if newValue ~= value then

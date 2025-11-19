@@ -9,11 +9,14 @@ local Workspace = game:GetService("Workspace")
 
 local TenantConfig = require(ReplicatedStorage.Shared.Configurations.TenantConfig)
 local TenantDefinitions = require(ReplicatedStorage.Shared.Definitions.TenantDefinitions)
+local TenantTraits = require(ReplicatedStorage.Shared.Definitions.TenantTraits)
 local MailboxPackets = require(ReplicatedStorage.Network.MailboxPackets)
+local TenantPackets = require(ReplicatedStorage.Network.TenantPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
+local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 local TenantValuation = require(ServerScriptService.Server.Modules.TenantValuation)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 
@@ -24,7 +27,7 @@ local OffersConfig = TenantConfig.Offers
 local RentConfig = TenantConfig.Rent
 
 local UPDATE_TASK_NAME = "TenantService"
-local UPDATE_INTERVAL = 2
+local UPDATE_INTERVAL = 1
 local INFINITE_LEASE_END = math.huge
 
 local rng = Random.new()
@@ -40,6 +43,8 @@ export type TenantOffer = {
 	CreatedUnix: number,
 	ExpiresUnix: number,
 	Score: number,
+	RentBoostPercent: number?,
+	Traits: { string }?,
 }
 
 export type TenantLease = {
@@ -52,6 +57,9 @@ export type TenantLease = {
 	MissedPayments: number,
 	DepositHeld: number,
 	StartedUnix: number,
+	AccruedRemainder: number?,
+	RentBoostPercent: number?,
+	Traits: { string }?,
 }
 
 type TenantStateSave = {
@@ -71,6 +79,7 @@ type RuntimeState = {
 	Save: TenantStateSave,
 	CurrencyState: { [string]: number }?,
 	CachedValuation: ValuationResult?,
+	LastPropertyValue: number,
 	NextValuationUnix: number,
 	NextOfferUnix: number,
 	MailboxOwnedPlotConn: RBXScriptConnection?,
@@ -81,7 +90,10 @@ local RuntimeByUserId: { [number]: RuntimeState } = {}
 
 local RESIDENTS_FOLDER_NAME = "Residents"
 local MAILBOX_ATTRIBUTE_NAME = "MailboxBalance"
+local PROPERTY_VALUE_ATTRIBUTE_NAME = "PropertyValue"
 local MAX_MAILBOX_BALANCE = 4294967295
+local MAX_PROPERTY_VALUE = MAX_MAILBOX_BALANCE
+local INCOME_RATE_ATTRIBUTE_NAME = "TenantIncomePerSecond"
 
 local function clampMailboxAmount(amount: number): number
 	if amount ~= amount then
@@ -141,6 +153,49 @@ local function applyMailboxAttribute(player: Player, balance: number)
 	end
 end
 
+local function clampPropertyValue(value: number): number
+	if value ~= value then
+		return 0
+	end
+	local rounded = math.floor(value + 0.5)
+	if rounded < 0 then
+		return 0
+	elseif rounded > MAX_PROPERTY_VALUE then
+		return MAX_PROPERTY_VALUE
+	end
+	return rounded
+end
+
+local function applyPropertyValueAttribute(player: Player, value: number)
+	local folder = ensureResidentsFolder(player)
+	if folder then
+		folder:SetAttribute(PROPERTY_VALUE_ATTRIBUTE_NAME, value)
+	end
+end
+
+local function clearPropertyValueAttribute(player: Player)
+	local folder = findResidentsFolder(player)
+	if folder then
+		folder:SetAttribute(PROPERTY_VALUE_ATTRIBUTE_NAME, nil)
+	end
+end
+
+local function broadcastPropertyValue(runtime: RuntimeState, scoreValue: any?)
+	local score = 0
+	if typeof(scoreValue) == "number" then
+		score = scoreValue
+	else
+		local lastKnownScore = runtime.Save.LastKnownScore
+		if typeof(lastKnownScore) == "number" then
+			score = lastKnownScore
+		end
+	end
+
+	local propertyValue = clampPropertyValue(score)
+	runtime.LastPropertyValue = propertyValue
+	applyPropertyValueAttribute(runtime.Player, propertyValue)
+end
+
 local function broadcastMailboxBalance(runtime: RuntimeState)
 	local rawValue = runtime.Save.MailboxBalance
 	local numeric = if typeof(rawValue) == "number" then rawValue else 0
@@ -152,10 +207,59 @@ local function broadcastMailboxBalance(runtime: RuntimeState)
 	})
 end
 
+local function getLeaseIncomePerSecond(_runtime: RuntimeState, lease: TenantLease): number
+	local interval = lease.RentIntervalSeconds
+	if typeof(interval) ~= "number" or interval <= 0 then
+		return 0
+	end
+
+	-- Use fixed rent from lease contract
+	local rent = lease.RentPerInterval
+	if typeof(rent) ~= "number" or rent <= 0 then
+		return 0
+	end
+
+	return rent / interval
+end
+
+local function updateIncomeRateAttribute(runtime: RuntimeState)
+	local leases = runtime.Save.ActiveLeases
+	local totalRate = 0
+	if typeof(leases) == "table" then
+		for _, lease in pairs(leases) do
+			totalRate += getLeaseIncomePerSecond(runtime, lease)
+		end
+	end
+	if totalRate ~= totalRate or totalRate <= 0 then
+		totalRate = 0
+	end
+	runtime.Player:SetAttribute(INCOME_RATE_ATTRIBUTE_NAME, totalRate)
+end
+
+local function addMailboxIncome(runtime: RuntimeState, amount: number)
+	if amount <= 0 then
+		return
+	end
+	local existing = runtime.Save.MailboxBalance
+	local currentBalance = if typeof(existing) == "number" then existing else 0
+	local updatedBalance = clampMailboxAmount(currentBalance + amount)
+	if updatedBalance == currentBalance then
+		return
+	end
+	runtime.Save.MailboxBalance = updatedBalance
+	runtime.Save.OutstandingRent = 0
+	broadcastMailboxBalance(runtime)
+end
+
 local function clearMailboxAttribute(player: Player)
 	local folder = findResidentsFolder(player)
 	if folder then
 		folder:SetAttribute(MAILBOX_ATTRIBUTE_NAME, nil)
+	end
+	clearPropertyValueAttribute(player)
+	local runtime = RuntimeByUserId[player.UserId]
+	if runtime then
+		runtime.LastPropertyValue = 0
 	end
 end
 
@@ -214,6 +318,7 @@ local function sanitizeLeaseEntry(lease: TenantLease, now: number)
 	lease.MissedPayments = lease.MissedPayments or 0
 	lease.DepositHeld = lease.DepositHeld or 0
 	lease.StartedUnix = lease.StartedUnix or now
+	lease.AccruedRemainder = lease.AccruedRemainder or 0
 end
 
 local function ensureActiveLeases(save: TenantStateSave, now: number): { [string]: TenantLease }
@@ -302,6 +407,7 @@ local function hydrateRuntime(player: Player): RuntimeState?
 		Save = tenantSave,
 		CurrencyState = currencyState,
 		CachedValuation = nil,
+		LastPropertyValue = 0,
 		NextValuationUnix = 0,
 		NextOfferUnix = now + OffersConfig.MinIntervalSeconds,
 		MailboxOwnedPlotConn = nil,
@@ -313,14 +419,18 @@ local function hydrateRuntime(player: Player): RuntimeState?
 			local active = RuntimeByUserId[player.UserId]
 			if active == runtime then
 				broadcastMailboxBalance(runtime)
+				broadcastPropertyValue(runtime)
 			end
 		end)
 	end)
+	updateIncomeRateAttribute(runtime)
+	broadcastPropertyValue(runtime)
 
 	task.defer(function()
 		local active = RuntimeByUserId[player.UserId]
 		if active == runtime then
 			broadcastMailboxBalance(runtime)
+			broadcastPropertyValue(runtime)
 		end
 	end)
 	return runtime
@@ -344,6 +454,7 @@ local function concludeLease(runtime: RuntimeState, tenantId: string, reason: st
 		end
 	end
 
+	updateIncomeRateAttribute(runtime)
 	scheduleNextOffer(runtime)
 end
 
@@ -356,6 +467,17 @@ local function composeOffer(runtime: RuntimeState, valuation: ValuationResult, n
 	end
 	baseRent = math.max(ValuationConfig.MinimumRent, math.floor(baseRent + 0.5))
 	local rentMultiplier = 1 + (tierDefinition.RentBoostPercent or 0)
+
+	-- Roll traits
+	local traitCount = rng:NextInteger(1, 4)
+	local traits = TenantTraits.RollTraits(rng, traitCount)
+	for _, traitId in ipairs(traits) do
+		local trait = TenantTraits.GetTrait(traitId)
+		if trait and trait.Effects and trait.Effects.RentMultiplier then
+			rentMultiplier *= trait.Effects.RentMultiplier
+		end
+	end
+
 	local rent = math.max(ValuationConfig.MinimumRent, math.floor(baseRent * rentMultiplier + 0.5))
 
 	local offerId = string.format("%d-%d", runtime.Player.UserId, (runtime.Save.OfferSequence or 0) + 1)
@@ -368,13 +490,15 @@ local function composeOffer(runtime: RuntimeState, valuation: ValuationResult, n
 		LeaseSeconds = 0,
 		RentIntervalSeconds = RentConfig.IntervalSeconds,
 		TenantName = tenantName,
+		RentBoostPercent = tierDefinition.RentBoostPercent or 0,
 		CreatedUnix = now,
 		ExpiresUnix = now + OffersConfig.OfferLifetimeSeconds,
 		Score = valuation.Score,
+		Traits = traits,
 	}
 end
 
-local function startLease(runtime: RuntimeState, offer: TenantOffer, now: number)
+local function startLease(runtime: RuntimeState, offer: TenantOffer, now: number): string
 	local leases = getActiveLeases(runtime)
 	local uniqueId = offer.OfferId
 	local suffix = 1
@@ -393,10 +517,15 @@ local function startLease(runtime: RuntimeState, offer: TenantOffer, now: number
 		MissedPayments = 0,
 		DepositHeld = offer.Deposit,
 		StartedUnix = now,
+		AccruedRemainder = 0,
+		RentBoostPercent = offer.RentBoostPercent or 0,
+		Traits = offer.Traits,
 	}
 
 	leases[uniqueId] = lease
 	scheduleNextOffer(runtime, now + OffersConfig.CooldownSeconds)
+	updateIncomeRateAttribute(runtime)
+	return uniqueId
 end
 
 local function settleOutstanding(runtime: RuntimeState)
@@ -405,28 +534,39 @@ local function settleOutstanding(runtime: RuntimeState)
 	end
 end
 
-local function serviceLeaseEntry(runtime: RuntimeState, _tenantId: string, lease: TenantLease, now: number)
-	local nextDue = lease.NextDueUnix
-	if nextDue > now then
+local function serviceLeaseEntry(runtime: RuntimeState, lease: TenantLease, now: number, dt: number)
+	if dt <= 0 then
 		return
 	end
-	local rentAmount = lease.RentPerInterval
-	if rentAmount <= 0 then
+	local rate = getLeaseIncomePerSecond(runtime, lease)
+	if rate <= 0 then
+		lease.AccruedRemainder = 0
 		lease.NextDueUnix = now + lease.RentIntervalSeconds
 		return
 	end
 
-	local existing = runtime.Save.MailboxBalance
-	local currentBalance = if typeof(existing) == "number" then existing else 0
-	local updatedBalance = clampMailboxAmount(currentBalance + rentAmount)
-	runtime.Save.MailboxBalance = updatedBalance
+	local accumulated = (lease.AccruedRemainder or 0) + rate * dt
+	if accumulated <= 0 then
+		lease.AccruedRemainder = 0
+		lease.NextDueUnix = now + lease.RentIntervalSeconds
+		lease.MissedPayments = 0
+		return
+	end
+	if accumulated < 0 then
+		accumulated = 0
+	end
+
+	local payout = math.floor(accumulated)
+	lease.AccruedRemainder = accumulated - payout
 	lease.NextDueUnix = now + lease.RentIntervalSeconds
 	lease.MissedPayments = 0
-	runtime.Save.OutstandingRent = 0
-	broadcastMailboxBalance(runtime)
+
+	if payout > 0 then
+		addMailboxIncome(runtime, payout)
+	end
 end
 
-local function serviceLease(runtime: RuntimeState, now: number)
+local function serviceLease(runtime: RuntimeState, now: number, dt: number)
 	local leases = runtime.Save.ActiveLeases
 	if typeof(leases) ~= "table" then
 		return
@@ -442,7 +582,7 @@ local function serviceLease(runtime: RuntimeState, now: number)
 		if lease.LeaseEndUnix <= now then
 			concludeLease(runtime, tenantId, "Complete")
 		else
-			serviceLeaseEntry(runtime, tenantId, lease, now)
+			serviceLeaseEntry(runtime, lease, now, dt)
 		end
 	end
 end
@@ -502,6 +642,7 @@ local function refreshValuation(runtime: RuntimeState, now: number)
 
 	runtime.CachedValuation = valuation
 	runtime.Save.LastKnownScore = valuation.Score
+	broadcastPropertyValue(runtime, valuation.Score)
 	runtime.NextValuationUnix = now + ValuationConfig.RefreshIntervalSeconds
 end
 
@@ -542,7 +683,7 @@ local function tryGenerateOffer(runtime: RuntimeState, now: number)
 	runtime.NextOfferUnix = now + OffersConfig.CooldownSeconds
 end
 
-local function stepTenants(_dt: number)
+local function stepTenants(dt: number)
 	local now = serverNow()
 	for userId, runtime in pairs(RuntimeByUserId) do
 		if not runtime.Player.Parent then
@@ -551,7 +692,7 @@ local function stepTenants(_dt: number)
 			refreshValuation(runtime, now)
 			tryExpireOffer(runtime, now)
 			tryGenerateOffer(runtime, now)
-			serviceLease(runtime, now)
+			serviceLease(runtime, now, dt)
 		end
 	end
 end
@@ -667,7 +808,25 @@ function TenantService.GenerateProspectOffer(player: Player): TenantOffer?
 	return offer
 end
 
-function TenantService.BeginLeaseFromOffer(player: Player, offer: TenantOffer): (boolean, string?)
+function TenantService.BeginLeaseFromOffer(player: Player, offer: TenantOffer): (boolean, string?, string?)
+	local runtime: RuntimeState? = RuntimeByUserId[player.UserId]
+	if not runtime then
+		runtime = hydrateRuntime(player)
+	end
+	if not runtime then
+		return false, "Tenant data unavailable.", nil
+	end
+	local resolvedRuntime: RuntimeState = runtime
+	local tenantId = startLease(resolvedRuntime, offer, serverNow())
+	resolvedRuntime.Save.LastOfferUnix = serverNow()
+	return true, nil, tenantId
+end
+
+function TenantService.EvictTenant(player: Player, tenantId: string): (boolean, string?)
+	if type(tenantId) ~= "string" or tenantId == "" then
+		return false, "Invalid tenant id."
+	end
+
 	local runtime: RuntimeState? = RuntimeByUserId[player.UserId]
 	if not runtime then
 		runtime = hydrateRuntime(player)
@@ -675,9 +834,23 @@ function TenantService.BeginLeaseFromOffer(player: Player, offer: TenantOffer): 
 	if not runtime then
 		return false, "Tenant data unavailable."
 	end
-	local resolvedRuntime: RuntimeState = runtime
-	startLease(resolvedRuntime, offer, serverNow())
-	resolvedRuntime.Save.LastOfferUnix = serverNow()
+
+	local leases = getActiveLeases(runtime)
+	local lease = leases[tenantId]
+	if not lease then
+		return false, "Tenant not found."
+	end
+
+	local residentName = ResidentService.GetResidentNameByTenantId(player, tenantId)
+	if residentName then
+		local deleted, message = ResidentService.DeleteResident(player, residentName)
+		if not deleted then
+			return false, message or "Resident could not be removed."
+		end
+	end
+
+	ResidentService.ClearTenantLink(player, tenantId)
+	concludeLease(runtime, tenantId, "Evicted")
 	return true, nil
 end
 
@@ -697,6 +870,7 @@ local function onPlayerRemoving(player: Player)
 		runtime.MailboxOwnedPlotConn = nil
 	end
 	RuntimeByUserId[player.UserId] = nil
+	player:SetAttribute(INCOME_RATE_ATTRIBUTE_NAME, 0)
 	clearMailboxAttribute(player)
 end
 
@@ -737,6 +911,7 @@ function TenantService.Init()
 			local active = RuntimeByUserId[player.UserId]
 			if active == resolvedRuntime then
 				broadcastMailboxBalance(resolvedRuntime)
+				broadcastPropertyValue(resolvedRuntime)
 			end
 		end)
 	end)
@@ -744,6 +919,11 @@ function TenantService.Init()
 	PlotService.PlotUnclaimed:Connect(function(player: Player)
 		clearMailboxAttribute(player)
 	end)
+
+	TenantPackets.EvictTenantRequest.OnServerInvoke = function(player: Player, tenantId: string)
+		local success, message = TenantService.EvictTenant(player, tenantId)
+		return success, message or ""
+	end
 
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)

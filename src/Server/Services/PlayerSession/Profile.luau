@@ -7,7 +7,7 @@ local Profile = {
 	HouseholdState = {
 		ResidentsCount = 0,
 		MaxResidents = 4, -- Default max residents per player; can be increased via in-game purchases later
-		Residents = {}, -- {name, age, gender, traits, needs}
+		Residents = {}, -- {name, traits, needs}
 	},
 	CurrencyState = {
 		-- CurrencyName: Balance
@@ -58,6 +58,11 @@ local Profile = {
 		OutageActive = false,
 	},
 	InventoryState = {},
+	TutorialState = {
+		IsCompleted = false,
+		Step = 0,
+		HasReceivedStartingCash = false,
+	},
 }
 
 return Profile

@@ -8,11 +8,8 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 
 export type ResidentData = {
 	Name: string,
-	Age: number,
-	Gender: string,
 	Needs: { [string]: number },
 	Traits: { string },
-	Statistics: { [string]: number }?,
 }
 
 local ResidentPlacer = {}
@@ -107,20 +104,20 @@ local function ensureResidentModel(residentState: any): Model?
 		warn("ResidentPlacer: missing Residents folder in Assets")
 		return existing
 	end
-	local gender = residentState.Save.Gender
+
 	local template: Model? = nil
-	if typeof(gender) == "string" then
-		local found = residentsFolder:FindFirstChild(gender)
-		if found and found:IsA("Model") then
-			template = found
+	local candidates = {}
+	for _, child in ipairs(residentsFolder:GetChildren()) do
+		if child:IsA("Model") then
+			table.insert(candidates, child)
 		end
 	end
-	if not template then
-		local fallback = residentsFolder:FindFirstChildWhichIsA("Model")
-		if fallback then
-			template = fallback
-		end
+
+	if #candidates > 0 then
+		local rng = Random.new()
+		template = candidates[rng:NextInteger(1, #candidates)]
 	end
+
 	if not template then
 		warn("ResidentPlacer: missing resident template for", residentState.Save and residentState.Save.Name)
 		return existing
@@ -146,7 +143,7 @@ local function loadResidentAppearance(residentState: any): Model?
 	residentState:SyncCurrentActionAttribute()
 	return model
 end
-function ResidentPlacer.Spawn(player, residentState)
+function ResidentPlacer.Spawn(player, residentState, spawnOverride: CFrame?)
 	local plotIndex = player:GetAttribute("OwnedPlotIndex") :: number
 	if not plotIndex then
 		warn("Player does not have a OwnedPlotIndex attribute:", player.Name)
@@ -160,7 +157,7 @@ function ResidentPlacer.Spawn(player, residentState)
 	end
 
 	local plotResidentsFolder = ensurePlotResidentsFolder(plotModel)
-	local spawnCFrame = resolveSpawnCFrame(plotModel)
+	local spawnCFrame = spawnOverride or resolveSpawnCFrame(plotModel)
 
 	local loadedResidentModel = loadResidentAppearance(residentState)
 	if not loadedResidentModel then

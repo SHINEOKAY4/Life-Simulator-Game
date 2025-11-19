@@ -14,7 +14,9 @@ TenantPackets.ProspectSpawn = Packet("TenantProspectSpawn", {
 	RentPerInterval = Packet.NumberU32,
 	RentIntervalSeconds = Packet.NumberU32,
 	Deposit = Packet.NumberU32,
+	RentBoostPercent = Packet.NumberF32,
 	LeaseSeconds = Packet.NumberU32,
+	Traits = { Packet.String },
 })
 
 TenantPackets.ProspectRemoved = Packet("TenantProspectRemoved", {
@@ -31,10 +33,15 @@ TenantPackets.ProspectPrompt = Packet("TenantProspectPrompt", {
 	RentPerInterval = Packet.NumberU32,
 	RentIntervalSeconds = Packet.NumberU32,
 	Deposit = Packet.NumberU32,
+	RentBoostPercent = Packet.NumberF32,
 	LeaseSeconds = Packet.NumberU32,
+	Traits = { Packet.String },
 })
 
 TenantPackets.ProspectDecision =
 	Packet("TenantProspectDecision", Packet.String, Packet.String):Response(Packet.Boolean8, Packet.StringLong)
+
+TenantPackets.EvictTenantRequest =
+	Packet("TenantEvictRequest", Packet.String):Response(Packet.Boolean8, Packet.StringLong)
 
 return TenantPackets

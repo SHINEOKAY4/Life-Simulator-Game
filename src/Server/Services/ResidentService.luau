@@ -17,6 +17,8 @@ type ResidentData = ResidentState.ResidentData
 local ResidentService = {}
 local PlayersResidents: { [number]: any } = {} -- [userId] = {residentData}
 local NameToIndexMap: { [number]: { [string]: number } } = {} -- [userId][name] = index
+local TenantToResidentMap: { [number]: { [string]: string } } = {} -- [userId][tenantId] = residentName
+local ResidentToTenantMap: { [number]: { [string]: string } } = {} -- [userId][residentName] = tenantId
 
 ResidentService.PlayerResidentsChanged = GoodSignal.new()
 
@@ -24,18 +26,60 @@ local Config = {
 	MaxResidentsPerHousehold = 8,
 }
 
-local DEFAULT_RESIDENT_GENDER = "Female"
-local DEFAULT_RESIDENT_AGE = 2
-
-local function sanitizeGender(_rawValue: any): string
-	return DEFAULT_RESIDENT_GENDER
+local function ensureTenantMaps(userId: number)
+	if not TenantToResidentMap[userId] then
+		TenantToResidentMap[userId] = {}
+	end
+	if not ResidentToTenantMap[userId] then
+		ResidentToTenantMap[userId] = {}
+	end
 end
 
-local function resolveAgeNumeric(rawValue: any): number
-	if typeof(rawValue) == "number" then
-		return math.clamp(math.floor(rawValue), 0, DEFAULT_RESIDENT_AGE)
+local function setTenantLinkInternal(userId: number, residentName: string, tenantId: string?)
+	ensureTenantMaps(userId)
+	local tenantMap = TenantToResidentMap[userId]
+	local residentMap = ResidentToTenantMap[userId]
+
+	local previousTenant = residentMap[residentName]
+	if previousTenant and tenantMap then
+		tenantMap[previousTenant] = nil
 	end
-	return DEFAULT_RESIDENT_AGE
+	residentMap[residentName] = nil
+
+	if tenantId and tenantId ~= "" then
+		local previousResident = tenantMap[tenantId]
+		if previousResident then
+			residentMap[previousResident] = nil
+		end
+		tenantMap[tenantId] = residentName
+		residentMap[residentName] = tenantId
+	end
+end
+
+local function clearTenantLinkByTenant(userId: number, tenantId: string)
+	local tenantMap = TenantToResidentMap[userId]
+	local residentMap = ResidentToTenantMap[userId]
+	if not tenantMap then
+		return
+	end
+	local residentName = tenantMap[tenantId]
+	tenantMap[tenantId] = nil
+	if residentName and residentMap then
+		residentMap[residentName] = nil
+	end
+end
+
+local function clearTenantLinkByResident(userId: number, residentName: string)
+	local residentMap = ResidentToTenantMap[userId]
+	local tenantMap = TenantToResidentMap[userId]
+	if not residentMap then
+		return
+	end
+	local tenantId = residentMap[residentName]
+	residentMap[residentName] = nil
+	if tenantId and tenantMap then
+		tenantMap[tenantId] = nil
+	end
 end
 
 local function stripAppearance(residentSave: any)
@@ -43,8 +87,9 @@ local function stripAppearance(residentSave: any)
 		return
 	end
 	residentSave.Appearance = nil
-	residentSave.Age = resolveAgeNumeric(residentSave.Age)
-	residentSave.Gender = sanitizeGender(residentSave.Gender)
+	residentSave.Age = nil
+	residentSave.Gender = nil
+	residentSave.Statistics = nil
 end
 
 local function stripCareerData(residentSave: any)
@@ -68,6 +113,33 @@ local function cloneTable(value: any): any
 	return copy
 end
 
+local function resolveTenantTransmissionId(rawValue: any): string
+	if type(rawValue) == "string" then
+		return rawValue
+	end
+	return ""
+end
+
+local function cloneResidentForNetwork(residentData: any): any?
+	if typeof(residentData) ~= "table" then
+		return nil
+	end
+	local copy = cloneTable(residentData)
+	copy.TenantId = resolveTenantTransmissionId(copy.TenantId)
+	return copy
+end
+
+local function buildNetworkResidentList(residents: { any }): { any }
+	local payload = table.create(#residents)
+	for index, resident in ipairs(residents) do
+		local clone = cloneResidentForNetwork(resident)
+		if clone then
+			payload[index] = clone
+		end
+	end
+	return payload
+end
+
 local function ensureHouseholdState(player: Player, data: any?)
 	if data == nil then
 		warn(string.format("[ResidentService] Household data unavailable for %s", player.Name))
@@ -79,62 +151,6 @@ local function ensureHouseholdState(player: Player, data: any?)
 	data.MaxResidents = data.MaxResidents or Config.MaxResidentsPerHousehold
 
 	return data
-end
-
-local function buildResidentNameSet(residents: { any }): { [string]: boolean }
-	local used = {} :: { [string]: boolean }
-	for _, resident in ipairs(residents) do
-		if typeof(resident) == "table" then
-			local residentName = resident.Name
-			if type(residentName) == "string" and residentName ~= "" then
-				used[string.lower(residentName)] = true
-			end
-		end
-	end
-	return used
-end
-
-local function generateDefaultResidentName(residents: { any }): string
-	local used = buildResidentNameSet(residents)
-	local homelessKey = string.lower("Homeless Resident")
-	if not used[homelessKey] then
-		return "Homeless Resident"
-	end
-	local index = 1
-	while true do
-		local candidate = if index == 1 then "Resident" else string.format("Resident %d", index)
-		if not used[string.lower(candidate)] then
-			return candidate
-		end
-		index += 1
-	end
-end
-
-local function createDefaultResidentTemplate(existingResidents: { any }): any
-	local newResident = {
-		Name = generateDefaultResidentName(existingResidents),
-		Age = DEFAULT_RESIDENT_AGE,
-		Gender = DEFAULT_RESIDENT_GENDER,
-		Traits = { "Balanced" },
-		Statistics = {
-			Intelligence = 1,
-			Discipline = 1,
-			Creativity = 1,
-			Fitness = 1,
-		},
-		Needs = {
-			Hunger = 100,
-			Bladder = 100,
-			Energy = 100,
-			Hygiene = 100,
-			Fun = 100,
-			Social = 100,
-		},
-	}
-
-	stripCareerData(newResident)
-	stripAppearance(newResident)
-	return newResident
 end
 
 local function prepareResidentForRemoval(residentState, timeoutSeconds: number?): (boolean, string?)
@@ -180,35 +196,68 @@ function ResidentService.Load(player: Player)
 	local userId = player.UserId
 
 	data.Residents = data.Residents or {}
-	if #data.Residents == 0 then
-		local defaultResident = createDefaultResidentTemplate(data.Residents)
-		data.Residents[1] = defaultResident
-		data.ResidentsCount = 1
-	else
-		data.ResidentsCount = math.max(#data.Residents, 0)
-	end
+	data.ResidentsCount = math.max(#data.Residents, 0)
 
 	-- Build a keyed map and index map for easier access
 	PlayersResidents[userId] = {}
 	NameToIndexMap[userId] = {}
 
+	local incomingResidents = data.Residents or {}
 	local filteredResidents = {}
 	local residentsMap = PlayersResidents[userId]
 	local indexMap = NameToIndexMap[userId]
+	local seenNames: { [string]: boolean } = {}
 
-	for _, resident in ipairs(data.Residents) do
-		if typeof(resident) == "table" and type(resident.Name) == "string" then
-			stripCareerData(resident)
-			stripAppearance(resident)
-			local count = #filteredResidents + 1
-			filteredResidents[count] = resident
-			local residentName = resident.Name
-			local residentState = ResidentState.new(resident)
-			residentsMap[residentName] = residentState
-			indexMap[residentName] = count
-			ResidentPlacer.Spawn(player, residentState)
+	local function ingestResident(entry: any, sourceKey: any)
+		if typeof(entry) ~= "table" then
+			warn("[ResidentService] Skipping non-table resident entry during load")
+			return
+		end
+
+		local residentName = entry.Name
+		if type(residentName) ~= "string" or residentName == "" then
+			if type(sourceKey) == "string" and sourceKey ~= "" then
+				residentName = sourceKey
+				entry.Name = sourceKey
+			else
+				warn("[ResidentService] Skipping resident with missing name during load")
+				return
+			end
+		end
+
+		if seenNames[residentName] then
+			return
+		end
+		seenNames[residentName] = true
+
+		stripCareerData(entry)
+		stripAppearance(entry)
+
+		local newIndex = #filteredResidents + 1
+		filteredResidents[newIndex] = entry
+
+		local residentState = ResidentState.new(entry)
+		residentsMap[residentName] = residentState
+		indexMap[residentName] = newIndex
+
+		local tenantId = if type(entry.TenantId) == "string" then entry.TenantId else nil
+		if tenantId then
+			setTenantLinkInternal(userId, residentName, tenantId)
 		else
-			warn("[ResidentService] Skipping invalid resident entry during load")
+			setTenantLinkInternal(userId, residentName, nil)
+		end
+
+		ResidentPlacer.Spawn(player, residentState)
+	end
+
+	local arrayLength = #incomingResidents
+	for idx = 1, arrayLength do
+		ingestResident(incomingResidents[idx], idx)
+	end
+
+	for key, resident in pairs(incomingResidents) do
+		if typeof(key) ~= "number" or key < 1 or key > arrayLength then
+			ingestResident(resident, key)
 		end
 	end
 
@@ -217,14 +266,14 @@ function ResidentService.Load(player: Player)
 
 	local payload = {
 		UserId = userId,
-		Residents = filteredResidents,
+		Residents = buildNetworkResidentList(filteredResidents),
 	}
 
 	ResidentService.PlayerResidentsChanged:Fire(player)
 	ResidentsPackets.PlayersResidentsSync:Fire(payload)
 end
 
-function ResidentService.CreateResident(player: Player, residentData: ResidentData)
+function ResidentService.CreateResident(player: Player, residentData: ResidentData, spawnOverride: CFrame?)
 	local data = ensureHouseholdState(player, PlayerSession.GetDataAwait(player, "HouseholdState"))
 	if not data then
 		return false, "Household data not available. Please try again."
@@ -258,15 +307,7 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 
 	local newResidentData = {
 		Name = residentData.Name,
-		Age = resolveAgeNumeric(residentData.Age),
-		Gender = sanitizeGender(residentData.Gender),
 		Traits = residentData.Traits or { "Balanced" },
-		Statistics = {
-			Intelligence = 1,
-			Discipline = 1,
-			Creativity = 1,
-			Fitness = 1,
-		},
 		Needs = {
 			Hunger = 100,
 			Bladder = 100,
@@ -280,10 +321,11 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 	stripCareerData(newResidentData)
 	stripAppearance(newResidentData)
 
+	local newResidentClone = cloneResidentForNetwork(newResidentData)
 	local payload = {
 		UserId = player.UserId,
 		ResidentName = newResidentData.Name,
-		ResidentDelta = { newResidentData },
+		ResidentDelta = newResidentClone and { newResidentClone } or {},
 	}
 	-- Add the new resident
 	local newIndex = #data.Residents + 1
@@ -294,7 +336,8 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 	PlayersResidents[player.UserId][residentName] = residentState
 	NameToIndexMap[player.UserId][residentName] = newIndex
 
-	ResidentPlacer.Spawn(player, residentState)
+	ResidentPlacer.Spawn(player, residentState, spawnOverride)
+	setTenantLinkInternal(player.UserId, residentName, nil)
 	ResidentService.PlayerResidentsChanged:Fire(player)
 	ResidentsPackets.PlayerResidentDelta:Fire(payload)
 	return true, "Resident created successfully."
@@ -350,6 +393,7 @@ function ResidentService.DeleteResident(player: Player, residentName: string)
 
 	ResidentPlacer.Despawn(resident)
 	resident:Destroy()
+	clearTenantLinkByResident(userId, residentName)
 	ResidentService.PlayerResidentsChanged:Fire(player)
 	ResidentsPackets.PlayerResidentDelta:Fire(payload)
 	return true, "Resident deleted successfully."
@@ -363,6 +407,8 @@ function ResidentService.Unload(player: Player)
 	end
 	PlayersResidents[userId] = nil
 	NameToIndexMap[userId] = nil
+	TenantToResidentMap[userId] = nil
+	ResidentToTenantMap[userId] = nil
 end
 
 function ResidentService.GetResidents(player: Player?)
@@ -397,11 +443,72 @@ function ResidentService.DispatchResidentUpdate(player: Player, residentState: a
 	if type(residentName) ~= "string" or residentName == "" then
 		return
 	end
+	local saveClone = cloneResidentForNetwork(save)
 	local payload = {
 		UserId = player.UserId,
 		ResidentName = residentName,
-		ResidentDelta = { cloneTable(save) },
+		ResidentDelta = saveClone and { saveClone } or {},
 	}
 	ResidentsPackets.PlayerResidentDelta:Fire(payload)
 end
+
+function ResidentService.SetResidentTenantData(player: Player, residentName: string, tenantId: string?)
+	local data = ensureHouseholdState(player, PlayerSession.GetDataAwait(player, "HouseholdState"))
+	if not data then
+		return false, "Household data not available."
+	end
+
+	local userId = player.UserId
+	local indexMap = NameToIndexMap[userId]
+	if not indexMap then
+		return false, "Residents not loaded yet."
+	end
+
+	local index = indexMap[residentName]
+	if not index then
+		return false, "Resident not found."
+	end
+
+	local entry = data.Residents[index] :: { [string]: any }
+	if entry then
+		entry.TenantId = tenantId
+	end
+
+	local residentState = ResidentService.GetResident(player, residentName)
+	if residentState and residentState.Save then
+		residentState.Save.TenantId = tenantId
+	end
+
+	setTenantLinkInternal(userId, residentName, tenantId)
+
+	local source = nil
+	if residentState and residentState.Save then
+		source = residentState.Save
+	elseif entry then
+		source = entry
+	end
+	local tenantClone = source and cloneResidentForNetwork(source) or nil
+	if tenantClone then
+		local payload = {
+			UserId = userId,
+			ResidentName = residentName,
+			ResidentDelta = { tenantClone },
+		}
+		ResidentsPackets.PlayerResidentDelta:Fire(payload)
+	end
+	return true, "Success"
+end
+
+function ResidentService.GetResidentNameByTenantId(player: Player, tenantId: string): string?
+	local tenantMap = TenantToResidentMap[player.UserId]
+	if not tenantMap then
+		return nil
+	end
+	return tenantMap[tenantId]
+end
+
+function ResidentService.ClearTenantLink(player: Player, tenantId: string)
+	clearTenantLinkByTenant(player.UserId, tenantId)
+end
+
 return ResidentService

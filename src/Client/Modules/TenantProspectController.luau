@@ -4,22 +4,23 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local TenantPackets = require(ReplicatedStorage.Network.TenantPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
-local Formatter = require(ReplicatedStorage.Shared.Utilities.Formatter)
 local TenantProspectPrompt = require(script.Parent.Parent.UserInterface.TenantProspectPrompt)
-local PromptWidgetBinder = require(script.Parent.PromptWidgetBinder)
+local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 
 local LocalPlayer = Players.LocalPlayer
 local AssetsFolder = ReplicatedStorage:FindFirstChild("Assets")
 local ResidentTemplatesFolder = AssetsFolder and AssetsFolder:FindFirstChild("Residents")
 
 local SLOT_PART_PREFIX = "TenantProspectSlot"
-local PROMPT_ACTION = "Meet Prospect"
+local PROMPT_ACTION = "Meet"
 local MAX_PROMPT_DISTANCE = 18
 local TARGET_ATTRIBUTE_PREFIX = "TenantProspectTarget"
 local DEFAULT_TEMPLATE_NAME = "Male"
+local DISABLE_RESIDENT_BILLBOARD_ATTR = "DisableResidentBillboard"
 
 export type ProspectSpawnPayload = {
 	ProspectId: string,
@@ -30,6 +31,8 @@ export type ProspectSpawnPayload = {
 	RentIntervalSeconds: number,
 	Deposit: number?,
 	LeaseSeconds: number,
+	RentBoostPercent: number?,
+	Traits: { string }?,
 }
 
 local TenantProspectController = {}
@@ -41,6 +44,65 @@ local IsInitialized = false
 
 local ProspectVisualsById: { [string]: any } = {}
 local ProspectVisualsBySlot: { [number]: any } = {}
+
+local DECISION_EMOJIS = {
+	Accept = {
+		Text = "🎉",
+		Color = Color3.fromRGB(90, 200, 120),
+	},
+	Decline = {
+		Text = "💤",
+		Color = Color3.fromRGB(200, 120, 120),
+	},
+}
+
+local function emitDecisionEmoji(prospectId: string, decision: "Accept" | "Decline")
+	local record = ProspectVisualsById[prospectId]
+	if not record then
+		return
+	end
+	local rootPart = record.RootPart :: BasePart?
+	if not rootPart then
+		return
+	end
+	local config = DECISION_EMOJIS[decision]
+	if not config then
+		return
+	end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "TenantDecisionEmoji"
+	billboard.AlwaysOnTop = true
+	billboard.Size = UDim2.fromOffset(48, 48)
+	billboard.MaxDistance = 60
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, 4, 0)
+	billboard.Adornee = rootPart
+	billboard.Parent = record.Model
+
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBlack
+	label.TextScaled = true
+	label.Text = config.Text
+	label.TextColor3 = config.Color
+	label.Size = UDim2.fromScale(1, 1)
+	label.Parent = billboard
+
+	local fadeInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local tween = TweenService:Create(label, fadeInfo, { TextTransparency = 1 })
+
+	task.delay(1.2, function()
+		if not billboard.Parent then
+			return
+		end
+		tween:Play()
+		task.delay(fadeInfo.Time + 0.05, function()
+			if billboard.Parent then
+				billboard:Destroy()
+			end
+		end)
+	end)
+end
 
 local function cloneProspectRig(): Model?
 	if not ResidentTemplatesFolder then
@@ -75,7 +137,7 @@ local function destroyProspect(id: string)
 	end
 
 	if record.Prompt then
-		PromptWidgetBinder.Detach(record.Prompt)
+		MinimalPromptUI.Detach(record.Prompt)
 		record.Prompt:Destroy()
 	end
 
@@ -136,25 +198,11 @@ local function getResidentsFolder(): Folder?
 	return nil
 end
 
-local function formatInterval(seconds: number): string
-	if seconds < 60 then
-		return string.format("%ds", math.floor(seconds + 0.5))
-	end
-	if seconds % 60 == 0 then
-		local minutes = math.floor(seconds / 60)
-		if minutes < 60 then
-			return string.format("%d min", minutes)
-		end
-	end
-	return Formatter.formatDuration(seconds, {
-		units = { "hour", "minute" },
-		shortUnits = true,
-		maxUnits = 2,
-	})
-end
-
 local function showPrompt(payload: ProspectSpawnPayload)
 	ActivePromptId = payload.ProspectId
+
+	local record = ProspectVisualsById[payload.ProspectId]
+	local model = record and record.Model
 
 	TenantProspectPrompt.Show(payload, {
 		OnAccept = function()
@@ -173,6 +221,7 @@ local function showPrompt(payload: ProspectSpawnPayload)
 					TenantProspectPrompt.SetStatus(message or "Could not invite tenant.", true)
 					return
 				end
+				emitDecisionEmoji(payload.ProspectId, "Accept")
 				TenantProspectPrompt.Hide()
 			end)
 		end,
@@ -192,6 +241,7 @@ local function showPrompt(payload: ProspectSpawnPayload)
 					TenantProspectPrompt.SetStatus(message or "Decline failed.", true)
 					return
 				end
+				emitDecisionEmoji(payload.ProspectId, "Decline")
 				TenantProspectPrompt.Hide()
 			end)
 		end,
@@ -200,7 +250,7 @@ local function showPrompt(payload: ProspectSpawnPayload)
 				ActivePromptId = nil
 			end
 		end,
-	})
+	}, model)
 end
 
 local function attachPrompt(record, payload)
@@ -218,8 +268,30 @@ local function attachPrompt(record, payload)
 	prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
 	prompt.RequiresLineOfSight = false
 	prompt.HoldDuration = 0
-	prompt.Parent = slotPart
-	PromptWidgetBinder.Attach(prompt)
+	prompt.Style = Enum.ProximityPromptStyle.Custom
+
+	local promptParent: Instance = slotPart
+	local rootPart = record.RootPart :: BasePart?
+	if rootPart then
+		local attachment = rootPart:FindFirstChild("TenantPromptAttachment")
+		local promptAttachment: Attachment
+		if attachment and attachment:IsA("Attachment") then
+			promptAttachment = attachment
+		else
+			promptAttachment = Instance.new("Attachment")
+			promptAttachment.Name = "TenantPromptAttachment"
+			promptAttachment.CFrame = CFrame.new()
+			promptAttachment.Parent = rootPart
+		end
+		promptParent = promptAttachment
+	end
+
+	prompt.Parent = promptParent
+
+	-- Center prompt at model origin
+	prompt:SetAttribute("MinimalPromptOffset", Vector3.new(0, 0, 0))
+
+	MinimalPromptUI.Attach(prompt)
 
 	record.Prompt = prompt
 	record.Connections[#record.Connections + 1] = prompt.Triggered:Connect(function(player)
@@ -228,68 +300,12 @@ local function attachPrompt(record, payload)
 		end
 		showPrompt(payload)
 	end)
-end
 
-local function createBillboard(root: BasePart, payload: ProspectSpawnPayload)
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "TenantProspectBillboard"
-	billboard.AlwaysOnTop = true
-	billboard.LightInfluence = 0
-	billboard.Size = UDim2.fromOffset(200, 60)
-	billboard.StudsOffsetWorldSpace = Vector3.new(0, 4.25, 0)
-	billboard.MaxDistance = 60
-	billboard.Parent = root
-
-	local container = Instance.new("Frame")
-	container.BackgroundColor3 = Color3.fromRGB(28, 32, 44)
-	container.BackgroundTransparency = 0.2
-	container.AutomaticSize = Enum.AutomaticSize.XY
-	container.Size = UDim2.fromOffset(0, 0)
-	container.Parent = billboard
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 8)
-	corner.Parent = container
-
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 10)
-	padding.PaddingRight = UDim.new(0, 10)
-	padding.PaddingTop = UDim.new(0, 6)
-	padding.PaddingBottom = UDim.new(0, 6)
-	padding.Parent = container
-
-	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Name = "Name"
-	nameLabel.BackgroundTransparency = 1
-	nameLabel.Font = Enum.Font.GothamBold
-	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	nameLabel.TextSize = 16
-	nameLabel.AutomaticSize = Enum.AutomaticSize.XY
-	nameLabel.Text = payload.Name
-	nameLabel.Parent = container
-
-	local rentLabel = Instance.new("TextLabel")
-	rentLabel.Name = "Rent"
-	rentLabel.BackgroundTransparency = 1
-	rentLabel.Font = Enum.Font.Gotham
-	rentLabel.TextColor3 = Color3.fromRGB(200, 210, 244)
-	rentLabel.TextSize = 14
-	rentLabel.AutomaticSize = Enum.AutomaticSize.XY
-	rentLabel.TextYAlignment = Enum.TextYAlignment.Top
-	rentLabel.Text = string.format(
-		"%s / %s",
-		Formatter.formatCurrency(payload.RentPerInterval, {
-			currencySymbol = "$",
-		}),
-		formatInterval(payload.RentIntervalSeconds)
-	)
-	rentLabel.Parent = container
-
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Vertical
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.VerticalAlignment = Enum.VerticalAlignment.Top
-	layout.Parent = container
+	record.Connections[#record.Connections + 1] = prompt.PromptHidden:Connect(function()
+		if ActivePromptId == payload.ProspectId and TenantProspectPrompt.IsVisible() then
+			TenantProspectPrompt.Hide()
+		end
+	end)
 end
 
 local function createProspectModel(payload: ProspectSpawnPayload, slotPart: BasePart): any
@@ -307,8 +323,10 @@ local function createProspectModel(payload: ProspectSpawnPayload, slotPart: Base
 	rootPart.Anchored = false
 	rig.Name = string.format("TenantProspect_%s", payload.ProspectId)
 	rig.PrimaryPart = rootPart
-
-	createBillboard(rootPart, payload)
+	rig:SetAttribute(DISABLE_RESIDENT_BILLBOARD_ATTR, true)
+	humanoid.WalkSpeed = 8
+	humanoid.JumpPower = 0
+	humanoid.UseJumpPower = true
 
 	local highlight = Instance.new("Highlight")
 	highlight.Name = "TenantProspectHighlight"

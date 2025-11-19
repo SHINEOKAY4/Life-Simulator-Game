@@ -6,7 +6,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
-local Formatter = require(ReplicatedStorage.Shared.Utilities.Formatter)
+local TenantTraits = require(ReplicatedStorage.Shared.Definitions.TenantTraits)
 
 export type ProspectOfferPayload = {
 	ProspectId: string,
@@ -16,22 +16,14 @@ export type ProspectOfferPayload = {
 	RentIntervalSeconds: number,
 	LeaseSeconds: number,
 	Deposit: number?,
+	RentBoostPercent: number?,
+	Traits: { string }?,
 }
 
 export type PromptCallbacks = {
 	OnAccept: (() -> ())?,
 	OnDecline: (() -> ())?,
 	OnClosed: (() -> ())?,
-}
-
-local CASH_OPTIONS = {
-	currencySymbol = "$",
-}
-
-local LEASE_DURATION_OPTIONS = {
-	units = { "hour", "minute" },
-	shortUnits = true,
-	maxUnits = 2,
 }
 
 local LocalPlayer = Players.LocalPlayer
@@ -95,22 +87,6 @@ local function setStatus(text: string?, isError: boolean?)
 	end
 end
 
-local function formatInterval(seconds: number): string
-	if seconds < 1 then
-		return "Instant"
-	end
-	if seconds < 60 then
-		return string.format("%ds", math.floor(seconds + 0.5))
-	end
-	if seconds % 60 == 0 then
-		local minutes = math.floor(seconds / 60)
-		if minutes < 60 then
-			return string.format("%d min", minutes)
-		end
-	end
-	return Formatter.formatDuration(seconds, LEASE_DURATION_OPTIONS)
-end
-
 local function destroyPanel()
 	if _panel then
 		_panel:Destroy()
@@ -122,194 +98,246 @@ local function destroyPanel()
 	setStatus(nil, false)
 end
 
-local function buildInfoLabel(text: string, layoutOrder: number): TextLabel
-	local label = Instance.new("TextLabel")
-	label.Name = "Info" .. layoutOrder
-	label.LayoutOrder = layoutOrder
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamMedium
-	label.TextSize = 16
-	label.TextColor3 = Color3.fromRGB(240, 244, 255)
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Text = text
-	label.Size = UDim2.fromScale(1, 0)
-	label.AutomaticSize = Enum.AutomaticSize.Y
-	return label
-end
-
-local function renderPanel(payload: ProspectOfferPayload, callbacks: PromptCallbacks?)
+local function renderPanel(payload: ProspectOfferPayload, callbacks: PromptCallbacks?, prospectModel: Model?)
 	destroyPanel()
 
 	local gui = ensureGui()
-	local overlay = Instance.new("TextButton")
-	overlay.Name = "Darken"
-	overlay.AutoButtonColor = false
-	overlay.BackgroundColor3 = Color3.fromRGB(6, 8, 14)
-	overlay.BackgroundTransparency = 0.35
-	overlay.BorderSizePixel = 0
-	overlay.Text = ""
-	overlay.Modal = true
-	overlay.Size = UDim2.fromScale(1, 1)
-	overlay.Parent = gui
 
-	local panel = Instance.new("Frame")
-	panel.Name = "Panel"
+	-- Minimal Card Design
+	local panel = Instance.new("CanvasGroup")
+	panel.Name = "ProspectCard"
 	panel.AnchorPoint = Vector2.new(0.5, 0.5)
 	panel.Position = UDim2.fromScale(0.5, 0.5)
-	panel.Size = UDim2.fromOffset(440, 320)
-	panel.BackgroundColor3 = Color3.fromRGB(24, 27, 35)
-	panel.Parent = overlay
+	-- Initial size will be set by animation
+	panel.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+	panel.BackgroundTransparency = 0.05
+	panel.Parent = gui
 
 	local panelCorner = Instance.new("UICorner")
-	panelCorner.CornerRadius = UDim.new(0, 12)
+	panelCorner.CornerRadius = UDim.new(0, 20)
 	panelCorner.Parent = panel
 
 	local panelStroke = Instance.new("UIStroke")
-	panelStroke.Color = Color3.fromRGB(92, 111, 194)
-	panelStroke.Transparency = 0.55
-	panelStroke.Thickness = 2
+	panelStroke.Color = Color3.fromRGB(255, 255, 255)
+	panelStroke.Transparency = 0.9
+	panelStroke.Thickness = 1
 	panelStroke.Parent = panel
 
 	local padding = Instance.new("UIPadding")
-	padding.PaddingTop = UDim.new(0, 20)
-	padding.PaddingBottom = UDim.new(0, 20)
+	padding.PaddingTop = UDim.new(0, 24)
+	padding.PaddingBottom = UDim.new(0, 24)
 	padding.PaddingLeft = UDim.new(0, 24)
 	padding.PaddingRight = UDim.new(0, 24)
 	padding.Parent = panel
 
-	local title = Instance.new("TextLabel")
-	title.Name = "Title"
-	title.BackgroundTransparency = 1
-	title.Size = UDim2.fromScale(1, 0)
-	title.AutomaticSize = Enum.AutomaticSize.Y
-	title.Font = Enum.Font.GothamBold
-	title.TextColor3 = Color3.fromRGB(255, 255, 255)
-	title.TextSize = 24
-	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.Text = string.format("%s wants to rent your plot", payload.Name)
-	title.Parent = panel
+	local contentOffsetY = 0
+
+	-- Portrait
+	if prospectModel then
+		local portraitContainer = Instance.new("Frame")
+		portraitContainer.Name = "PortraitContainer"
+		portraitContainer.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+		portraitContainer.Size = UDim2.fromOffset(100, 100)
+		portraitContainer.Position = UDim2.fromScale(0.5, 0)
+		portraitContainer.AnchorPoint = Vector2.new(0.5, 0)
+		portraitContainer.Parent = panel
+
+		local portraitCorner = Instance.new("UICorner")
+		portraitCorner.CornerRadius = UDim.new(1, 0)
+		portraitCorner.Parent = portraitContainer
+
+		local viewport = Instance.new("ViewportFrame")
+		viewport.BackgroundTransparency = 1
+		viewport.Size = UDim2.fromScale(1, 1)
+		viewport.Parent = portraitContainer
+
+		local worldModel = Instance.new("WorldModel")
+		worldModel.Parent = viewport
+
+		local clone = prospectModel:Clone()
+		clone.Parent = worldModel
+
+		local camera = Instance.new("Camera")
+		camera.Parent = viewport
+		viewport.CurrentCamera = camera
+
+		local head = clone:FindFirstChild("Head") or clone.PrimaryPart
+		if head and head:IsA("BasePart") then
+			local lookAt = head.Position
+			local forward = (clone.PrimaryPart and clone.PrimaryPart.CFrame.LookVector) or Vector3.new(0, 0, -1)
+			local camPos = lookAt + (forward * 3) + Vector3.new(0, 0.2, 0)
+			camera.CFrame = CFrame.lookAt(camPos, lookAt)
+		end
+
+		contentOffsetY = 110
+	end
+
+	-- Header: Name & Tier
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "Name"
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Position = UDim2.fromOffset(0, contentOffsetY)
+	nameLabel.Size = UDim2.fromScale(1, 0)
+	nameLabel.AutomaticSize = Enum.AutomaticSize.Y
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	nameLabel.TextSize = 22
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Center
+	nameLabel.Text = payload.Name
+	nameLabel.Parent = panel
 
 	local tierLabel = Instance.new("TextLabel")
 	tierLabel.Name = "Tier"
 	tierLabel.BackgroundTransparency = 1
-	tierLabel.Position = UDim2.fromOffset(0, 40)
+	tierLabel.Position = UDim2.fromOffset(0, contentOffsetY + 28)
 	tierLabel.Size = UDim2.fromScale(1, 0)
 	tierLabel.AutomaticSize = Enum.AutomaticSize.Y
-	tierLabel.Font = Enum.Font.Gotham
-	tierLabel.TextColor3 = Color3.fromRGB(186, 196, 216)
-	tierLabel.TextSize = 16
-	tierLabel.TextXAlignment = Enum.TextXAlignment.Left
-	tierLabel.Text = string.format("Prospect tier: %s", payload.TierId)
+	tierLabel.Font = Enum.Font.GothamMedium
+	tierLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
+	tierLabel.TextSize = 14
+	tierLabel.TextXAlignment = Enum.TextXAlignment.Center
+	tierLabel.Text = string.upper(payload.TierId)
 	tierLabel.Parent = panel
 
-	local infoList = Instance.new("Frame")
-	infoList.Name = "OfferStats"
-	infoList.BackgroundTransparency = 1
-	infoList.Position = UDim2.fromOffset(0, 90)
-	infoList.Size = UDim2.new(1, 0, 0, 150)
-	infoList.Parent = panel
+	-- Hero Stat: Boost
+	local boostContainer = Instance.new("Frame")
+	boostContainer.Name = "BoostContainer"
+	boostContainer.BackgroundTransparency = 1
+	boostContainer.Position = UDim2.fromOffset(0, contentOffsetY + 60)
+	boostContainer.Size = UDim2.new(1, 0, 0, 80)
+	boostContainer.Parent = panel
 
-	local listLayout = Instance.new("UIListLayout")
-	listLayout.FillDirection = Enum.FillDirection.Vertical
-	listLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-	listLayout.Padding = UDim.new(0, 8)
-	listLayout.Parent = infoList
+	local boostValue = payload.RentBoostPercent or 0
+	local boostText = string.format("+%.0f%%", boostValue * 100)
 
-	local rentText = Formatter.formatCurrency(payload.RentPerInterval, CASH_OPTIONS)
-	local rentIntervalText = formatInterval(payload.RentIntervalSeconds)
-	local depositValue = payload.Deposit or 0
-	local depositText = Formatter.formatCurrency(depositValue, CASH_OPTIONS)
-	local leaseText = "Stays until you evict them"
-	if payload.LeaseSeconds and payload.LeaseSeconds > 0 then
-		leaseText = Formatter.formatDuration(payload.LeaseSeconds, LEASE_DURATION_OPTIONS)
+	local boostLabel = Instance.new("TextLabel")
+	boostLabel.Name = "BoostValue"
+	boostLabel.BackgroundTransparency = 1
+	boostLabel.Size = UDim2.fromScale(1, 0.7)
+	boostLabel.Font = Enum.Font.GothamBlack
+	boostLabel.TextColor3 = Color3.fromRGB(100, 255, 140) -- Green
+	boostLabel.TextSize = 48
+	boostLabel.Text = boostText
+	boostLabel.Parent = boostContainer
+
+	local boostDesc = Instance.new("TextLabel")
+	boostDesc.Name = "BoostDesc"
+	boostDesc.BackgroundTransparency = 1
+	boostDesc.Position = UDim2.fromScale(0, 0.65)
+	boostDesc.Size = UDim2.fromScale(1, 0.35)
+	boostDesc.Font = Enum.Font.GothamMedium
+	boostDesc.TextColor3 = Color3.fromRGB(180, 180, 190)
+	boostDesc.TextSize = 14
+	boostDesc.Text = "RENT BOOST"
+	boostDesc.Parent = boostContainer
+
+	-- Traits List
+	local traitsContainer = Instance.new("Frame")
+	traitsContainer.Name = "TraitsContainer"
+	traitsContainer.BackgroundTransparency = 1
+	traitsContainer.Position = UDim2.fromOffset(0, contentOffsetY + 150)
+	traitsContainer.Size = UDim2.fromScale(1, 0)
+	traitsContainer.AutomaticSize = Enum.AutomaticSize.Y
+	traitsContainer.Parent = panel
+
+	local traitsLayout = Instance.new("UIListLayout")
+	traitsLayout.FillDirection = Enum.FillDirection.Vertical
+	traitsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	traitsLayout.Padding = UDim.new(0, 6)
+	traitsLayout.Parent = traitsContainer
+
+	local traitCount = 0
+	if payload.Traits then
+		for _, traitId in ipairs(payload.Traits) do
+			local traitDef = TenantTraits.GetTrait(traitId)
+			if traitDef then
+				traitCount += 1
+				local traitLabel = Instance.new("TextLabel")
+				traitLabel.Name = "Trait_" .. traitId
+				traitLabel.BackgroundTransparency = 1
+				traitLabel.Size = UDim2.fromScale(1, 0)
+				traitLabel.AutomaticSize = Enum.AutomaticSize.Y
+				traitLabel.Font = Enum.Font.GothamBold
+				traitLabel.TextSize = 15
+				traitLabel.Text = traitDef.Name
+				traitLabel.TextColor3 = traitDef.DisplayColor or Color3.fromRGB(200, 200, 200)
+				traitLabel.Parent = traitsContainer
+			end
+		end
 	end
 
-	local rentLabel = buildInfoLabel(string.format("Rent: %s every %s", rentText, rentIntervalText), 1)
-	rentLabel.Parent = infoList
-
-	if depositValue > 0 then
-		local depositLabel = buildInfoLabel(string.format("Deposit returned on move-out: %s", depositText), 2)
-		depositLabel.Parent = infoList
-	end
-
-	local leaseLabel = buildInfoLabel(string.format("Lease length: %s", leaseText), 3)
-	leaseLabel.Parent = infoList
-
-	local status = Instance.new("TextLabel")
-	status.Name = "Status"
-	status.BackgroundTransparency = 1
-	status.Size = UDim2.fromScale(1, 0)
-	status.AutomaticSize = Enum.AutomaticSize.Y
-	status.Font = Enum.Font.Gotham
-	status.TextSize = 14
-	status.TextColor3 = Color3.fromRGB(199, 214, 255)
-	status.Visible = false
-	status.Parent = panel
-	status.Position = UDim2.new(0, 0, 1, -90)
-
+	-- Buttons
 	local buttons = Instance.new("Frame")
 	buttons.Name = "Buttons"
 	buttons.BackgroundTransparency = 1
 	buttons.AnchorPoint = Vector2.new(0, 1)
-	buttons.Position = UDim2.new(0, 0, 1, -20)
-	buttons.Size = UDim2.fromScale(1, 0)
-	buttons.AutomaticSize = Enum.AutomaticSize.Y
+	buttons.Position = UDim2.fromScale(0, 1)
+	buttons.Size = UDim2.new(1, 0, 0, 44)
 	buttons.Parent = panel
 
 	local buttonLayout = Instance.new("UIListLayout")
 	buttonLayout.FillDirection = Enum.FillDirection.Horizontal
-	buttonLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	buttonLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	buttonLayout.Padding = UDim.new(0, 12)
 	buttonLayout.Parent = buttons
 
 	local declineButton = Instance.new("TextButton")
 	declineButton.Name = "Decline"
 	declineButton.AutoButtonColor = true
-	declineButton.BackgroundColor3 = Color3.fromRGB(49, 53, 65)
-	declineButton.Size = UDim2.fromOffset(150, 42)
-	declineButton.Font = Enum.Font.Gotham
-	declineButton.TextSize = 16
-	declineButton.Text = "Decline"
-	declineButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	declineButton.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+	declineButton.Size = UDim2.fromScale(0.4, 1)
+	declineButton.Font = Enum.Font.GothamMedium
+	declineButton.TextSize = 14
+	declineButton.Text = "Pass"
+	declineButton.TextColor3 = Color3.fromRGB(200, 200, 210)
 	declineButton.Parent = buttons
 
 	local declineCorner = Instance.new("UICorner")
-	declineCorner.CornerRadius = UDim.new(0, 10)
+	declineCorner.CornerRadius = UDim.new(0, 12)
 	declineCorner.Parent = declineButton
 
 	local acceptButton = Instance.new("TextButton")
 	acceptButton.Name = "Accept"
 	acceptButton.AutoButtonColor = true
-	acceptButton.BackgroundColor3 = Color3.fromRGB(96, 187, 121)
-	acceptButton.Size = UDim2.fromOffset(160, 42)
+	acceptButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	acceptButton.Size = UDim2.fromScale(0.55, 1)
 	acceptButton.Font = Enum.Font.GothamBold
-	acceptButton.TextSize = 16
-	acceptButton.Text = "Invite to Move In"
-	acceptButton.TextColor3 = Color3.fromRGB(12, 23, 16)
+	acceptButton.TextSize = 14
+	acceptButton.Text = "Accept"
+	acceptButton.TextColor3 = Color3.fromRGB(10, 10, 15)
 	acceptButton.Parent = buttons
 
 	local acceptCorner = Instance.new("UICorner")
-	acceptCorner.CornerRadius = UDim.new(0, 10)
+	acceptCorner.CornerRadius = UDim.new(0, 12)
 	acceptCorner.Parent = acceptButton
 
-	local closeButton = Instance.new("TextButton")
-	closeButton.Name = "Close"
-	closeButton.AnchorPoint = Vector2.new(1, 0)
-	closeButton.Position = UDim2.new(1, 0, 0, -8)
-	closeButton.Size = UDim2.fromOffset(32, 32)
-	closeButton.Text = "✕"
-	closeButton.TextSize = 18
-	closeButton.Font = Enum.Font.Gotham
-	closeButton.TextColor3 = Color3.fromRGB(190, 196, 210)
-	closeButton.BackgroundTransparency = 1
-	closeButton.Parent = panel
+	-- Status Overlay (for busy state)
+	local status = Instance.new("TextLabel")
+	status.Name = "Status"
+	status.BackgroundTransparency = 1
+	status.Size = UDim2.fromScale(1, 0)
+	status.AutomaticSize = Enum.AutomaticSize.Y
+	status.Font = Enum.Font.GothamMedium
+	status.TextSize = 14
+	status.TextColor3 = Color3.fromRGB(255, 255, 255)
+	status.Visible = false
+	status.Parent = panel
+	status.Position = UDim2.new(0, 0, 1, -70)
 
-	local appear = TweenService:Create(panel, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Size = UDim2.fromOffset(460, 332),
+	-- Animation
+	local baseHeight = 260 + contentOffsetY
+	local traitsHeight = traitCount * 22
+	local targetHeight = baseHeight + traitsHeight
+	panel.Size = UDim2.fromOffset(300, targetHeight - 20)
+	panel.GroupTransparency = 1
+
+	local appear = TweenService:Create(panel, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Size = UDim2.fromOffset(320, targetHeight),
+		GroupTransparency = 0,
 	})
 	appear:Play()
 
-	_panel = overlay
+	_panel = panel -- Note: _panel is now the frame itself, not an overlay
 	_callbacks = callbacks
 	_statusLabel = status
 	_acceptButton = acceptButton
@@ -337,18 +365,11 @@ local function renderPanel(payload: ProspectOfferPayload, callbacks: PromptCallb
 			TenantProspectPrompt.Hide()
 		end
 	end)
-
-	closeButton.MouseButton1Click:Connect(function()
-		TenantProspectPrompt.Hide()
-	end)
-	overlay.MouseButton1Click:Connect(function()
-		TenantProspectPrompt.Hide()
-	end)
 end
 
-function TenantProspectPrompt.Show(payload: ProspectOfferPayload, callbacks: PromptCallbacks?)
+function TenantProspectPrompt.Show(payload: ProspectOfferPayload, callbacks: PromptCallbacks?, prospectModel: Model?)
 	_currentPayload = payload
-	renderPanel(payload, callbacks)
+	renderPanel(payload, callbacks, prospectModel)
 end
 
 function TenantProspectPrompt.Hide()

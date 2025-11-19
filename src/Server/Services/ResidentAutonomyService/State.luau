@@ -17,7 +17,6 @@ State.NeedStationTypes = {
 	Energy = { "RestStation" },
 	Hygiene = { "HygieneStation" },
 	Social = { "SocialStation" },
-	Fun = { "FunStation" },
 }
 
 State.NeedToStationType = {}
@@ -36,7 +35,7 @@ local SURVIVAL_NEEDS = table.freeze({
 
 State.SurvivalNeeds = SURVIVAL_NEEDS
 
-State.NeedPrioritySeed = { "Hunger", "Bladder", "Energy", "Hygiene", "Social", "Fun" }
+State.NeedPrioritySeed = { "Hunger", "Bladder", "Energy", "Hygiene", "Social" }
 State.NeedEvaluationOrder = {} :: { string }
 
 State.MissingStationPhrases = {
@@ -59,10 +58,6 @@ State.MissingStationPhrases = {
 	Social = {
 		"Wish we had a spot to hang out with someone.",
 		"No place to talk... it's lonely here.",
-	},
-	Fun = {
-		"It'd be great to have something fun to do.",
-		"We should really set up a fun station sometime.",
 	},
 	_default = {
 		"I wish we had the right station for this...",

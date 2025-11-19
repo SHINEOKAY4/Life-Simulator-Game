@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local EnergyUsageTracker = require(ServerScriptService.Server.Utilities.EnergyUsageTracker)
+local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local GridClass = require(ReplicatedStorage.Shared.Utilities.Grid)
@@ -14,6 +15,7 @@ local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
+local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
 type PlotRuntimeState = PlotState.PlotState
@@ -426,12 +428,24 @@ function PlotService.UnlockArea(player: Player, chunkX: number, chunkZ: number):
 		return false, "Chunk not adjacent to unlocked area"
 	end
 
-	--#TODO: integrate cost check (currency / cash module)
+	local unlockedCount = #runtimeState.Save.UnlockedChunks
+	local baseCost = BuildConstants.ExpansionBaseCost or 400
+	local increment = BuildConstants.ExpansionCostIncrement or 200
+	local cost = baseCost + math.max(0, unlockedCount - 1) * increment
+
+	local currencyData = PlayerSession.GetDataAwait(player, "CurrencyState")
+	local currentCash = CurrencyService.Get(player, "Cash", currencyData)
+
+	if currentCash < cost then
+		return false, "Insufficient funds"
+	end
 
 	local success = runtimeState:UnlockChunk(chunkX, chunkZ)
 	if not success then
 		return false, "Already unlocked"
 	end
+
+	CurrencyService.Remove(player, "Cash", cost, currencyData)
 
 	Packets.PlotStateUnlockDelta:FireClient(player, { runtimeState:ChunkIndex(chunkX, chunkZ) })
 	return true, "Chunk unlocked"

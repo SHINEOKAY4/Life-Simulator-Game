@@ -3,11 +3,10 @@
 
 export type ResidentData = {
 	Name: string,
-	Age: number,
-	Gender: string,
 	Needs: { [string]: number },
 	Traits: { string },
-	Statistics: { [string]: number }?,
+	DissatisfactionTime: number?,
+	TenantId: string?,
 }
 
 type MoodletRuntime = {
@@ -106,6 +105,12 @@ function ResidentState.new(save: ResidentData)
 	self.NeedsChanged = GoodSignal.new() -- Fired when any need changes
 	self.ActiveMoodlets = {} :: { [string]: MoodletRuntime }
 	self.Model = nil :: Model?
+
+	-- Initialize DissatisfactionTime if missing
+	if type(self.Save.DissatisfactionTime) ~= "number" then
+		self.Save.DissatisfactionTime = 0
+	end
+
 	self.Connections = self:BindConnections()
 	return self
 end
@@ -434,6 +439,43 @@ function ResidentState:IsNeedPaused(needName: string): boolean
 		return false
 	end
 	return (pauses[needName] or 0) > 0
+end
+
+function ResidentState:GetSatisfaction(): number
+	local totalNeedValue = 0
+	local validNeedCount = 0
+	-- Hardcoded list of needs that contribute to satisfaction
+	local needs = { "Hunger", "Energy", "Fun", "Social", "Hygiene" }
+
+	for _, needName in ipairs(needs) do
+		local needValue = self:GetNeed(needName)
+		if typeof(needValue) == "number" then
+			totalNeedValue += math.clamp(needValue, 0, 100)
+			validNeedCount += 1
+		end
+	end
+
+	if validNeedCount == 0 then
+		return 1 -- Default to full satisfaction if no needs found
+	end
+
+	return math.clamp(totalNeedValue / (validNeedCount * 100), 0, 1)
+end
+
+function ResidentState:UpdateDissatisfaction(dt: number, satisfaction: number, threshold: number)
+	local current = self.Save.DissatisfactionTime or 0
+	if satisfaction < threshold then
+		-- Accumulate dissatisfaction time
+		self.Save.DissatisfactionTime = current + dt
+	else
+		-- Recover: reduce dissatisfaction time when happy
+		-- Recover at 2x speed to require consistent happiness
+		self.Save.DissatisfactionTime = math.max(0, current - (dt * 2))
+	end
+end
+
+function ResidentState:GetDissatisfactionTime(): number
+	return self.Save.DissatisfactionTime or 0
 end
 
 function ResidentState:Destroy()

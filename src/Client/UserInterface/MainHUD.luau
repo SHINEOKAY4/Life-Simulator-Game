@@ -36,6 +36,40 @@ local TotalFrame = BillPanel:WaitForChild("TotalFrame")
 local PlotTaxAmountLabel = PlotTaxFrame:WaitForChild("TextLabel") :: TextLabel
 local ElectricAmountLabel = ElectricityFrame:WaitForChild("TextLabel") :: TextLabel
 local OverdueAmountLabel = OverdueFrame:WaitForChild("TextLabel") :: TextLabel
+
+-- Dynamic Frame Creation for Water and Internet
+local WaterFrame = ItemsContainer:FindFirstChild("WaterFrame") :: Frame?
+if not WaterFrame then
+	local clone = ElectricityFrame:Clone() :: Frame
+	clone.Name = "WaterFrame"
+	clone.LayoutOrder = (ElectricityFrame :: Frame).LayoutOrder + 1
+	local titleLabel = clone:FindFirstChild("TitleLabel")
+		or clone:FindFirstChild("Label")
+		or clone:FindFirstChild("Title")
+	if titleLabel and titleLabel:IsA("TextLabel") then
+		titleLabel.Text = "Water"
+	end
+	clone.Parent = ItemsContainer
+	WaterFrame = clone
+end
+local WaterAmountLabel = (WaterFrame :: Frame):WaitForChild("TextLabel") :: TextLabel
+
+local InternetFrame = ItemsContainer:FindFirstChild("InternetFrame") :: Frame?
+if not InternetFrame then
+	local clone = ElectricityFrame:Clone() :: Frame
+	clone.Name = "InternetFrame"
+	clone.LayoutOrder = (ElectricityFrame :: Frame).LayoutOrder + 2
+	local titleLabel = clone:FindFirstChild("TitleLabel")
+		or clone:FindFirstChild("Label")
+		or clone:FindFirstChild("Title")
+	if titleLabel and titleLabel:IsA("TextLabel") then
+		titleLabel.Text = "Internet"
+	end
+	clone.Parent = ItemsContainer
+	InternetFrame = clone
+end
+local InternetAmountLabel = (InternetFrame :: Frame):WaitForChild("TextLabel") :: TextLabel
+
 local TotalRow = TotalFrame:WaitForChild("TotalRow")
 local TotalAmountLabel = TotalRow:WaitForChild("TotalLabel") :: TextLabel
 
@@ -43,7 +77,8 @@ local BottomRight = MainHUDGui:WaitForChild("BottomRight") :: Frame
 local TopRight = MainHUDGui:WaitForChild("TopRight")
 local TextFrame = TopRight:WaitForChild("TextFrame") :: Frame
 local CashLabel = TextFrame:WaitForChild("CashLabel") :: TextLabel
-local CashLabelStroke = TextFrame:WaitForChild("CashLabelStroke") :: TextLabel
+local IncomePerSecondLabel = TopRight:WaitForChild("IncomePerSecondLabel") :: TextLabel
+local BuyCashButton = TopRight:WaitForChild("BuyCashButton") :: ImageButton
 local BuildButton = BottomRight:WaitForChild("BuildButton") :: TextButton
 local BillsButton = BottomRight:WaitForChild("BillsButton") :: TextButton
 local ExpandButton = BottomRight:WaitForChild("ExpandButton") :: TextButton
@@ -55,6 +90,8 @@ local ResidentGui = PlayerGui:WaitForChild("ResidentGui") :: ScreenGui
 local ResidentSelectionFrame = ResidentGui:WaitForChild("ResidentSelectionFrame") :: Frame
 local ResidentRosterBackground = ResidentSelectionFrame:WaitForChild("Background") :: Frame
 local Roster = ResidentRosterBackground:WaitForChild("Roster") :: Frame
+
+local INCOME_RATE_ATTRIBUTE_NAME = "TenantIncomePerSecond"
 
 local FoodFrame = ItemsContainer:FindFirstChild("FoodFrame")
 if FoodFrame and FoodFrame:IsA("Frame") then
@@ -120,6 +157,31 @@ local CASH_DEDUCTION_STYLE: PopupStyle = {
 	FadeDelayRatio = 0.45,
 	CleanupExtraDelay = 0.3,
 }
+
+local MIN_INCOME_DISPLAY = 0.01
+
+local function formatIncomePerSecond(amount: number): string
+	if typeof(amount) ~= "number" or amount ~= amount then
+		return "$0/sec"
+	end
+	local sanitized = math.max(amount, 0)
+	if sanitized == 0 then
+		return "$0/sec"
+	end
+	if sanitized < MIN_INCOME_DISPLAY then
+		return "+<$0.01/sec"
+	end
+	local formatted = Formatter.formatCurrency(sanitized, {
+		currencySymbol = "$",
+		decimalPlaces = 2,
+	})
+	return string.format("+%s/sec", formatted)
+end
+
+local function updateIncomePerSecondLabel()
+	local rawValue = Player:GetAttribute(INCOME_RATE_ATTRIBUTE_NAME)
+	IncomePerSecondLabel.Text = formatIncomePerSecond(if typeof(rawValue) == "number" then rawValue else 0)
+end
 
 local function findRosterFrame(targetResidentName: string?): Frame?
 	if typeof(targetResidentName) == "string" and targetResidentName ~= "" then
@@ -426,7 +488,8 @@ function MainHUD.Init()
 	end
 	lastCash = currentCash
 	CashLabel.Text = Formatter.formatCurrency(currentCash, CASH_FORMAT_OPTIONS)
-	CashLabelStroke.Text = CashLabel.Text
+	updateIncomePerSecondLabel()
+	Player:GetAttributeChangedSignal(INCOME_RATE_ATTRIBUTE_NAME):Connect(updateIncomePerSecondLabel)
 
 	CurrencyPackets.PlayerCurrencyDelta.OnClientEvent:Connect(function(payload)
 		if typeof(payload) ~= "table" then
@@ -570,6 +633,8 @@ function MainHUD.Init()
 	local function resolveOverdueInterest(
 		plotTax: number?,
 		electricityCost: number?,
+		waterCost: number?,
+		internetCost: number?,
 		totalCost: number?,
 		providedOverdue: number?
 	): number
@@ -589,6 +654,12 @@ function MainHUD.Init()
 		if typeof(electricityCost) == "number" then
 			baseSum += electricityCost
 		end
+		if typeof(waterCost) == "number" then
+			baseSum += waterCost
+		end
+		if typeof(internetCost) == "number" then
+			baseSum += internetCost
+		end
 
 		local interest = total - baseSum
 		if interest <= 0 then
@@ -601,16 +672,22 @@ function MainHUD.Init()
 	local function updateBillDisplay(
 		plotTax: number?,
 		electricityCost: number?,
+		waterCost: number?,
+		internetCost: number?,
 		overdueInterest: number?,
 		totalCost: number?
 	)
 		local sanitizedPlotTax = clampAmount(plotTax)
 		local sanitizedElectric = clampAmount(electricityCost)
+		local sanitizedWater = clampAmount(waterCost)
+		local sanitizedInternet = clampAmount(internetCost)
 		local sanitizedOverdue = clampAmount(overdueInterest)
 		local sanitizedTotal = clampAmount(totalCost)
 
 		PlotTaxAmountLabel.Text = Formatter.formatCurrency(sanitizedPlotTax, CASH_FORMAT_OPTIONS)
 		ElectricAmountLabel.Text = Formatter.formatCurrency(sanitizedElectric, CASH_FORMAT_OPTIONS)
+		WaterAmountLabel.Text = Formatter.formatCurrency(sanitizedWater, CASH_FORMAT_OPTIONS)
+		InternetAmountLabel.Text = Formatter.formatCurrency(sanitizedInternet, CASH_FORMAT_OPTIONS)
 		OverdueAmountLabel.Text = Formatter.formatCurrency(sanitizedOverdue, CASH_FORMAT_OPTIONS)
 		TotalAmountLabel.Text = Formatter.formatCurrency(sanitizedTotal, CASH_FORMAT_OPTIONS)
 	end
@@ -653,9 +730,18 @@ function MainHUD.Init()
 
 		local plotTax = payload.PlotTax
 		local electricityCost = payload.Electric
+		local waterCost = payload.Water
+		local internetCost = payload.Internet
 		local outstandingTotal = payload.OutstandingTotal
 		local totalCost = payload.Total
-		local overdueInterest = resolveOverdueInterest(plotTax, electricityCost, totalCost, rawget(payload, "Overdue"))
+		local overdueInterest = resolveOverdueInterest(
+			plotTax,
+			electricityCost,
+			waterCost,
+			internetCost,
+			totalCost,
+			rawget(payload, "Overdue")
+		)
 		local dueClockTime = payload.DueClockTime
 		local timeRemaining = payload.TimeRemaining
 
@@ -663,7 +749,7 @@ function MainHUD.Init()
 
 		-- Only update bill breakdown if the bill frame is currently visible
 		if BillFrame.Visible then
-			updateBillDisplay(plotTax, electricityCost, overdueInterest, totalCost)
+			updateBillDisplay(plotTax, electricityCost, waterCost, internetCost, overdueInterest, totalCost)
 		end
 	end)
 
@@ -675,16 +761,25 @@ function MainHUD.Init()
 
 		local plotTax = payload.PlotTax
 		local electricityCost = payload.Electric
+		local waterCost = payload.Water
+		local internetCost = payload.Internet
 		local outstandingTotal = payload.OutstandingTotal
 		local totalCost = payload.Total
-		local overdueInterest = resolveOverdueInterest(plotTax, electricityCost, totalCost, rawget(payload, "Overdue"))
+		local overdueInterest = resolveOverdueInterest(
+			plotTax,
+			electricityCost,
+			waterCost,
+			internetCost,
+			totalCost,
+			rawget(payload, "Overdue")
+		)
 		local dueClockTime = payload.DueClockTime
 		local timeRemaining = payload.TimeRemaining
 
 		updateDueLabel(dueClockTime, timeRemaining, outstandingTotal, false)
 
 		if BillFrame.Visible then
-			updateBillDisplay(plotTax, electricityCost, overdueInterest, totalCost)
+			updateBillDisplay(plotTax, electricityCost, waterCost, internetCost, overdueInterest, totalCost)
 		end
 	end
 
@@ -751,7 +846,6 @@ function MainHUD.Init()
 			newValue = 0
 		end
 		CashLabel.Text = Formatter.formatCurrency(newValue, CASH_FORMAT_OPTIONS)
-		CashLabelStroke.Text = CashLabel.Text
 		if not hasProcessedInitialAttribute then
 			hasProcessedInitialAttribute = true
 			if pendingCashIncrease == 0 then
