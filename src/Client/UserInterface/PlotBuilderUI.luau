@@ -1136,6 +1136,30 @@ local function configureItemButton(button: ImageButton, entry: ItemEntry, layout
 	button.Image = buildThumbnail(entry.Spec)
 	button:SetAttribute("Selected", false)
 
+	local fallbackLabel = button:FindFirstChild("FallbackLabel") :: TextLabel?
+	if button.Image == PLACEHOLDER_THUMBNAIL then
+		if not fallbackLabel then
+			fallbackLabel = Instance.new("TextLabel")
+			fallbackLabel.Name = "FallbackLabel"
+			fallbackLabel.Size = UDim2.fromScale(0.8, 0.8)
+			fallbackLabel.Position = UDim2.fromScale(0.1, 0.1)
+			fallbackLabel.BackgroundTransparency = 1
+			fallbackLabel.TextColor3 = Color3.new(1, 1, 1)
+			fallbackLabel.TextStrokeTransparency = 0
+			fallbackLabel.TextScaled = true
+			fallbackLabel.Font = Enum.Font.GothamBold
+			fallbackLabel.Parent = button
+		end
+		fallbackLabel.Text = entry.Spec.Name or entry.Id
+		fallbackLabel.Visible = true
+		button.ImageTransparency = 0.8
+	else
+		if fallbackLabel then
+			fallbackLabel.Visible = false
+		end
+		button.ImageTransparency = 0
+	end
+
 	local infoFrame = button:FindFirstChild("Info")
 	if infoFrame and infoFrame:IsA("Frame") then
 		local costLabel = infoFrame:FindFirstChild("ItemCost")

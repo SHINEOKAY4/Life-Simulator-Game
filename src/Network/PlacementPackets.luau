@@ -201,4 +201,21 @@ PlacementPackets.RotateRequest = Packet("RotateRequest", {
 	ToFacing = Packet.String,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
+PlacementPackets.UtilityUpdate = Packet("UtilityUpdate", {
+	{
+		Key = Packet.String,
+		Metadata = Packet.Any,
+	},
+})
+
+PlacementPackets.ConnectUtilityRequest = Packet("ConnectUtilityRequest", {
+	SourceKey = Packet.String,
+	TargetKey = Packet.String,
+}):Response(Packet.Boolean8, Packet.StringLong)
+
+PlacementPackets.DisconnectUtilityRequest = Packet("DisconnectUtilityRequest", {
+	SourceKey = Packet.String,
+	TargetKey = Packet.String,
+}):Response(Packet.Boolean8, Packet.StringLong)
+
 return PlacementPackets

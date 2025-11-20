@@ -13,8 +13,19 @@ local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBe
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 
+type StateSnapshotType = {
+	ChunkInfo: { [string]: any }?,
+	ChunkUnlocked: { [number]: boolean }?,
+	PlacedItems: { [string]: any }?,
+	SurfaceMounts: { [string]: any }?,
+	FloorHeightStuds: number?,
+	DefaultLevel: number?,
+	MaxLevel: number?,
+	ActiveLevel: number?,
+}
+
 local PlotStateStore = {}
-local StateSnapshot = {}
+local StateSnapshot: StateSnapshotType = {}
 
 local PlotModel = nil
 local CachedSurface: BasePart? = nil
@@ -24,6 +35,7 @@ local ActiveLevel = 0
 local ActiveLevelChanged = GoodSignal.new()
 local CutawayChanged = GoodSignal.new()
 local RoomSnapshotChanged = GoodSignal.new()
+local PlacementMetadataChanged = GoodSignal.new()
 
 local function deepClone(value: any): any
 	if typeof(value) ~= "table" then
@@ -1027,6 +1039,23 @@ function PlotStateStore.Init()
 
 		StateSnapshot.SurfaceMounts[normalized.key] = normalized
 	end)
+
+	Packets.UtilityUpdate.OnClientEvent:Connect(function(changes)
+		StateSnapshot.PlacedItems = StateSnapshot.PlacedItems or {}
+		local anyChanged = false
+		for _, change in ipairs(changes) do
+			local key = change.Key
+			local metadata = normalizeMetadata(change.Metadata)
+			local entry = StateSnapshot.PlacedItems[key]
+			if entry then
+				entry.Metadata = metadata
+				anyChanged = true
+			end
+		end
+		if anyChanged then
+			PlacementMetadataChanged:Fire()
+		end
+	end)
 end
 
 function PlotStateStore.GetStateSnapshot()
@@ -1139,6 +1168,10 @@ end
 
 function PlotStateStore.OnRoomSnapshotChanged(handler: () -> ()): RBXScriptConnection
 	return RoomSnapshotChanged:Connect(handler)
+end
+
+function PlotStateStore.OnPlacementMetadataChanged(handler: () -> ()): RBXScriptConnection
+	return PlacementMetadataChanged:Connect(handler)
 end
 
 function PlotStateStore.GetFloorHeightStuds(): number
@@ -1491,6 +1524,44 @@ function PlotStateStore.IsCellUnlocked(cellX: number, cellZ: number): boolean
 		return false
 	end
 	return PlotStateStore.IsChunkUnlocked(chunkX, chunkZ)
+end
+
+function PlotStateStore.OptimisticDisconnect(sourceKey: string, targetKey: string)
+	local sourceEntry = StateSnapshot.PlacedItems and StateSnapshot.PlacedItems[sourceKey]
+	local targetEntry = StateSnapshot.PlacedItems and StateSnapshot.PlacedItems[targetKey]
+
+	local changed = false
+
+	local function removeConnection(entry: any, keyToRemove: string)
+		if entry and entry.Metadata and entry.Metadata.Connections then
+			local connections = entry.Metadata.Connections
+			for i = #connections, 1, -1 do
+				if connections[i] == keyToRemove then
+					table.remove(connections, i)
+					changed = true
+				end
+			end
+
+			-- Optimistic power down: assume disconnection cuts power for non-sources
+			-- This gives immediate visual feedback (icon turns red)
+			if entry.id then
+				local spec = ItemFinder.FindItemById(entry.id)
+				if spec and not spec.PowerSource then
+					if entry.Metadata.IsPowered ~= false then
+						entry.Metadata.IsPowered = false
+						changed = true
+					end
+				end
+			end
+		end
+	end
+
+	removeConnection(sourceEntry, targetKey)
+	removeConnection(targetEntry, sourceKey)
+
+	if changed then
+		PlacementMetadataChanged:Fire()
+	end
 end
 
 return PlotStateStore

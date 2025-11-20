@@ -549,20 +549,62 @@ function ItemFinder.ResolveItemModel(itemId: string): Model
 	assert(modelPath, ("Model path not registered for item %s"):format(itemId))
 
 	local node: Instance = CatalogModelsFolder
+	local found = true
 	for index = 1, #modelPath do
 		local segment = modelPath[index]
-		assert(typeof(segment) == "string" and segment ~= "", "Invalid model path segment")
+		if typeof(segment) ~= "string" or segment == "" then
+			found = false
+			break
+		end
 		local nextNode = node:FindFirstChild(segment)
-		assert(
-			nextNode,
-			("Model path segment not found for %s: %s (%s)"):format(itemId, segment, table.concat(modelPath, "/"))
-		)
+		if not nextNode then
+			found = false
+			break
+		end
 		node = nextNode
 	end
 
-	assert(node:IsA("Model"), ("Resolved instance for %s is not a Model (got %s)"):format(itemId, node.ClassName))
+	if found and node:IsA("Model") then
+		return node :: Model
+	end
 
-	return node :: Model
+	-- Fallback model generation
+	local width = spec.WidthCells or spec.Width or 1
+	local depth = spec.DepthCells or spec.Depth or 1
+	local height = 4 -- Default height
+
+	local model = Instance.new("Model")
+	model.Name = itemId
+
+	local part = Instance.new("Part")
+	part.Name = "PrimaryPart"
+	part.Size = Vector3.new(width * 4, height, depth * 4)
+	part.Anchored = true
+	part.CanCollide = false
+	part.Transparency = 0.5
+	part.Color = Color3.fromRGB(255, 0, 255) -- Magenta
+	part.Material = Enum.Material.Neon
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Parent = model
+	model.PrimaryPart = part
+
+	local bb = Instance.new("BillboardGui")
+	bb.Size = UDim2.fromScale(4, 1)
+	bb.StudsOffset = Vector3.new(0, 2, 0)
+	bb.AlwaysOnTop = true
+	bb.Parent = part
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.TextStrokeTransparency = 0
+	label.TextScaled = true
+	label.Text = spec.Name or itemId
+	label.Parent = bb
+
+	return model
 end
 
 function ItemFinder.CloneModel(itemId: string): Model

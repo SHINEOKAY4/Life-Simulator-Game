@@ -59,6 +59,9 @@ local TenantInteractionController = require(ModulesFolder.TenantInteractionContr
 local ChoreController = require(ModulesFolder.ChoreController)
 local TipsController = require(ModulesFolder.TipsController)
 local ReviewController = require(ModulesFolder.ReviewController)
+local UtilityVisuals = require(ModulesFolder.UtilityVisuals)
+local SelectionController = require(ModulesFolder.SelectionController)
+local WireController = require(ModulesFolder.WireController)
 
 local PlotBuilderUI = require(script.Parent.UserInterface.PlotBuilderUI)
 local BuildPaletteUI = require(script.Parent.UserInterface.BuildPaletteUI)
@@ -101,6 +104,9 @@ ResidentChatBubbles.Init()
 ResidentNameBillboard.Init()
 PlotSelector.Init()
 MailboxInteractionController.Init()
+UtilityVisuals.Init()
+SelectionController.Init()
+WireController.Init()
 local ResidentsStore = require(script.Parent.ClientStores.ResidentsStore) :: any
 
 ResidentsStore.Init()

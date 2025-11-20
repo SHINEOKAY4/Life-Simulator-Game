@@ -8,6 +8,7 @@ local Electronics = {
 			PlacementType = "WallMounted",
 			StationType = "FunStation",
 			Station = true,
+			RequiresPower = true,
 			maxOccupancy = 3,
 			WidthCells = 1,
 			DepthCells = 1,

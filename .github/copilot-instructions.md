@@ -35,6 +35,18 @@ src/
 ## Core Architectural Patterns
 
 ### 1. **Network Communication: Packet Library**
+- **Library**: Custom typed networking library (similar to ByteNet) located in `Packages/Packet`.
+- **Definitions**: All packets are defined in `src/Network/*.luau`.
+- **Syntax**: `Packet("Name", {Args}):Response({Returns})`.
+- **Client Usage**:
+  - **Send**: `MyPacket:Fire(args)` (yields if response defined).
+  - **Receive**: `MyPacket.OnClientEvent:Connect(function(args) ... end)`.
+- **Server Usage**:
+  - **Send**: `MyPacket:FireClient(player, args)`.
+  - **Receive**: `MyPacket.OnServerEvent:Connect(function(player, args) ... end)`.
+  - **Handle Request**: `MyPacket.OnServerInvoke = function(player, args) ... end`.
+
+### 2. **Resident AI & Autonomy**
 - **ResidentState** (`Server/Classes/ResidentState.luau`): Stateful object wrapping resident data
   - Owns `ActionQueue` (serialized action execution)
   - Maintains `CancelToken` for interrupting actions

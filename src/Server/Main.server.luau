@@ -20,6 +20,7 @@ local TenantProspectService = require(ServicesFolder.TenantProspectService)
 local TutorialService = require(ServicesFolder.TutorialService)
 local ChoreService = require(ServicesFolder.ChoreService)
 local TipsService = require(ServicesFolder.TipsService)
+local UtilityService = require(ServicesFolder.UtilityService)
 
 local _ResidentActionHandlers = require(ModulesFolder.ResidentActionHandlers)
 
@@ -35,6 +36,13 @@ ResidentCollapseService.Init()
 TutorialService.Init()
 ChoreService.Init()
 TipsService.Init()
+
+-- Ensure power state is recalculated whenever a plot finishes loading
+PlotService.PlotClaimed:Connect(function(player)
+	task.defer(function()
+		UtilityService.Recalculate(player)
+	end)
+end)
 
 ResidentCollapseService.Refresh()
 local function OnPlayerAdded(player: Player)

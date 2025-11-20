@@ -8,6 +8,7 @@ local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local Helpers = require(ServerScriptService.Server.Services.BuildService.Helpers)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
+local UtilityService = require(ServerScriptService.Server.Services.UtilityService)
 
 type Facing = any
 
@@ -21,6 +22,7 @@ type Payload = {
 	ToCellZ: number,
 	ToFacing: string,
 	ToLevel: number?,
+	SubSlotId: string?,
 }
 
 local function moveDoorSegment(
@@ -145,7 +147,7 @@ local function Move(player: Player, payload: Payload): (boolean, string)
 					and cellX == payload.FromCellX
 					and cellZ == payload.FromCellZ
 				then
-					local facingMatches = PlacementKey.NormalizeFacing(parsedFacing) == fromF
+					local facingMatches = PlacementKey.NormalizeFacing(parsedFacing :: any) == fromF
 					if facingMatches then
 						sourceSaved = entry
 						normalizedSubSlotId = SubSlotResolver.ResolveSavedSlotId(entry.Metadata, spec)
@@ -298,6 +300,7 @@ local function Move(player: Player, payload: Payload): (boolean, string)
 		toKey
 	)
 
+	UtilityService.Recalculate(player)
 	return true, "Moved"
 end
 

@@ -12,6 +12,7 @@ local PlotStateModule = require(ServerScriptService.Server.Classes.PlotState)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
 local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
+local UtilityService = require(ServerScriptService.Server.Services.UtilityService)
 
 type Facing = PlotStateModule.Facing
 
@@ -47,6 +48,7 @@ type Payload = {
 	CeilingMountNormalZ: number?,
 	WindowEnabled: boolean?,
 	WindowHeightOffset: number?,
+	SubSlotId: string?,
 }
 
 -- Derives authoritative world pose metadata for wall-mounted items using the plot grid.
@@ -428,6 +430,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		)
 
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
+		UtilityService.Recalculate(player)
 
 		return true, "Floor placed"
 	elseif placementType == "WallMounted" then
@@ -518,6 +521,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 
 		Helpers.sendPlacementDelta(player, "Placed", payload.ItemId, wallCellX, wallCellZ, wallFacing, metadata, level)
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
+		UtilityService.Recalculate(player)
 		return true, "Wall attachment placed"
 	elseif placementType == "Ceiling" then
 		local ceilingEnabled = payload.CeilingMountEnabled == true
@@ -621,6 +625,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			ceilingLevel
 		)
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
+		UtilityService.Recalculate(player)
 		return true, "Ceiling decor placed"
 	elseif itemData.PlacementType == "CellObject" then
 		local widthCells = itemData.WidthCells or itemData.Width or 1
@@ -708,6 +713,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		)
 
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
+		UtilityService.Recalculate(player)
 		return true, "Cell object placed"
 	elseif itemData.PlacementType == "Wall" then
 		local requiresFloorOnBothSides = itemData.RequiresFloorOnBothSides or false
@@ -970,9 +976,11 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			Helpers.deductPlacementCost(player, currencyState, totalCost)
 
 			if isWindowVariant then
+				UtilityService.Recalculate(player)
 				return true, "Window installed"
 			end
 
+			UtilityService.Recalculate(player)
 			return true, "Door installed"
 		end
 
@@ -1011,6 +1019,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		)
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
 
+		UtilityService.Recalculate(player)
 		return true, "Wall placed"
 	elseif itemData.PlacementType == "Roof" then
 		local widthCells = itemData.WidthCells or itemData.Width or 1
@@ -1041,6 +1050,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		Helpers.sendPlacementDelta(player, "Placed", payload.ItemId, payload.CellX, payload.CellZ, facing, nil, level)
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
 
+		UtilityService.Recalculate(player)
 		return true, "Roof placed"
 	else
 		return false, "Unknown placement type"

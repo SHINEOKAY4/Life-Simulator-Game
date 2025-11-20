@@ -80,6 +80,8 @@ export type SavedPlacedObject = {
 	cellZ: number,
 	facing: Facing?,
 	yLevel: number?,
+	WidthCells: number?,
+	DepthCells: number?,
 	Metadata: { [string]: any }?,
 }
 
@@ -149,6 +151,7 @@ export type PlotState = {
 		yLevel: number?
 	) -> string,
 	NormalizeLevel: (self: PlotState, yLevel: number?) -> number,
+	GetFloorHeightStuds: (self: PlotState) -> number,
 	GetCellFreeForLevel: (self: PlotState, yLevel: number?) -> { [number]: boolean },
 	GetFloorFilledForLevel: (self: PlotState, yLevel: number?) -> { [number]: boolean },
 	GetRoofFilledForLevel: (self: PlotState, yLevel: number?) -> { [number]: boolean },
@@ -292,6 +295,29 @@ export type PlotState = {
 		facing: Facing,
 		yLevel: number?
 	) -> SavedPlacedObject?,
+	CanPlaceCeilingMounted: (
+		self: PlotState,
+		cellX: number,
+		cellZ: number,
+		facing: Facing,
+		yLevel: number?
+	) -> (boolean, string?),
+	PlaceCeilingMounted: (
+		self: PlotState,
+		objectId: string,
+		cellX: number,
+		cellZ: number,
+		facing: Facing,
+		metadata: { [string]: any }?,
+		yLevel: number?
+	) -> (boolean, string?),
+	RemoveCeilingMounted: (
+		self: PlotState,
+		cellX: number,
+		cellZ: number,
+		facing: Facing,
+		yLevel: number?
+	) -> SavedPlacedObject?,
 	PlaceSurfaceMount: (
 		self: PlotState,
 		objectId: string,
@@ -346,7 +372,8 @@ export type PlotState = {
 		widthCells: number,
 		depthCells: number,
 		facing: Facing,
-		yLevel: number?
+		yLevel: number?,
+		options: { [string]: any }?
 	) -> (boolean, string),
 	RemoveCellObject: (
 		self: PlotState,
@@ -355,7 +382,8 @@ export type PlotState = {
 		widthCells: number,
 		depthCells: number,
 		facing: Facing,
-		yLevel: number?
+		yLevel: number?,
+		options: { [string]: any }?
 	) -> (),
 	MoveCellObject: (
 		self: PlotState,
@@ -367,7 +395,8 @@ export type PlotState = {
 		toZ: number,
 		toF: Facing,
 		fromLevel: number?,
-		toLevel: number?
+		toLevel: number?,
+		options: { [string]: any }?
 	) -> (boolean, string?),
 	MoveFloor: (
 		self: PlotState,

@@ -2,6 +2,26 @@
 
 local Utilities = {
 	Electrical = {
+		SmallGenerator = {
+			Name = "Small Generator",
+			PlacementType = "CellObject",
+			WidthCells = 1,
+			DepthCells = 2,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 500,
+			Description = "A noisy but reliable generator. Connect to outlets to provide power.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Utility", "Power", "Generator" },
+			ModelPath = { "Furnitures", "SmallGenerator" }, -- Placeholder
+			AssetId = 0,
+			PowerSource = true,
+			PowerRadius = 0, -- No wireless power
+			MaxConnections = 4,
+			EffectSummary = {
+				"Generates electricity.",
+				"Must be connected to outlets or appliances via wires.",
+			},
+		},
 		ElectricBox = {
 			Name = "Electric Box",
 			PlacementType = "WallMounted",
@@ -26,6 +46,34 @@ local Utilities = {
 			EffectSummary = {
 				"Provides a safe enclosure for electrical systems.",
 				"Built to withstand various environmental conditions.",
+			},
+		},
+		WallOutlet = {
+			Name = "Wall Outlet",
+			PlacementType = "WallMounted",
+			WallMountConfig = {
+				AttachmentSurface = "Back",
+				OffsetFromWall = 0.05,
+				MinHeight = 1,
+				MaxHeight = 5,
+				RequiresFloorSupport = false,
+				CollisionCheck = true,
+			},
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 50,
+			Description = "Extends power from a generator or another outlet.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Utility", "Power", "Outlet" },
+			ModelPath = { "Furnitures", "WallOutlet" }, -- Placeholder
+			AssetId = 0,
+			PowerConductor = true,
+			ConnectionRadius = 12, -- Can connect to source/outlet within 12 studs
+			PowerRadius = 8, -- Powers appliances within 8 studs
+			EffectSummary = {
+				"Connects to nearby power sources.",
+				"Powers nearby appliances.",
 			},
 		},
 	},
@@ -66,7 +114,43 @@ local Utilities = {
 			},
 		},
 	},
-	Plumbing = {},
+	Plumbing = {
+		WaterPump = {
+			Name = "Water Pump",
+			PlacementType = "CellObject",
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 400,
+			Description = "Pumps water to connected pipes.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Utility", "Water", "Pump" },
+			ModelPath = { "Furnitures", "WaterPump" }, -- Placeholder
+			AssetId = 0,
+			WaterSource = true,
+			EffectSummary = {
+				"Provides water pressure.",
+				"Connect pipes to distribute water.",
+			},
+		},
+		WaterPipe = {
+			Name = "Water Pipe",
+			PlacementType = "CellObject",
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 10,
+			Description = "Standard PVC pipe for water distribution.",
+			Rules = { RequiresFloorUnderAllCells = true },
+			Tags = { "Utility", "Water", "Pipe" },
+			ModelPath = { "Furnitures", "WaterPipe" }, -- Placeholder
+			AssetId = 0,
+			WaterConductor = true,
+			EffectSummary = {
+				"Connects water sources to sinks and showers.",
+			},
+		},
+	},
 	Safety = {},
 	HVAC = {},
 	Storage = {

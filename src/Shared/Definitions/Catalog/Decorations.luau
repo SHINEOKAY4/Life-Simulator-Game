@@ -10,6 +10,7 @@ local Decorations = {
 			DepthCells = 1,
 			Facing = { "North", "East", "South", "West" },
 			EnergyConsumptionPerHour = 1,
+			RequiresPower = true,
 			Cost = 75,
 			Description = "Warm standing lamp with a woven shade and gentle glow.",
 			Rules = { RequiresFloorUnderAllCells = false },
@@ -41,8 +42,9 @@ local Decorations = {
 			DepthCells = 1,
 			Facing = { "North", "East", "South", "West" },
 			Cost = 110,
+			RequiresPower = true,
 			Description = "Suspended ceiling fixture with a matte shade that pools light right where you need it.",
-			Tags = { "Lighting", "Ceiling" },
+			Tags = { "Lighting", "Ceiling", "Light" },
 			Rules = { RequiresFloorUnderAllCells = true },
 			CeilingMountConfig = {
 				MinDropStuds = 2,

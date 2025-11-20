@@ -15,6 +15,8 @@ local PlaceSurfaceMount = require(script.Actions.PlaceSurfaceMount)
 local DestroySurfaceMount = require(script.Actions.DestroySurfaceMount)
 local Rotate = require(script.Actions.Rotate)
 local PaintSurface = require(script.Actions.PaintSurface)
+local ConnectUtility = require(script.Actions.ConnectUtility)
+local DisconnectUtility = require(script.Actions.DisconnectUtility)
 
 local BuildService = {}
 
@@ -43,6 +45,8 @@ BuildService.PlaceSurfaceMount = PlaceSurfaceMount
 BuildService.DestroySurfaceMount = DestroySurfaceMount
 BuildService.PaintSurface = PaintSurface.PaintSurface
 BuildService.PaintSurfaceBatch = PaintSurface.PaintSurfaceBatch
+BuildService.ConnectUtility = ConnectUtility
+BuildService.DisconnectUtility = DisconnectUtility
 
 function BuildService.Init()
 	Packets.PlaceRequest.OnServerInvoke = withRateLimit(BuildService.Build)
@@ -56,6 +60,8 @@ function BuildService.Init()
 	Packets.DestroyRequest.OnServerInvoke = withRateLimit(BuildService.Destroy)
 	Packets.MoveRequest.OnServerInvoke = withRateLimit(BuildService.Move)
 	Packets.RotateRequest.OnServerInvoke = withRateLimit(BuildService.Rotate)
+	Packets.ConnectUtilityRequest.OnServerInvoke = withRateLimit(BuildService.ConnectUtility)
+	Packets.DisconnectUtilityRequest.OnServerInvoke = withRateLimit(BuildService.DisconnectUtility)
 end
 
 return BuildService

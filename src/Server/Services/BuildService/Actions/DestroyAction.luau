@@ -7,6 +7,7 @@ local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
+local UtilityService = require(ServerScriptService.Server.Services.UtilityService)
 
 local Helpers = require(ServerScriptService.Server.Services.BuildService.Helpers)
 
@@ -29,7 +30,14 @@ end
 
 local function DestroyAction(
 	player: Player,
-	payload: { ItemId: string, CellX: number, CellZ: number, Facing: string, Level: number? }
+	payload: {
+		ItemId: string,
+		CellX: number,
+		CellZ: number,
+		Facing: string,
+		Level: number?,
+		SubSlotId: string?,
+	}
 ): (boolean, string)
 	local state = PlotService.GetState(player)
 	if not state then
@@ -66,7 +74,7 @@ local function DestroyAction(
 			local fallbackSaved = savedFromIdentifier
 			local fallbackLevel = if typeof(fallbackSaved.yLevel) == "number" then fallbackSaved.yLevel else levelHint
 			saved = fallbackSaved
-			keyFacing = PlacementKey.NormalizeFacing(fallbackSaved.facing) :: Facing
+			keyFacing = PlacementKey.NormalizeFacing(fallbackSaved.facing :: any) :: Facing
 			key = state:PlacementKeyForType(
 				fallbackSaved.cellX,
 				fallbackSaved.cellZ,
@@ -85,7 +93,7 @@ local function DestroyAction(
 						if parsedType == entryKeyType then
 							saved = entry
 							placementKeyType = entryKeyType
-							keyFacing = PlacementKey.NormalizeFacing(entry.facing) :: Facing
+							keyFacing = PlacementKey.NormalizeFacing(entry.facing :: any) :: Facing
 							key = state:PlacementKeyForType(cellX, cellZ, keyFacing, placementKeyType, parsedLevel)
 							break
 						end
@@ -113,7 +121,7 @@ local function DestroyAction(
 		or spec.DepthCells
 		or spec.Depth
 		or 1
-	local facing: Facing = PlacementKey.NormalizeFacing(saved.facing) :: Facing
+	local facing: Facing = PlacementKey.NormalizeFacing(saved.facing :: any) :: Facing
 
 	local removedId = resolvedId
 	local restoredId: string? = nil
@@ -181,6 +189,7 @@ local function DestroyAction(
 		)
 	end
 
+	UtilityService.Recalculate(player)
 	return true, "Removed"
 end
 

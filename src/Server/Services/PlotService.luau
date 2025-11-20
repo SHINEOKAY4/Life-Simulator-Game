@@ -433,7 +433,8 @@ function PlotService.UnlockArea(player: Player, chunkX: number, chunkZ: number):
 	local increment = BuildConstants.ExpansionCostIncrement or 200
 	local cost = baseCost + math.max(0, unlockedCount - 1) * increment
 
-	local currencyData = PlayerSession.GetDataAwait(player, "CurrencyState")
+	local rawCurrencyData = PlayerSession.GetDataAwait(player, "CurrencyState")
+	local currencyData = if typeof(rawCurrencyData) == "table" then rawCurrencyData :: { [string]: number } else {}
 	local currentCash = CurrencyService.Get(player, "Cash", currencyData)
 
 	if currentCash < cost then
