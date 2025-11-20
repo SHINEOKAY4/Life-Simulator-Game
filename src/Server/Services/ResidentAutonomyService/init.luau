@@ -11,14 +11,15 @@ local ResidentService = require(ServerScriptService.Server.Services.ResidentServ
 local ResidentMovement = require(ServerScriptService.Server.Utilities.ResidentMovement)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
+local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local TraitUtils = require(ReplicatedStorage.Shared.Utilities.TraitUtils)
+local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 
 local Constants = require(script.Constants)
 local State = require(script.State)
 local Utils = require(script.Utils)
-local NeedEvaluator = require(script.NeedEvaluator)
-local SocialCoordinator = require(script.SocialCoordinator)
 local ActionQueue = require(script.ActionQueue)
-local FallbackActions = require(script.FallbackActions)
+local StationManager = require(script.StationManager)
 local TipsService = require(ServerScriptService.Server.Services.TipsService)
 local TenantTraits = require(ReplicatedStorage.Shared.Definitions.TenantTraits)
 
@@ -28,113 +29,219 @@ export type ResidentState = any
 
 local ResidentAutonomyService = {}
 
-local function getPlayerByUserId(userId: number): Player?
-	return Players:GetPlayerByUserId(userId)
+local PlayerCache: { [number]: Player } = {}
+
+local function onPlayerAdded(player: Player)
+	PlayerCache[player.UserId] = player
 end
 
-function ResidentAutonomyService.EvaluateResidentNeeds(
+local function onPlayerRemoving(player: Player)
+	PlayerCache[player.UserId] = nil
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+	onPlayerAdded(player)
+end
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+local function isNight(clockTime: number): boolean
+	return clockTime >= 22 or clockTime < 6
+end
+
+local function wander(player: Player, residentName: string, resident: ResidentState): boolean
+	local plotState = PlotService.GetState(player)
+	if not plotState then
+		return false
+	end
+
+	local unlockedChunks = plotState.Save.UnlockedChunks
+	if not unlockedChunks or #unlockedChunks == 0 then
+		return false
+	end
+
+	local randomChunk = unlockedChunks[math.random(1, #unlockedChunks)]
+	local chunkSize = plotState.ChunkSizeInCells or 5
+	local plotIndex = player:GetAttribute("OwnedPlotIndex")
+	if typeof(plotIndex) ~= "number" then
+		return false
+	end
+
+	local gridObject = PlotService.GetGrid(plotIndex)
+	if not gridObject then
+		return false
+	end
+
+	local minX = (randomChunk.cx - 1) * chunkSize + 1
+	local maxX = randomChunk.cx * chunkSize
+	local minZ = (randomChunk.cz - 1) * chunkSize + 1
+	local maxZ = randomChunk.cz * chunkSize
+
+	local cellX = math.random(minX, maxX)
+	local cellZ = math.random(minZ, maxZ)
+	local worldPos = gridObject:CellToWorldCenter(cellX, cellZ)
+
+	return ActionQueue.enqueueFallbackAction(player, residentName, resident, "Wander", {
+		TargetPosition = worldPos,
+	})
+end
+
+local function applyDecay(player: Player, resident: ResidentState, gameHours: number)
+	if gameHours <= 0 then
+		return
+	end
+	local globalPaused = false
+	if resident and typeof(resident.IsNeedDecayPaused) == "function" then
+		globalPaused = resident:IsNeedDecayPaused()
+	end
+	if globalPaused then
+		return
+	end
+
+	-- Resolve tenant traits for decay multipliers (Cached)
+	local now = os.clock()
+	local tenantMultipliers = resident._CachedTenantMultipliers
+	if not tenantMultipliers or (now - (resident._LastTenantMultiplierUpdate or 0) > 10) then
+		tenantMultipliers = {}
+		if resident.Save and resident.Save.TenantId then
+			if not TenantService then
+				TenantService = require(ServerScriptService.Server.Services.TenantService)
+			end
+			local leases = TenantService.GetActiveLeases(player)
+			if leases and leases[resident.Save.TenantId] then
+				local lease = leases[resident.Save.TenantId]
+				if lease.Traits then
+					for _, traitId in ipairs(lease.Traits) do
+						local trait = TenantTraits.GetTrait(traitId)
+						if trait and trait.Effects and trait.Effects.NeedDecayMultipliers then
+							for need, mult in pairs(trait.Effects.NeedDecayMultipliers) do
+								tenantMultipliers[need] = (tenantMultipliers[need] or 1) * mult
+							end
+						end
+					end
+				end
+			end
+		end
+		resident._CachedTenantMultipliers = tenantMultipliers
+		resident._LastTenantMultiplierUpdate = now
+	end
+
+	local hasNeedPauseCheck = resident and typeof(resident.IsNeedPaused) == "function"
+	for needName, definition in pairs(NeedConfig.Needs) do
+		if hasNeedPauseCheck and resident:IsNeedPaused(needName) then
+			continue
+		end
+		local value = resident:GetNeed(needName)
+		local traits = if resident.GetTraits then resident:GetTraits() else nil
+		local decayMultiplier = TraitUtils.GetNeedDecayMultiplier(traits, needName)
+
+		if tenantMultipliers[needName] then
+			decayMultiplier *= tenantMultipliers[needName]
+		end
+
+		local decayRate = definition.DecayPerHour * decayMultiplier
+		local newValue = math.clamp(value - decayRate * gameHours, definition.Min, definition.Max)
+		if newValue ~= value then
+			resident:SetNeed(needName, newValue)
+		end
+	end
+end
+
+local function tryUseStation(
+	player: Player,
+	residentName: string,
+	resident: ResidentState,
+	stationType: string,
+	stationCache: { [string]: any }
+): boolean
+	local uniqueId, stationRecord, itemSpec, stationModel =
+		StationManager.findAvailableStation(player, stationType, residentName, stationCache, nil)
+
+	if uniqueId and stationRecord and itemSpec and stationModel then
+		local decision = {
+			StationType = stationType,
+			UniqueId = uniqueId,
+			StationRecord = stationRecord,
+			ItemSpec = itemSpec,
+			StationModel = stationModel,
+			NeedName = "Satisfaction", -- Generic need name for simple system
+			ActionMode = nil,
+			TargetContainerId = nil,
+			PreparedMealId = nil,
+			PreparedMealServings = nil,
+			PreparedMealHungerPerPortion = nil,
+		}
+		return ActionQueue.enqueueNeedAction(player, residentName, resident, decision)
+	end
+	return false
+end
+
+function ResidentAutonomyService.DecideForResident(
 	player: Player,
 	residentName: string,
 	resident: ResidentState,
 	nowClock: number,
 	clockTime: number,
-	stationCache: { [string]: any }?
+	stationCache: { [string]: any }
 )
-	return NeedEvaluator.evaluate(player, residentName, resident, nowClock, clockTime, stationCache)
-end
-
-function ResidentAutonomyService.TrySatisfyNeedsForResident(
-	player: Player,
-	residentName: string,
-	residentState: ResidentState,
-	nowClock: number?,
-	clockTime: number?,
-	stationCacheOverride: { [string]: any }?
-): boolean
-	if not Utils.shouldEvaluate(residentState) then
-		return false
+	if not Utils.shouldEvaluate(resident) then
+		return
 	end
-	local evaluationClock = nowClock or os.clock()
-	local scheduled = State.getNextEvaluation(residentState)
-	if scheduled and evaluationClock < scheduled then
-		return false
-	end
-	State.clearNextEvaluation(residentState)
-	local evaluationTime = clockTime or TimeScale.GetClockTime()
-	local stationCache = stationCacheOverride or PlotService.GetStationsForPlayer(player)
-	local attemptedDirectSocial = false
 
-	-- Prefer conversational social interactions before falling back to stations.
-	local needs = State.getNeeds()
-	local socialDef = needs.Social
-	if socialDef then
-		local cooldownSeconds = State.getNeedCooldownSeconds("Social", socialDef)
-		local onCooldown = State.isNeedOnCooldown(residentState, "Social", cooldownSeconds, evaluationClock)
-		if not onCooldown then
-			local socialValue = residentState:GetNeed("Social")
-			if socialValue < socialDef.Low then
-				local blocking = Utils.hasBlockingCriticalNeed(player, residentState, "Social", stationCache)
-				if not blocking then
-					attemptedDirectSocial = true
-					if SocialCoordinator.attemptDirectSocial(player, residentName, residentState, stationCache) then
-						return true
-					end
-				end
-			end
+	local scheduled = State.getNextEvaluation(resident)
+	if scheduled and nowClock < scheduled then
+		return
+	end
+	State.clearNextEvaluation(resident)
+
+	-- Simple Logic Loop
+	local energy = resident:GetNeed("Energy")
+	local night = isNight(clockTime)
+
+	-- 1. Sleep Logic
+	if energy < 10 or (night and energy < 60) then
+		if tryUseStation(player, residentName, resident, "RestStation", stationCache) then
+			return
+		end
+		-- If tired but no bed, complain? Or just wander.
+	end
+
+	-- 2. Amenity Logic (Daytime or not tired)
+	-- Pick a random amenity type to use
+	local amenityTypes = { "FunStation", "SocialStation", "HygieneStation", "CookStation", "ComfortStation" }
+	-- Shuffle
+	for i = #amenityTypes, 2, -1 do
+		local j = math.random(i)
+		amenityTypes[i], amenityTypes[j] = amenityTypes[j], amenityTypes[i]
+	end
+
+	for _, stationType in ipairs(amenityTypes) do
+		-- 50% chance to skip checking this type to add randomness
+		if math.random() < 0.5 then
+			continue
+		end
+		if tryUseStation(player, residentName, resident, stationType, stationCache) then
+			return
 		end
 	end
-	local decision = ResidentAutonomyService.EvaluateResidentNeeds(
-		player,
-		residentName,
-		residentState,
-		evaluationClock,
-		evaluationTime,
-		stationCache
-	)
-	if not decision then
-		local forcedNeed = State.getForcedNeed(residentState, evaluationClock)
-		if forcedNeed then
-			local forcedDef = State.getNeeds()[forcedNeed]
-			if forcedDef then
-				local value = residentState:GetNeed(forcedNeed)
-				if value <= forcedDef.Critical then
-					State.setForcedNeed(residentState, forcedNeed, evaluationClock)
-				end
-			end
-			local delay = math.min(2, State.computeNextEvaluationDelay(residentState))
-			State.setNextEvaluation(residentState, evaluationClock + delay)
-			return false
-		end
-		local otherCriticalNeeds = Utils.hasBlockingCriticalNeed(player, residentState, "Social", stationCache)
-		if not otherCriticalNeeds and not attemptedDirectSocial then
-			if SocialCoordinator.attemptDirectSocial(player, residentName, residentState, stationCache) then
-				return true
-			end
-		end
 
-		if FallbackActions.evaluateFallback(player, residentName, residentState, stationCache) then
-			return true
-		end
+	-- 3. Wander Logic
+	if wander(player, residentName, resident) then
+		-- Set a delay before next evaluation so they don't spam wander
+		local delay = math.random(5, 10)
+		State.setNextEvaluation(resident, nowClock + delay)
+		return
+	end
 
-		local delay = State.computeNextEvaluationDelay(residentState)
-		State.setNextEvaluation(residentState, evaluationClock + delay)
-		return false
-	end
-	if ActionQueue.enqueueNeedAction(player, residentName, residentState, decision) then
-		State.clearNextEvaluation(residentState)
-		return true
-	end
-	local delay = State.computeNextEvaluationDelay(residentState)
-	State.setNextEvaluation(residentState, evaluationClock + delay)
-	return false
+	-- If nothing happened, wait a bit
+	State.setNextEvaluation(resident, nowClock + 2)
 end
 
 local function updatePassiveFun(residents: { [string]: ResidentState }, stationCache: { [string]: any })
+	-- Keep this for now, maybe rename to "PassiveSatisfaction" later
 	local funStations = stationCache["FunStation"]
 	local funScore = 0
 	if funStations then
-		-- Simple logic: each fun station adds 25% to the passive fun score
-		-- This could be expanded to check item quality/tier in the future
 		local count = 0
 		for _ in pairs(funStations) do
 			count += 1
@@ -158,22 +265,10 @@ local function handleStationRemoved(player: Player, _stationType: string, _uniqu
 			if residentState then
 				residentState:CancelCurrentAction("StationRemoved")
 				residentState:ClearQueuedActions()
-				-- Ensure we clear any rest pose (lying down) in case the station (e.g., a bed)
-				-- was removed while the resident was resting. LeaveSeat handles seated
-				-- residents but does not clear rest poses applied for lying down.
 				ResidentMovement.LeaveSeat(residentState, nil)
 				ResidentMovement.ClearRestPose(residentState)
 				State.setPending(residentState, nil)
 				State.clearNextEvaluation(residentState)
-				task.defer(function()
-					ResidentAutonomyService.TrySatisfyNeedsForResident(
-						player,
-						residentName,
-						residentState,
-						os.clock(),
-						TimeScale.GetClockTime()
-					)
-				end)
 			end
 		end
 	end
@@ -183,48 +278,22 @@ function ResidentAutonomyService.Decide(dt: number)
 	local nowClock = os.clock()
 	local clockTime = TimeScale.GetClockTime()
 	local allResidents = ResidentService.GetResidents()
+	local gameHours = TimeScale.GameHoursFromRealDelta(dt)
+
 	for userId, residents in pairs(allResidents) do
-		local player = getPlayerByUserId(userId)
+		local player = PlayerCache[userId]
 		if player then
 			local stationCache = PlotService.GetStationsForPlayer(player)
-
-			-- Update passive fun based on plot contents
 			updatePassiveFun(residents, stationCache)
 
 			for residentName, residentState in pairs(residents) do
-				-- Update dissatisfaction
+				-- Update Needs Decay
+				applyDecay(player, residentState, gameHours)
+
+				-- Satisfaction Logic
 				local satisfaction = residentState:GetSatisfaction()
 
-				-- Resolve tenant traits
-				local tipMultiplier = 1
-				local dissatisfactionMultiplier = 1
-				local tenantId = residentState.Save.TenantId
-				local lease = nil
-
-				if tenantId then
-					if not TenantService then
-						TenantService = require(ServerScriptService.Server.Services.TenantService)
-					end
-					local leases = TenantService.GetActiveLeases(player)
-					if leases and leases[tenantId] then
-						lease = leases[tenantId]
-						if lease.Traits then
-							for _, traitId in ipairs(lease.Traits) do
-								local trait = TenantTraits.GetTrait(traitId)
-								if trait and trait.Effects then
-									if trait.Effects.TipMultiplier then
-										tipMultiplier *= trait.Effects.TipMultiplier
-									end
-									if trait.Effects.DissatisfactionMultiplier then
-										dissatisfactionMultiplier *= trait.Effects.DissatisfactionMultiplier
-									end
-								end
-							end
-						end
-					end
-				end
-
-				-- Tip Logic: Detect transition from Not Satisfied (< 0.5) to Satisfied (>= 0.5)
+				-- Tip Logic (Simplified)
 				local isSatisfied = satisfaction >= 0.5
 				local wasSatisfied = residentState.WasSatisfied
 
@@ -234,38 +303,28 @@ function ResidentAutonomyService.Decide(dt: number)
 					residentState.WasSatisfied = true
 					local root = residentState.Model and residentState.Model.PrimaryPart
 					if root then
-						local tipAmount = 50
-						if lease then
-							local tierId = lease.TierId
-							if tierId == "Cozy" then
-								tipAmount = 100
-							elseif tierId == "Upgraded" then
-								tipAmount = 250
-							elseif tierId == "Premium" then
-								tipAmount = 500
-							end
-						end
-
-						tipAmount = math.floor(tipAmount * tipMultiplier)
-						TipsService.AwardTip(player, residentName, tipAmount, root.Position)
+						TipsService.SpawnTip(player, residentName, 50, root.Position, "Satisfaction")
 					end
 				elseif wasSatisfied and not isSatisfied then
 					residentState.WasSatisfied = false
 				end
 
-				-- Apply dissatisfaction multiplier to dt
-				residentState:UpdateDissatisfaction(dt * dissatisfactionMultiplier, satisfaction, 0.35) -- 35% threshold
+				-- Dissatisfaction Accumulation
+				residentState:UpdateDissatisfaction(dt, satisfaction, 0.35)
 
-				if residentState:GetDissatisfactionTime() > 1200 then -- 20 minutes tolerance
+				if residentState:GetDissatisfactionTime() > 1200 then
+					local tenantId = residentState.Save.TenantId
 					if tenantId then
+						if not TenantService then
+							TenantService = require(ServerScriptService.Server.Services.TenantService)
+						end
 						task.defer(function()
 							TenantService.EvictTenant(player, tenantId)
-							-- Notification could be handled here or in TenantService
 						end)
 					end
 				end
 
-				ResidentAutonomyService.TrySatisfyNeedsForResident(
+				ResidentAutonomyService.DecideForResident(
 					player,
 					residentName,
 					residentState,
@@ -296,9 +355,6 @@ function ResidentAutonomyService.Init()
 		State.StationIteratorState[player.UserId] = nil
 	end)
 	PlotService.StationRemoved:Connect(handleStationRemoved)
-	ResidentService.PlayerResidentsChanged:Connect(function()
-		-- Cooldowns use weak keys; no explicit cleanup needed beyond clearing pending flags.
-	end)
 	startTask()
 end
 

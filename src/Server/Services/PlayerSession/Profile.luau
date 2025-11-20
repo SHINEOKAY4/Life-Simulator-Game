@@ -42,14 +42,6 @@ local Profile = {
 			Interest = 0,
 		},
 	},
-	KitchenState = {
-		Version = 1,
-		Seeded = false,
-		Ingredients = {},
-		Meals = {},
-		LastCookedAt = 0,
-		Containers = {},
-	},
 	EnergyState = {
 		BaseLoad = 0,
 		ActiveLoad = 0,
@@ -62,6 +54,9 @@ local Profile = {
 		IsCompleted = false,
 		Step = 0,
 		HasReceivedStartingCash = false,
+	},
+	ReviewState = {
+		Reviews = {},
 	},
 }
 

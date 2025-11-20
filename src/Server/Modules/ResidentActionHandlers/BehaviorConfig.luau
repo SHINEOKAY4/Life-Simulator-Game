@@ -3,7 +3,6 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local AutonomyState = require(ServerScriptService.Server.Services.ResidentAutonomyService.State)
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 
@@ -191,6 +190,7 @@ local RestProfiles: {
 		UseSeat: boolean,
 		TargetEnergy: number?,
 		ChatPhrases: { any }?,
+		ActionEmoji: string?,
 		Moodlets: { { Name: string, DurationSeconds: number, NeedBias: { [string]: number }? } }?,
 	},
 } =
@@ -201,21 +201,22 @@ local RestProfiles: {
 			RatePerHour = 12,
 			UseSeat = false,
 			TargetEnergy = computeEnergyTarget(Needs.Energy.Max, -1),
+			ActionEmoji = "😴",
 			ChatPhrases = {
 				{
-					Text = "Turning in for the night...",
+					Text = "😴",
 					MinClock = 19,
 					MaxClock = 6,
 				},
 				{
-					Text = "I'm exhausted... time to lie down.",
+					Text = "💤",
 					MaxNeeds = { Energy = energyLow },
 				},
 				{
-					Text = "Time for a long rest.",
+					Text = "🛌",
 				},
 				{
-					Text = "Grabbing proper sleep while I can.",
+					Text = "🌙",
 					MinClock = 6,
 					MaxClock = 19,
 				},
@@ -230,16 +231,17 @@ local RestProfiles: {
 			RatePerHour = 10,
 			UseSeat = true,
 			TargetEnergy = computeEnergyTarget(Needs.Energy.Low, Needs.Energy.Hysteresis + 6),
+			ActionEmoji = "💤",
 			ChatPhrases = {
 				{
-					Text = "Just a quick nap...",
+					Text = "💤",
 					MaxClock = 20,
 				},
 				{
-					Text = "Let me rest my eyes for a bit.",
+					Text = "🛋️",
 				},
 				{
-					Text = "Power nap coming right up.",
+					Text = "🥱",
 					MinClock = 10,
 					MaxClock = 18,
 				},
@@ -251,11 +253,12 @@ local RestProfiles: {
 			RatePerHour = 9,
 			UseSeat = true,
 			TargetEnergy = computeEnergyTarget(Needs.Energy.Low, Needs.Energy.Hysteresis + 4),
+			ActionEmoji = "😌",
 			ChatPhrases = {
-				{ Text = "Taking a moment to relax." },
-				{ Text = "Getting comfy for a bit." },
+				{ Text = "😌" },
+				{ Text = "🛋️" },
 				{
-					Text = "Just lounging for a moment.",
+					Text = "🧘",
 					MinClock = 9,
 					MaxClock = 22,
 				},
@@ -270,18 +273,19 @@ local RestProfiles: {
 			RatePerHour = 10,
 			UseSeat = false,
 			TargetEnergy = computeEnergyTarget(Needs.Energy.Low, Needs.Energy.Hysteresis + 4),
+			ActionEmoji = "☀️",
 			ChatPhrases = {
 				{
-					Text = "Grabbing a quick lie-down...",
+					Text = "☀️",
 					MinClock = 8,
 					MaxClock = 20,
 				},
 				{
-					Text = "Just resting until I'm steady again.",
+					Text = "😴",
 					MaxNeeds = { Energy = energyLow },
 				},
 				{
-					Text = "Can't burn out—short reset time.",
+					Text = "🔋",
 				},
 			} :: { any },
 		},
@@ -291,11 +295,12 @@ local RestProfiles: {
 			RatePerHour = 6,
 			UseSeat = false,
 			TargetEnergy = nil,
+			ActionEmoji = "😵",
 			ChatPhrases = {
-				{ Text = "I guess the floor will have to do..." },
-				{ Text = "Not ideal, but I need to rest." },
+				{ Text = "😵" },
+				{ Text = "🛌" },
 				{
-					Text = "Too tired to care where I sleep.",
+					Text = "📉",
 					MaxNeeds = { Energy = energyCritical },
 				},
 			} :: { any },
@@ -324,14 +329,12 @@ local function createRestShouldEnd(mode: string, targetEnergy: number?): ((any) 
 		if hungerDef then
 			local hunger = residentState:GetNeed("Hunger")
 			if hunger <= hungerDef.Critical then
-				if not AutonomyState.isSurvivalNeedUnavailable(residentState, "Hunger") then
-					if not energyDefLocal then
-						return "NeedUrgent:Hunger"
-					end
-					local energy = residentState:GetNeed("Energy")
-					if energy > energyDefLocal.Critical then
-						return "NeedUrgent:Hunger"
-					end
+				if not energyDefLocal then
+					return "NeedUrgent:Hunger"
+				end
+				local energy = residentState:GetNeed("Energy")
+				if energy > energyDefLocal.Critical then
+					return "NeedUrgent:Hunger"
 				end
 			end
 		end
@@ -375,6 +378,7 @@ function BehaviorConfig.applyRestProfile(behavior: Behavior, mode: string?)
 	behavior.Moodlets = if profile.Moodlets then BehaviorConfig.copyMoodlets(profile.Moodlets) else nil
 	behavior.ChatPhrases = if profile.ChatPhrases then BehaviorConfig.copyChatPhrases(profile.ChatPhrases) else nil
 	behavior.RestProfileKey = profile.Mode
+	behavior.ActionEmoji = profile.ActionEmoji
 
 	local existingGuards = behavior.EmergencyGuards
 	local hungerGuard = if existingGuards then existingGuards.Hunger else nil
@@ -416,7 +420,7 @@ local StationActionLabels: { [string]: string } = {
 	HygieneStation = "wash up",
 	ComfortStation = "use restroom",
 	FunStation = "have fun",
-	FoodStorage = "grab food",
+	FoodStorage = "grab snack",
 }
 
 BehaviorConfig.StationActionLabels = StationActionLabels
@@ -468,23 +472,26 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 	RestStation = {
 		ApproachDistance = 3,
 		MoveTimeoutSeconds = 25,
+		ActionEmoji = "😴",
 	},
 	CookStation = {
 		ApproachDistance = 3,
 		MoveTimeoutSeconds = 25,
-		DurationSeconds = 30,
+		DurationSeconds = 10, -- Short duration to "grab food"
+		ActionEmoji = "👨‍🍳",
 		ChatPhrases = {
-			"I could use a bite!",
-			"Cooking something tasty.",
+			"🍳",
+			"👨‍🍳",
 		},
 	},
 	MealStation = {
 		ApproachDistance = 3,
 		MoveTimeoutSeconds = 22,
 		UseSeat = true,
+		ActionEmoji = "🍽️",
 		ChatPhrases = {
-			"Let's grab a seat and eat.",
-			"Time to enjoy this meal together.",
+			"🍽️",
+			"😋",
 		},
 	},
 	SocialStation = {
@@ -499,31 +506,29 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 			{ Name = "Chatty", DurationSeconds = 200, NeedBias = { Social = -0.3, Fun = -0.15 } },
 		},
 		ChatIntervalSeconds = 6,
+		ActionEmoji = "💬",
 		ChatPhrases = {
-			"Let's catch up!",
-			"I want to chat for a bit.",
-			"Anything exciting happen today?",
-			"Tell me about your day!",
-			"You won't believe what I heard earlier.",
-			"We should plan something fun soon.",
-			"I love hearing your stories.",
-			"Got any good gossip?",
+			"💬",
+			"🗣️",
+			"👋",
+			"😄",
+			"🤝",
+			"😂",
+			"👂",
+			"📢",
 		},
 		ShouldEnd = function(residentState)
 			local socialDef = Needs.Social
 			if not socialDef then
 				return false
 			end
-			local survivalNeeds = AutonomyState.SurvivalNeeds
-			for needName in pairs(survivalNeeds) do
+			local survivalNeeds = { "Hunger", "Bladder", "Energy", "Hygiene" }
+			for _, needName in ipairs(survivalNeeds) do
 				if needName ~= "Social" then
 					local needDef = Needs[needName]
 					if needDef then
 						local value = residentState:GetNeed(needName)
 						if value <= needDef.Critical then
-							if AutonomyState.isSurvivalNeedUnavailable(residentState, needName) then
-								continue
-							end
 							return true
 						end
 					end
@@ -543,9 +548,10 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 		Moodlets = {
 			{ Name = "Fresh", DurationSeconds = 160, NeedBias = { Hygiene = -0.25 } },
 		},
+		ActionEmoji = "🚿",
 		ChatPhrases = {
-			"I need to freshen up!",
-			"Time for a quick wash.",
+			"🚿",
+			"🧼",
 		},
 		ShouldEnd = function(residentState)
 			local def = Needs.Hygiene
@@ -563,9 +569,10 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 		Effects = {
 			{ Need = "Bladder", RatePerHour = 280 },
 		},
+		ActionEmoji = "🚽",
 		ChatPhrases = {
-			"I really have to go...",
-			"Excuse me for a moment!",
+			"🚽",
+			"🚻",
 		},
 		ShouldEnd = function(residentState)
 			local def = Needs.Bladder
@@ -586,9 +593,10 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 		Moodlets = {
 			{ Name = "Entertained", DurationSeconds = 200, NeedBias = { Fun = -0.3 } },
 		},
+		ActionEmoji = "🎮",
 		ChatPhrases = {
-			"I need some fun!",
-			"This will be exciting!",
+			"🎮",
+			"🎲",
 		},
 		ShouldEnd = function(residentState)
 			local def = Needs.Fun
@@ -602,10 +610,15 @@ local StationDefaults: { [string]: BehaviorSpec } = {
 	FoodStorage = {
 		ApproachDistance = 3,
 		MoveTimeoutSeconds = 18,
-		DurationSeconds = 12,
+		DurationSeconds = 8,
+		Effects = {
+			{ Need = "Hunger", InstantAmount = 25 },
+		},
+		ActionEmoji = "🍎",
 		ChatPhrases = {
-			"Let me grab something quick.",
-			"Checking the fridge.",
+			"🍎",
+			"🥪",
+			"🥛",
 		},
 	},
 }
@@ -652,11 +665,6 @@ end
 
 function BehaviorConfig.buildMealEatingBehavior(hungerRestore: number, recipe: any?): Behavior
 	local duration = BehaviorConfig.computeMealEatDuration(hungerRestore)
-	local recipeName = if recipe
-			and typeof(recipe.Name) == "string"
-			and recipe.Name ~= ""
-		then recipe.Name
-		else "this meal"
 	local totalRestore = math.max(hungerRestore, 0)
 	local ratePerHour = 0
 	if duration > 0 and totalRestore > 0 then
@@ -677,9 +685,9 @@ function BehaviorConfig.buildMealEatingBehavior(hungerRestore: number, recipe: a
 		DurationSeconds = duration,
 		Effects = effects,
 		ChatPhrases = {
-			{ Text = string.format("Enjoying %s.", recipeName) },
-			{ Text = "Taking a moment to eat." },
-			{ Text = "Digging in." },
+			{ Text = "😋" },
+			{ Text = "🍽️" },
+			{ Text = "🍗" },
 		},
 		UseSeat = true,
 	}
@@ -733,7 +741,7 @@ function BehaviorConfig.applyMealStationBonus(behavior: Behavior?, seatType: str
 			behavior.ChatPhrases = chatList
 		end
 		local chatOptions = chatList :: { ChatOption }
-		chatOptions[#chatOptions + 1] = { Text = string.format("Sharing %s together.", recipeName) }
+		chatOptions[#chatOptions + 1] = { Text = "🥘" }
 	end
 end
 

@@ -6,11 +6,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local BillboardText = require(script.Parent:WaitForChild("BillboardText"))
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local TenantTraits = require(ReplicatedStorage.Shared.Definitions.TenantTraits)
 local ClientFolder = script.Parent.Parent
 local ClientStoresFolder = ClientFolder:WaitForChild("ClientStores")
 local ResidentsStore = require(ClientStoresFolder:WaitForChild("ResidentsStore"))
-
-local SUBTITLE_COLOR = Color3.fromRGB(218, 223, 235)
 
 type BillboardTextHandle = BillboardText.BillboardTextHandle
 
@@ -23,6 +22,7 @@ export type NameplateEntry = {
 	Handle: BillboardTextHandle,
 	Connections: { RBXScriptConnection },
 	ResidentName: string,
+	Traits: { string }?,
 }
 
 local ResidentNameBillboard = {}
@@ -49,209 +49,36 @@ local function escapeRichText(text: string): string
 	return sanitized
 end
 
-local function trim(text: string): string
-	local trimmed = text:gsub("^%s+", "")
-	return trimmed:gsub("%s+$", "")
-end
-
-local function canonicalizeLabel(raw: string): string
-	local lowered = raw:lower()
-	lowered = lowered:gsub("[:/_%-%s]+", " ")
-	lowered = lowered:gsub("%s+", " ")
-	lowered = lowered:gsub("^%s+", "")
-	lowered = lowered:gsub("%s+$", "")
-	return lowered
-end
-
-local ACTION_LABEL_OVERRIDES: { [string]: string } = {
-	["rest"] = "Resting",
-	["take nap"] = "Napping",
-	["nap"] = "Napping",
-	["sleep"] = "Sleeping",
-	["sleep in"] = "Sleeping",
-	["cook"] = "Cooking",
-	["cook meal"] = "Cooking Meal",
-	["prep meal"] = "Preparing Meal",
-	["wash up"] = "Washing Up",
-	["wash"] = "Washing Up",
-	["clean"] = "Cleaning",
-	["grab snack"] = "Grabbing Snack",
-	["eat snack"] = "Eating Snack",
-	["eat meal"] = "Eating Meal",
-	["have fun"] = "Having Fun",
-	["fun"] = "Having Fun",
-	["chat"] = "Chatting",
-	["socialize"] = "Socializing",
-	["directsocial"] = "Socializing",
-	["hang out"] = "Hanging Out",
-	["check mail"] = "Checking Mail",
-	["pay bills"] = "Paying Bills",
-	["roam"] = "Roaming",
-	["auto roam"] = "Roaming",
-	["look around"] = "Looking Around",
-	["need urgent hunger"] = "Seeking Food",
-	["need urgent hygiene"] = "Freshening Up",
-	["need urgent social"] = "Socializing",
-	["need urgent fun"] = "Finding Fun",
-	["forced energycollapse"] = "Collapsed",
-	["energy collapse"] = "Collapsed",
-}
-
-local STATION_TYPE_OVERRIDES: { [string]: string } = {
-	RestStation = "Resting",
-	CookStation = "Cooking",
-	SocialStation = "Socializing",
-	HygieneStation = "Freshening Up",
-	FunStation = "Relaxing",
-}
-
-local COLLAPSE_LABEL = "Collapsed"
-local DEFAULT_IDLE_LABEL = "Idle"
-
-local function humanizeIdentifier(raw: string): string
-	local spaced = raw:gsub("(%l)(%u)", "%1 %2")
-	spaced = spaced:gsub("[_%-%s]+", " ")
-	return trim(spaced)
-end
-
-local function lookupActionOverride(raw: string): string?
-	local canonical = canonicalizeLabel(raw)
-	if canonical == "" then
+local function getBoostString(traits: { string }?): string?
+	if not traits then
 		return nil
 	end
-	local override = ACTION_LABEL_OVERRIDES[canonical]
-	if override then
-		return override
-	end
-	local fragments = {}
-	for fragment in canonical:gmatch("%S+") do
-		fragments[#fragments + 1] = fragment
-	end
-	for index = #fragments, 1, -1 do
-		local fragment = fragments[index]
-		local fragmentOverride = ACTION_LABEL_OVERRIDES[fragment]
-		if fragmentOverride then
-			return fragmentOverride
-		end
-	end
-	return nil
-end
-
-local function formatActionPhrase(raw: string): string?
-	if raw == "" then
-		return nil
-	end
-	local trimmed = trim(raw)
-	if trimmed == "" then
-		return nil
-	end
-	local override = lookupActionOverride(trimmed)
-	if override then
-		return override
-	end
-	local segments = {}
-	for segment in trimmed:gmatch("[^:]+") do
-		local cleaned = trim(segment)
-		if cleaned ~= "" then
-			local segOverride = lookupActionOverride(cleaned)
-			if segOverride then
-				return segOverride
-			end
-			table.insert(segments, cleaned)
-		end
-	end
-	local candidate: string? = nil
-	if #segments > 0 then
-		for index = #segments, 1, -1 do
-			local part = segments[index]
-			part = part:gsub("^ManualOverride[%-%s]*", "")
-			part = part:gsub("^Auto[%-%s]*", "")
-			part = part:gsub("^Forced[%-%s]*", "")
-			part = part:gsub("^Need[%-%s]*", "")
-			part = trim(part)
-			if part ~= "" then
-				local partOverride = lookupActionOverride(part)
-				if partOverride then
-					return partOverride
+	local parts = {}
+	for _, traitId in ipairs(traits) do
+		local traitDef = TenantTraits.GetTrait(traitId)
+		if traitDef and traitDef.Effects then
+			if traitDef.Effects.TipMultiplier then
+				local pct = (traitDef.Effects.TipMultiplier - 1) * 100
+				if pct > 0 then
+					table.insert(parts, string.format("+%d%% Tips", pct))
+				elseif pct < 0 then
+					table.insert(parts, string.format("%d%% Tips", pct))
 				end
-				candidate = part
-				break
+			end
+			if traitDef.Effects.RentMultiplier then
+				local pct = (traitDef.Effects.RentMultiplier - 1) * 100
+				if pct > 0 then
+					table.insert(parts, string.format("+%d%% Rent", pct))
+				elseif pct < 0 then
+					table.insert(parts, string.format("%d%% Rent", pct))
+				end
 			end
 		end
 	end
-	if not candidate or candidate == "" then
-		candidate = trimmed
-	end
-	if not candidate or candidate == "" then
+	if #parts == 0 then
 		return nil
 	end
-	local resolvedCandidate = candidate
-	resolvedCandidate = resolvedCandidate:gsub("^ManualOverride[%-%s]*", "")
-	resolvedCandidate = resolvedCandidate:gsub("^Auto[%-%s]*", "")
-	resolvedCandidate = resolvedCandidate:gsub("^Forced[%-%s]*", "")
-	resolvedCandidate = resolvedCandidate:gsub("^Need[%-%s]*", "")
-	resolvedCandidate = humanizeIdentifier(resolvedCandidate)
-	if resolvedCandidate == "" then
-		return nil
-	end
-	local candidateOverride = lookupActionOverride(resolvedCandidate)
-	if candidateOverride then
-		return candidateOverride
-	end
-	local words = {}
-	for word in resolvedCandidate:gmatch("%S+") do
-		words[#words + 1] = word:sub(1, 1):upper() .. word:sub(2):lower()
-	end
-	if #words == 0 then
-		return nil
-	end
-	return table.concat(words, " ")
-end
-
-local function resolveActionSubtitle(model: Model): string
-	if model:GetAttribute("EnergyCollapseActive") == true then
-		return COLLAPSE_LABEL
-	end
-	if model:GetAttribute("StationActivityActive") == true then
-		local actionAttr = model:GetAttribute("StationActivityAction")
-		if typeof(actionAttr) == "string" and actionAttr ~= "" then
-			local formatted = formatActionPhrase(actionAttr)
-			if formatted then
-				return formatted
-			end
-		end
-		local stationType = model:GetAttribute("StationActivityType")
-		if typeof(stationType) == "string" and stationType ~= "" then
-			local stationOverride = STATION_TYPE_OVERRIDES[stationType]
-			if stationOverride then
-				return stationOverride
-			end
-			local formattedStation = formatActionPhrase(stationType)
-			if formattedStation then
-				return formattedStation
-			end
-		end
-	end
-	local currentAction = model:GetAttribute("CurrentActionName")
-	if typeof(currentAction) == "string" and currentAction ~= "" then
-		local formattedAction = formatActionPhrase(currentAction)
-		if formattedAction then
-			return formattedAction
-		end
-	end
-	return DEFAULT_IDLE_LABEL
-end
-
-local function color3ToHex(color: Color3): string
-	local r = math.clamp(color.R, 0, 1)
-	local g = math.clamp(color.G, 0, 1)
-	local b = math.clamp(color.B, 0, 1)
-	return string.format(
-		"#%02X%02X%02X",
-		math.floor(r * 255 + 0.5),
-		math.floor(g * 255 + 0.5),
-		math.floor(b * 255 + 0.5)
-	)
+	return table.concat(parts, ", ")
 end
 
 local function getAdornee(model: Model): BasePart?
@@ -292,13 +119,10 @@ local function applyBillboard(entry: NameplateEntry)
 	local titleLine = string.format("<b>%s</b>", escapeRichText(residentName))
 
 	local lines = { titleLine }
-	local subtitleText = resolveActionSubtitle(model)
-	if subtitleText and subtitleText ~= "" then
-		lines[#lines + 1] = string.format(
-			'<font size="18" color="%s">%s</font>',
-			color3ToHex(SUBTITLE_COLOR),
-			escapeRichText(subtitleText)
-		)
+
+	local boostText = getBoostString(entry.Traits)
+	if boostText then
+		lines[#lines + 1] = string.format('<font size="10" color="#FFD700">%s</font>', escapeRichText(boostText))
 	end
 
 	entry.Handle:setText(table.concat(lines, "\n"))
@@ -317,10 +141,13 @@ local function detachResident(model: Model)
 	entry.Handle:destroy()
 end
 
-local function updateResidentNameplate(residentName: string)
+local function updateResidentNameplate(residentName: string, traits: { string }?)
 	local entry = nameplatesByResident[residentName]
 	if not entry then
 		return
+	end
+	if traits then
+		entry.Traits = traits
 	end
 	applyBillboard(entry)
 end
@@ -350,11 +177,11 @@ local function attachResident(model: Model)
 		text = "",
 		textColor = Color3.new(1, 1, 1),
 		backgroundTransparency = 1,
-		size = UDim2.fromScale(2, 1),
-		studsOffsetWorldSpace = Vector3.new(0, 2, 0),
+		size = UDim2.fromScale(1.5, 0.6),
+		studsOffsetWorldSpace = Vector3.new(0, 1.5, 0),
 		alwaysOnTop = false,
 		maxDistance = 40,
-		textSize = 22,
+		textSize = 12,
 		richText = true,
 		font = Enum.Font.GothamBold,
 		outline = true,
@@ -365,11 +192,14 @@ local function attachResident(model: Model)
 	local billboard = handle.instance
 	billboard.Enabled = true
 
+	local residentData = ResidentsStore.GetResident(LocalPlayer.UserId, residentName)
+
 	local entry: NameplateEntry = {
 		Model = model,
 		Handle = handle,
 		Connections = {},
 		ResidentName = residentName,
+		Traits = residentData and residentData.Traits,
 	}
 
 	nameplatesByModel[model] = entry
@@ -378,26 +208,6 @@ local function attachResident(model: Model)
 	local function bind(connection: RBXScriptConnection)
 		table.insert(entry.Connections, connection)
 	end
-
-	bind(model:GetAttributeChangedSignal("StationActivityActive"):Connect(function()
-		applyBillboard(entry)
-	end))
-
-	bind(model:GetAttributeChangedSignal("StationActivityAction"):Connect(function()
-		applyBillboard(entry)
-	end))
-
-	bind(model:GetAttributeChangedSignal("StationActivityType"):Connect(function()
-		applyBillboard(entry)
-	end))
-
-	bind(model:GetAttributeChangedSignal("EnergyCollapseActive"):Connect(function()
-		applyBillboard(entry)
-	end))
-
-	bind(model:GetAttributeChangedSignal("CurrentActionName"):Connect(function()
-		applyBillboard(entry)
-	end))
 
 	bind(model.Destroying:Connect(function()
 		detachResident(model)
@@ -507,7 +317,7 @@ function ResidentNameBillboard.Init()
 		if type(residentData.Name) ~= "string" then
 			return
 		end
-		updateResidentNameplate(residentData.Name)
+		updateResidentNameplate(residentData.Name, residentData.Traits)
 	end)
 
 	ResidentsStore.ResidentsUpdated:Connect(function(userId: number, residentData: any)
@@ -517,7 +327,7 @@ function ResidentNameBillboard.Init()
 		if type(residentData.Name) ~= "string" then
 			return
 		end
-		updateResidentNameplate(residentData.Name)
+		updateResidentNameplate(residentData.Name, residentData.Traits)
 	end)
 
 	ResidentsStore.ResidentRemoved:Connect(function(userId: number, residentName: string)

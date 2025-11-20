@@ -44,6 +44,7 @@ local IsInitialized = false
 
 local ProspectVisualsById: { [string]: any } = {}
 local ProspectVisualsBySlot: { [number]: any } = {}
+local ModelPool: { Model } = {}
 
 local DECISION_EMOJIS = {
 	Accept = {
@@ -104,7 +105,12 @@ local function emitDecisionEmoji(prospectId: string, decision: "Accept" | "Decli
 	end)
 end
 
-local function cloneProspectRig(): Model?
+local function getPooledRig(): Model?
+	local pooled = table.remove(ModelPool)
+	if pooled then
+		return pooled
+	end
+
 	if not ResidentTemplatesFolder then
 		return nil
 	end
@@ -117,6 +123,32 @@ local function cloneProspectRig(): Model?
 		return nil
 	end
 	return template:Clone()
+end
+
+local function returnPooledRig(model: Model)
+	model.Parent = nil
+
+	-- Cleanup added instances
+	local highlight = model:FindFirstChild("TenantProspectHighlight")
+	if highlight then
+		highlight:Destroy()
+	end
+
+	local emoji = model:FindFirstChild("TenantDecisionEmoji")
+	if emoji then
+		emoji:Destroy()
+	end
+
+	local rootPart = model:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		local attachment = rootPart:FindFirstChild("TenantPromptAttachment")
+		if attachment then
+			attachment:Destroy()
+		end
+		rootPart.Anchored = false
+	end
+
+	table.insert(ModelPool, model)
 end
 
 local function destroyProspect(id: string)
@@ -142,7 +174,7 @@ local function destroyProspect(id: string)
 	end
 
 	if record.Model then
-		record.Model:Destroy()
+		returnPooledRig(record.Model)
 	end
 
 	if ActivePromptId == id and TenantProspectPrompt.IsVisible() then
@@ -309,7 +341,7 @@ local function attachPrompt(record, payload)
 end
 
 local function createProspectModel(payload: ProspectSpawnPayload, slotPart: BasePart): any
-	local rig = cloneProspectRig()
+	local rig = getPooledRig()
 	if not rig then
 		return nil
 	end

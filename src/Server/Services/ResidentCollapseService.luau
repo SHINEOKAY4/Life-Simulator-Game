@@ -26,9 +26,9 @@ local energyPauseTokens = setmetatable({} :: { [any]: string }, { __mode = "k" }
 local releaseReasons = setmetatable({} :: { [any]: string }, { __mode = "k" })
 
 local collapseChat = {
-	{ Text = "I'm spent... hitting the floor." },
-	{ Text = "Too exhausted to stand another second." },
-	{ Text = "Need to crash right here." },
+	{ Text = "😵💫" },
+	{ Text = "🪫" },
+	{ Text = "🛌" },
 }
 
 local function getResidentName(residentState: any): string
@@ -251,9 +251,7 @@ local function startCollapse(residentState: any, context: { UserId: number?, Nam
 		end
 
 		local succeeded = ok and runResult == true
-		if succeeded then
-			AutonomyState.setNeedCooldown(residentState, "Energy")
-		else
+		if not succeeded then
 			local failureLabel
 			if ok then
 				failureLabel = runReason or "Cancelled"

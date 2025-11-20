@@ -4,16 +4,12 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
-local ServerScriptService = game:GetService("ServerScriptService")
 local ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
 local ResidentChat = require(ServerScriptService.Server.Utilities.ResidentChat)
-local PlotService = require(ServerScriptService.Server.Services.PlotService)
-local StationManager = require(ServerScriptService.Server.Services.ResidentAutonomyService.StationManager)
-local AutonomyState = require(ServerScriptService.Server.Services.ResidentAutonomyService.State)
-local AutonomyUtils = require(ServerScriptService.Server.Services.ResidentAutonomyService.Utils)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 
 local SCHEDULER_TASK_NAME = "NeedEffectsRunner"
@@ -56,9 +52,6 @@ type EffectDef = {
 	RatePerHour: number?,
 }
 
-type NeedDef = NeedConfig.NeedDef
-type EmergencyGuard = (residentState: any, value: number, def: NeedDef) -> boolean
-
 type Behavior = {
 	Effects: { EffectDef }?,
 	DurationSeconds: number?,
@@ -67,18 +60,10 @@ type Behavior = {
 	ChatIntervalSeconds: number?,
 	ChatPhrases: { ResidentChat.ChatOption }?,
 	EndReasonProvider: ((residentState: any) -> string?)?,
-	EmergencyGuards: { [string]: EmergencyGuard }?,
-	AllowNonSurvivalInterrupts: boolean?,
 }
 
 local NeedEffects = {}
 local EFFECT_CHANNEL = "Effects"
-local SURVIVAL_NEEDS: { [string]: boolean } = {
-	Energy = true,
-	Hunger = true,
-	Bladder = true,
-}
-
 local ABORT_ERROR_PREFIX = "NeedEffectsAborted|"
 
 NeedEffects.ABORT_ERROR_PREFIX = ABORT_ERROR_PREFIX
@@ -102,75 +87,12 @@ function NeedEffects.ParseAbortReason(message: string?): string?
 	return raw
 end
 
-local NEED_TO_STATION: { [string]: string } = {
-	Hunger = "CookStation",
-	Bladder = "ComfortStation",
-	Energy = "RestStation",
-	Hygiene = "HygieneStation",
-	Social = "SocialStation",
-	Fun = "FunStation",
-}
-
-local EMPTY_DICT: { [string]: boolean } = table.freeze({}) :: { [string]: boolean }
-local TargetedDictPool: { { [string]: boolean } } = {}
-local PositiveDictPool: { { [string]: boolean } } = {}
-
-local function acquireDict(pool: { { [string]: boolean } }): { [string]: boolean }
-	local dict = pool[#pool]
-	if dict then
-		pool[#pool] = nil
-		table.clear(dict)
-		return dict
-	end
-	return {}
-end
-
-local function releaseDict(pool: { { [string]: boolean } }, dict: { [string]: boolean })
-	table.clear(dict)
-	pool[#pool + 1] = dict
-end
-
-local function isSurvivalNeed(needName: string?): boolean
-	if not needName then
-		return false
-	end
-	return SURVIVAL_NEEDS[needName] == true
-end
-
-local function cloneContext(context: ResidentChat.InterruptContext?): ResidentChat.InterruptContext?
-	if context == nil then
-		return nil
-	end
-	local clone: ResidentChat.InterruptContext = {}
-	for key, value in pairs(context) do
-		(clone :: any)[key] = value
-	end
-	return clone
-end
-
 local function clampNeed(needName: string, value: number): number
 	local def = NeedConfig.Needs[needName]
 	if not def then
 		return value
 	end
 	return math.clamp(value, def.Min, def.Max)
-end
-
-local function sanitizeNeed(residentState: any, needName: string): number
-	local def = NeedConfig.Needs[needName]
-	local minValue = if def then def.Min else -math.huge
-	local maxValue = if def then def.Max else math.huge
-	local current = residentState:GetNeed(needName)
-	if typeof(current) ~= "number" or current ~= current or current == math.huge or current == -math.huge then
-		local fallback = if def then def.Min else 0
-		residentState:SetNeed(needName, fallback)
-		return fallback
-	end
-	local clamped = math.clamp(current, minValue, maxValue)
-	if clamped ~= current then
-		residentState:SetNeed(needName, clamped)
-	end
-	return clamped
 end
 
 local function applyDelta(residentState: any, needName: string, delta: number)
@@ -202,153 +124,6 @@ local function applyMoodlets(
 	end
 end
 
-local function gatherEffectContext(effects: { EffectDef }): ({ [string]: boolean }, { [string]: boolean }, () -> ())
-	local targeted = acquireDict(TargetedDictPool)
-	local positive = acquireDict(PositiveDictPool)
-	for _, effect in ipairs(effects) do
-		local needName = effect.Need
-		if type(needName) == "string" and needName ~= "" then
-			targeted[needName] = true
-			local instant = effect.InstantAmount
-			if typeof(instant) == "number" and instant > 0 then
-				positive[needName] = true
-			end
-			local rate = effect.RatePerHour
-			if typeof(rate) == "number" and rate > 0 then
-				positive[needName] = true
-			end
-		end
-	end
-	local released = false
-	local function release()
-		if released then
-			return
-		end
-		released = true
-		releaseDict(TargetedDictPool, targeted)
-		releaseDict(PositiveDictPool, positive)
-	end
-	return targeted, positive, release
-end
-
-local function evaluateEmergencyNeeds(
-	residentState: any,
-	targetedNeeds: { [string]: boolean },
-	positiveTargets: { [string]: boolean },
-	contextPlayer: Player?,
-	guardOverrides: { [string]: EmergencyGuard }?,
-	residentName: string?,
-	allowNonSurvivalInterrupts: boolean
-): (boolean, string?, string?)
-	local needsDef = NeedConfig.Needs
-	local worstNeed: string? = nil
-	local worstDeficit = -math.huge
-	local zeroCount = 0
-	local targetsHunger = positiveTargets.Hunger == true
-	local prioritizingSurvival = targetsHunger or positiveTargets.Energy == true
-	local stationCacheLoaded = false
-	local stationCache: { [string]: { [string]: any } }? = nil
-
-	local function hasStationsForNeed(needName: string): boolean
-		if contextPlayer == nil then
-			return true
-		end
-		if not stationCacheLoaded then
-			stationCacheLoaded = true
-			local result = PlotService.GetStationsForPlayer(contextPlayer)
-			if result ~= nil then
-				stationCache = result
-			else
-				stationCache = {}
-			end
-		end
-		local cache = stationCache
-		if cache == nil then
-			return false
-		end
-		if needName == "Hunger" then
-			return AutonomyUtils.hasActionableHungerPath(contextPlayer, cache, residentName)
-		end
-		local stationType = NEED_TO_STATION[needName]
-		if not stationType then
-			return true
-		end
-		local scope = cache[stationType]
-		if scope == nil or next(scope) == nil then
-			return false
-		end
-		return StationManager.hasVacantStation(contextPlayer, stationType, residentName, cache)
-	end
-
-	for needName, def in pairs(needsDef) do
-		local value = sanitizeNeed(residentState, needName)
-		local guard = guardOverrides and guardOverrides[needName]
-		if guard and guard(residentState, value, def) then
-			continue
-		end
-		local isPositiveTarget = positiveTargets[needName] == true
-		if not isPositiveTarget and targetedNeeds[needName] == true then
-			isPositiveTarget = true
-		end
-		local isSurvival = isSurvivalNeed(needName)
-		if not isSurvival and not allowNonSurvivalInterrupts then
-			continue
-		end
-		if prioritizingSurvival and not isSurvival then
-			continue
-		end
-		local consider = false
-		local survivalStationAvailable = true
-		if isSurvival then
-			survivalStationAvailable = false
-			if not AutonomyState.isSurvivalNeedUnavailable(residentState, needName) then
-				survivalStationAvailable = hasStationsForNeed(needName)
-			end
-		end
-		if needName == "Hunger" then
-			if not isPositiveTarget and value <= def.Critical and survivalStationAvailable then
-				consider = true
-			end
-		elseif needName == "Energy" then
-			if not isPositiveTarget and value <= def.Critical and survivalStationAvailable then
-				if not targetsHunger then
-					consider = true
-				end
-			end
-		elseif not isPositiveTarget and value <= def.Critical then
-			if isSurvival then
-				if survivalStationAvailable then
-					consider = true
-				end
-			else
-				if hasStationsForNeed(needName) then
-					consider = true
-				end
-			end
-		end
-		if consider then
-			if value <= def.Min then
-				zeroCount += 1
-			end
-			local deficit = def.Critical - value
-			if deficit > worstDeficit then
-				worstDeficit = deficit
-				worstNeed = needName
-			end
-		end
-	end
-	if worstNeed ~= nil then
-		return true, "NeedUrgent:" .. worstNeed, worstNeed
-	end
-	if zeroCount >= 2 then
-		if prioritizingSurvival then
-			return false, nil, nil
-		end
-		return true, "NeedUrgent:MultipleNeeds", worstNeed
-	end
-	return false, nil, nil
-end
-
 function NeedEffects.Run(
 	residentState: any,
 	token: CancelToken?,
@@ -359,49 +134,34 @@ function NeedEffects.Run(
 	local duration = behavior.DurationSeconds or 10
 	local shouldEnd = behavior.ShouldEnd
 	local appliedInstant: { [number]: boolean } = {}
-	local residentNameValue = "UnknownResident"
+
+	local residentName = "UnknownResident"
 	if residentState then
 		local save = (residentState :: any).Save
-		if typeof(save) == "table" then
-			local savedName = save.Name
-			if typeof(savedName) == "string" and savedName ~= "" then
-				residentNameValue = savedName
-			end
-		end
-		if residentNameValue == "UnknownResident" then
-			local directName = (residentState :: any).Name
-			if typeof(directName) == "string" and directName ~= "" then
-				residentNameValue = directName
-			end
+		if typeof(save) == "table" and save.Name then
+			residentName = save.Name
+		elseif (residentState :: any).Name then
+			residentName = (residentState :: any).Name
 		end
 	end
-	local residentName = residentNameValue
+
 	local chatInterval = behavior.ChatIntervalSeconds
 	if chatInterval and chatInterval <= 0 then
 		chatInterval = nil
 	end
 	local chatPhrases = behavior.ChatPhrases
-	local targetedNeeds: { [string]: boolean }
-	local positiveNeeds: { [string]: boolean }
-	local releaseEffectContext: (() -> ())? = nil
-	local emergencyGuards = behavior.EmergencyGuards
-	local contextPlayer = if interruptContext then interruptContext.Player else nil
-	local allowNonSurvivalInterrupts = behavior.AllowNonSurvivalInterrupts == true
-	if effects and #effects > 0 then
-		targetedNeeds, positiveNeeds, releaseEffectContext = gatherEffectContext(effects)
-	else
-		targetedNeeds = EMPTY_DICT
-		positiveNeeds = EMPTY_DICT
-	end
+
 	local pauseApplied = false
 	local pausedNeeds: { [string]: boolean }? = nil
 	local usedGlobalPause = false
 	local usedLegacyToggle = false
+
 	local residentModel: Model? = if residentState and residentState.Model then residentState.Model else nil
 	local activityTracking = false
 	local trackedProgress = 0
 	local lastEmitTime = 0
 	local activityReason: string? = nil
+
 	local stationType = if interruptContext and typeof(interruptContext.StationType) == "string"
 		then interruptContext.StationType :: string
 		else nil
@@ -411,12 +171,14 @@ function NeedEffects.Run(
 	local shouldTrackStation = residentModel ~= nil
 		and stationType ~= nil
 		and stationType:find("Station", 1, true) ~= nil
+
 	local function setAttribute(attribute: string, value: any)
 		if not residentModel then
 			return
 		end
 		residentModel:SetAttribute(attribute, value)
 	end
+
 	local function beginActivity()
 		if not shouldTrackStation or activityTracking then
 			return
@@ -433,6 +195,7 @@ function NeedEffects.Run(
 		setAttribute("StationActivityProgress", 0)
 		setAttribute("StationActivityReason", nil)
 	end
+
 	local function emitProgress(progress: number, force: boolean?)
 		if not activityTracking then
 			return
@@ -451,6 +214,7 @@ function NeedEffects.Run(
 			setAttribute("StationActivityProgress", trackedProgress)
 		end
 	end
+
 	local function clearActivity(_success: boolean, reason: string?, finalProgress: number?)
 		if not activityTracking then
 			return
@@ -466,104 +230,46 @@ function NeedEffects.Run(
 		setAttribute("StationActivityAction", nil)
 		activityReason = nil
 	end
+
 	local function applyPause()
 		if pauseApplied then
 			return
 		end
 		if residentState then
-			local pauseNeedFn = typeof(residentState.PushNeedPause) == "function"
-			if pauseNeedFn then
-				local added = false
-				for needName, isPositive in pairs(positiveNeeds) do
-					if isPositive then
-						if not pausedNeeds then
-							pausedNeeds = {}
-						end
-						local needs = pausedNeeds :: { [string]: boolean }
-						if not needs[needName] then
-							(residentState :: any):PushNeedPause(needName)
-							needs[needName] = true
-						end
-						added = true
-					end
-				end
-				if added then
-					pauseApplied = true
-					return
-				end
-			end
+			-- Simple global pause for now
 			if typeof(residentState.PushNeedDecayPause) == "function" then
 				residentState:PushNeedDecayPause()
 				pauseApplied = true
 				usedGlobalPause = true
-				return
-			end
-			if typeof(residentState.SetNeedDecayPaused) == "function" then
+			elseif typeof(residentState.SetNeedDecayPaused) == "function" then
 				residentState:SetNeedDecayPaused(true)
 				pauseApplied = true
 				usedLegacyToggle = true
 			end
 		end
 	end
+
 	local function releasePause()
 		if not pauseApplied then
 			return
 		end
-		local canPopNeed = pausedNeeds ~= nil and residentState and typeof(residentState.PopNeedPause) == "function"
-		if canPopNeed then
-			local needs = pausedNeeds :: { [string]: boolean }
-			pausedNeeds = nil
-			for needName in pairs(needs) do
-				(residentState :: any):PopNeedPause(needName)
-			end
-		elseif residentState then
-			local popFn = if typeof(residentState.PopNeedDecayPause) == "function"
-				then function()
-					residentState:PopNeedDecayPause()
-				end
-				else nil
-			local toggleFn = if typeof(residentState.SetNeedDecayPaused) == "function"
-				then function()
-					residentState:SetNeedDecayPaused(false)
-				end
-				else nil
-			local releaseOrder = {
-				{ Condition = usedGlobalPause, Fn = popFn },
-				{ Condition = usedLegacyToggle, Fn = toggleFn },
-				{ Condition = true, Fn = popFn },
-				{ Condition = true, Fn = toggleFn },
-			}
-			for _, candidate in ipairs(releaseOrder) do
-				local fn = candidate.Fn
-				if fn and candidate.Condition then
-					fn()
-					break
-				end
+		if residentState then
+			if usedGlobalPause and typeof(residentState.PopNeedDecayPause) == "function" then
+				residentState:PopNeedDecayPause()
+			elseif usedLegacyToggle and typeof(residentState.SetNeedDecayPaused) == "function" then
+				residentState:SetNeedDecayPaused(false)
 			end
 		end
 		pauseApplied = false
 		usedGlobalPause = false
 		usedLegacyToggle = false
 	end
-	local contextReleased = false
-	local function cleanupEffectContext()
-		if contextReleased then
-			return
-		end
-		contextReleased = true
-		if releaseEffectContext then
-			releaseEffectContext()
-			releaseEffectContext = nil
-		end
-	end
-	local finalReason: string? = nil
+
 	local isFinalized = false
+	local finalReason: string? = nil
 
 	local function finalize(success: boolean, reason: string?, finalProgress: number?)
 		if isFinalized then
-			if success and finalReason ~= nil then
-				finalReason = nil
-			end
 			return
 		end
 		isFinalized = true
@@ -575,91 +281,55 @@ function NeedEffects.Run(
 		end
 		clearActivity(success, reason, finalProgress)
 		releasePause()
-		cleanupEffectContext()
 	end
 
 	local function failReturn(reason: string?, progress: number?): (boolean, string?)
 		finalize(false, reason, progress)
 		return false, reason
 	end
-	local function emitEmergency(reason: string, needName: string?)
-		local context = cloneContext(interruptContext)
-		if context then
-			context.NeedName = needName or context.NeedName
-		end
-		ResidentChat.ShowInterrupt(residentState, reason, context)
-		ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects emergency stop: %s", residentName), {
-			Reason = reason,
-			Need = needName,
-		})
-	end
-	local function abortIfEmergency(): (boolean, string?)
-		local emergency, emergencyReason, emergencyNeed = evaluateEmergencyNeeds(
-			residentState,
-			targetedNeeds,
-			positiveNeeds,
-			contextPlayer,
-			emergencyGuards,
-			residentName,
-			allowNonSurvivalInterrupts
-		)
-		if emergency and emergencyReason then
-			emitEmergency(emergencyReason, emergencyNeed)
-			activityReason = emergencyReason
-			return true, emergencyReason
-		end
-		return false, nil
-	end
+
 	if
 		not residentState
 		or typeof(residentState.GetNeed) ~= "function"
 		or typeof(residentState.SetNeed) ~= "function"
 	then
-		ResidentDebug.Trace(EFFECT_CHANNEL, "NeedEffects missing resident interfaces", {
-			Resident = residentName,
-		})
 		return failReturn("InvalidState", trackedProgress)
 	end
+
 	if token and token.Cancelled then
 		local cancelReason = if token.Reason and token.Reason ~= "" then token.Reason else "Cancelled"
 		return failReturn(cancelReason, trackedProgress)
 	end
+
 	if not effects or #effects == 0 then
 		finalize(true, nil, trackedProgress)
 		return true, nil
 	end
+
 	duration = math.max(duration, 0)
-	for needName in pairs(targetedNeeds) do
-		sanitizeNeed(residentState, needName)
-	end
+
 	ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects start: %s", residentName), {
 		Resident = residentName,
 		Duration = duration,
 		Effects = effects,
 	})
-	local abortEarly, abortReason = abortIfEmergency()
-	if abortEarly then
-		return failReturn(abortReason, trackedProgress)
-	end
+
 	applyPause()
 	beginActivity()
 	emitProgress(0, true)
 	applyInstantEffects(residentState, effects, appliedInstant)
-	local abortAfterInstant, abortInstantReason = abortIfEmergency()
-	if abortAfterInstant then
-		return failReturn(abortInstantReason, trackedProgress)
-	end
+
 	if token and token.Cancelled then
 		local cancelReason = if token.Reason and token.Reason ~= "" then token.Reason else "Cancelled"
 		ResidentChat.ShowInterrupt(residentState, cancelReason, interruptContext)
-		ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects cancelled: %s", residentName))
-		activityReason = cancelReason
 		return failReturn(cancelReason, trackedProgress)
 	end
+
 	local elapsed = 0
 	local lastTick = os.clock()
 	local nextChatTime: number? = nil
 	local lastChatText: string? = nil
+
 	local function emitChat()
 		if not chatPhrases then
 			return
@@ -670,10 +340,12 @@ function NeedEffects.Run(
 			lastChatText = selected
 		end
 	end
+
 	if chatInterval and chatPhrases and #chatPhrases > 0 then
 		emitChat()
 		nextChatTime = os.clock() + chatInterval
 	end
+
 	if duration == 0 then
 		finalize(true, nil, trackedProgress)
 		return true, nil
@@ -719,16 +391,7 @@ function NeedEffects.Run(
 		if token and token.Cancelled then
 			local cancelReason = if token.Reason and token.Reason ~= "" then token.Reason else "Cancelled"
 			ResidentChat.ShowInterrupt(residentState, cancelReason, interruptContext)
-			ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects cancelled: %s", residentName))
-			activityReason = cancelReason
 			local result, failureReason = failReturn(cancelReason, currentProgress())
-			complete(result, failureReason)
-			return true
-		end
-
-		local abortDuring, abortReasonDuring = abortIfEmergency()
-		if abortDuring then
-			local result, failureReason = failReturn(abortReasonDuring, currentProgress())
 			complete(result, failureReason)
 			return true
 		end
@@ -742,9 +405,6 @@ function NeedEffects.Run(
 					ResidentChat.ShowInterrupt(residentState, resolvedReason, interruptContext)
 				end
 			end
-			ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects early exit: %s", residentName), {
-				Elapsed = elapsed,
-			})
 			local reasonLabel = if resolvedReason and resolvedReason ~= "" then resolvedReason else "NeedSatisfied"
 			activityReason = reasonLabel
 			finalize(true, reasonLabel, currentProgress())
@@ -789,9 +449,6 @@ function NeedEffects.Run(
 		end
 
 		if elapsed >= duration then
-			ResidentDebug.Trace(EFFECT_CHANNEL, string.format("NeedEffects completed: %s", residentName), {
-				Elapsed = elapsed,
-			})
 			activityReason = activityReason or "DurationComplete"
 			finalize(true, activityReason, currentProgress())
 			complete(true, nil)
@@ -812,18 +469,12 @@ function NeedEffects.Run(
 	step(0)
 
 	if completed then
-		if not hasResult then
-			cleanupEffectContext()
-			return false, finalResultReason
-		end
-		cleanupEffectContext()
 		return finalResult, finalResultReason
 	end
 
 	waitingForResume = true
 	local resumeResult, resumeReason = coroutine.yield()
 	waitingForResume = false
-	cleanupEffectContext()
 	return resumeResult == true, resumeReason
 end
 

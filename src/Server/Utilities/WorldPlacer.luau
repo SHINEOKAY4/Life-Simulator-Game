@@ -56,7 +56,7 @@ end
 
 local function sampleWallSize(wallId: string?): Vector3
 	if typeof(wallId) ~= "string" or wallId == "" then
-		return Vector3.new(4, 12, 0.5)
+		return Vector3.new(4, BuildConstants.FloorHeightStuds, 0.5)
 	end
 
 	local spec = ItemFinder.FindItemById(wallId)
@@ -64,7 +64,8 @@ local function sampleWallSize(wallId: string?): Vector3
 		local dims = spec.WallDimensions
 		if typeof(dims) == "table" then
 			local width = typeof(dims.NominalWidth) == "number" and dims.NominalWidth or 4
-			local height = typeof(dims.NominalHeight) == "number" and dims.NominalHeight or 12
+			local height = typeof(dims.NominalHeight) == "number" and dims.NominalHeight
+				or BuildConstants.FloorHeightStuds
 			local thickness = typeof(dims.NominalThickness) == "number" and dims.NominalThickness or 0.5
 			return Vector3.new(width, height, thickness)
 		end
@@ -72,7 +73,7 @@ local function sampleWallSize(wallId: string?): Vector3
 
 	local wallModel = ItemFinder.CloneModel(wallId)
 	if not wallModel then
-		return Vector3.new(4, 12, 0.5)
+		return Vector3.new(4, BuildConstants.FloorHeightStuds, 0.5)
 	end
 
 	local _, size = wallModel:GetBoundingBox()
@@ -321,7 +322,7 @@ local function applySurfacePaletteToModel(
 	end
 end
 
-local function applyWallModelScaling(model: Model, facing: Facing, cellSize: number)
+local function applyWallModelScaling(model: Model, facing: Facing, cellSize: number, targetHeight: number?)
 	local rootPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
 	if not rootPart then
 		return
@@ -354,6 +355,10 @@ local function applyWallModelScaling(model: Model, facing: Facing, cellSize: num
 	local baseHeight = baseHeightAttr :: number
 	local baseLength = baseLengthAttr :: number
 	local baseThickness = baseThicknessAttr :: number
+
+	if typeof(targetHeight) == "number" and targetHeight > 0 then
+		baseHeight = targetHeight
+	end
 
 	local lengthMultiplier = 1
 	if facing == "NorthEast" or facing == "SouthEast" or facing == "NorthWest" or facing == "SouthWest" then
@@ -427,7 +432,7 @@ function WorldPlacer.Spawn(
 	end
 
 	local resolvedLevel = PlotState.ResolveLevel(levelValue)
-	local floorHeight = BuildConstants.FloorHeightStuds or 12
+	local floorHeight = BuildConstants.FloorHeightStuds or 16
 	local levelHeight = resolvedLevel * floorHeight
 
 	local placementType = spec.PlacementType or "CellObject"
@@ -513,7 +518,9 @@ function WorldPlacer.Spawn(
 	local target: CFrame?
 	if placementType == "Wall" then
 		base = grid:CellToWorldEdgeCenterCFrame(cellX, cellZ, facing, levelHeight)
-		applyWallModelScaling(model, facing, grid.CellSize)
+		if spec.WallVariant ~= "Door" and spec.WallVariant ~= "Window" then
+			applyWallModelScaling(model, facing, grid.CellSize, floorHeight)
+		end
 
 		local windowData = metadata and metadata.WindowCutoutData
 		if spec.WallVariant == "Window" then
@@ -532,7 +539,7 @@ function WorldPlacer.Spawn(
 			end
 
 			local resolvedWallWidth = math.max(wallWidth or 4, 0.5)
-			local resolvedWallHeight = math.max(wallHeight or 12, 0.5)
+			local resolvedWallHeight = math.max(wallHeight or BuildConstants.FloorHeightStuds, 0.5)
 			local resolvedWallThickness = math.max(wallThickness or 0.05, 0.05)
 
 			local diagonalMultiplier = extractNumber(metadata, "DiagonalLengthMultiplier") or math.sqrt(2)
@@ -611,22 +618,14 @@ function WorldPlacer.Spawn(
 				or math.max(resolvedEffectiveWidth * 0.5 - 0.01, 0.05)
 			resolvedFrameThickness = math.clamp(resolvedFrameThickness, minFrameThickness, maxFrameThickness)
 
+			local _, modelSize = model:GetBoundingBox()
+
 			local cutoutWidthValue = extractNumber(windowData, "CutoutWidth")
 			local resolvedCutoutWidth: number
 			if typeof(cutoutWidthValue) == "number" then
 				resolvedCutoutWidth = cutoutWidthValue
 			else
-				local cutoutWidthRatio = extractNumber(windowConfig, "CutoutWidthRatio")
-				if typeof(cutoutWidthRatio) == "number" and cutoutWidthRatio > 0 then
-					resolvedCutoutWidth = resolvedEffectiveWidth * cutoutWidthRatio
-				else
-					local defaultCutoutWidth = extractNumber(windowConfig, "CutoutWidth")
-					if typeof(defaultCutoutWidth) == "number" then
-						resolvedCutoutWidth = defaultCutoutWidth
-					else
-						resolvedCutoutWidth = resolvedEffectiveWidth * 0.7
-					end
-				end
+				resolvedCutoutWidth = modelSize.X
 			end
 
 			local cutoutHeightValue = extractNumber(windowData, "CutoutHeight")
@@ -634,17 +633,7 @@ function WorldPlacer.Spawn(
 			if typeof(cutoutHeightValue) == "number" then
 				resolvedCutoutHeight = cutoutHeightValue
 			else
-				local cutoutHeightRatio = extractNumber(windowConfig, "CutoutHeightRatio")
-				if typeof(cutoutHeightRatio) == "number" and cutoutHeightRatio > 0 then
-					resolvedCutoutHeight = resolvedWallHeight * cutoutHeightRatio
-				else
-					local defaultCutoutHeight = extractNumber(windowConfig, "CutoutHeight")
-					if typeof(defaultCutoutHeight) == "number" then
-						resolvedCutoutHeight = defaultCutoutHeight
-					else
-						resolvedCutoutHeight = resolvedWallHeight * 0.6
-					end
-				end
+				resolvedCutoutHeight = modelSize.Y
 			end
 
 			local minCutoutWidth = math.max(
@@ -746,7 +735,7 @@ function WorldPlacer.Spawn(
 		local yaw = CFrame.Angles(0, GetYawFromFacing(facing), 0)
 		local roofLift = if typeof(spec.HeightStuds) == "number"
 			then spec.HeightStuds
-			else BuildConstants.RoofLiftStuds or 12
+			else BuildConstants.RoofLiftStuds or 16
 		if typeof(extraLift) == "number" and extraLift ~= 0 then
 			roofLift += extraLift
 		end

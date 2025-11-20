@@ -66,6 +66,7 @@ export type Behavior = {
 	EndReasonProvider: ((residentState: any) -> string?)?,
 	EmergencyGuards: { [string]: (residentState: any, value: number, def: any) -> boolean }?,
 	AllowNonSurvivalInterrupts: boolean?,
+	ActionEmoji: string?,
 }
 
 export type BehaviorSpec = {
@@ -82,6 +83,7 @@ export type BehaviorSpec = {
 	EndReasonProvider: ((residentState: any) -> string?)?,
 	EmergencyGuards: { [string]: (residentState: any, value: number, def: any) -> boolean }?,
 	AllowNonSurvivalInterrupts: boolean?,
+	ActionEmoji: string?,
 }
 
 return nil

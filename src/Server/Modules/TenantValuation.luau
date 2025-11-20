@@ -43,6 +43,7 @@ local VarietyBonusPerCategory = Valuation.VarietyBonusPerCategory or 0.05
 local ThemeSynergyBonus = Valuation.ThemeSynergyBonus or 0.15
 local LuxuryThreshold = Valuation.LuxuryThreshold or 500
 local LuxuryBonusMultiplier = Valuation.LuxuryBonusMultiplier or 1.2
+local ReviewScoreMultiplier = 0.1 -- +/- 10% per star deviation from 3
 
 local TenantValuation = {}
 
@@ -92,7 +93,7 @@ local function accumulateTags(spec: { [string]: any }, tagCounts: { [string]: nu
 	return total
 end
 
-function TenantValuation.Evaluate(plotState: any): ValuationResult?
+function TenantValuation.Evaluate(plotState: any, averageReviewScore: number?): ValuationResult?
 	if typeof(plotState) ~= "table" then
 		return nil
 	end
@@ -227,6 +228,14 @@ function TenantValuation.Evaluate(plotState: any): ValuationResult?
 	if tier then
 		rentBaseline *= tier.RentMultiplier
 	end
+
+	-- Apply Review Score Multiplier
+	-- Default to 3 stars (neutral) if no score provided
+	local rating = averageReviewScore or 3
+	local reviewMult = 1 + (rating - 3) * ReviewScoreMultiplier
+	-- Clamp to reasonable bounds (e.g. 0.5x to 1.5x)
+	reviewMult = math.clamp(reviewMult, 0.5, 1.5)
+	rentBaseline *= reviewMult
 
 	rentBaseline = math.floor(rentBaseline + 0.5)
 

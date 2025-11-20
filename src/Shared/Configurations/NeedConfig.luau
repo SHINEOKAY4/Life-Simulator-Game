@@ -20,6 +20,7 @@ local Needs: NeedConfig = {
 	Energy = { Min = 0, Max = 100, DecayPerHour = 5, Low = 85, Critical = 12, Hysteresis = 15, CooldownMinutes = 240 },
 	Hygiene = { Min = 0, Max = 100, DecayPerHour = 5, Low = 90, Critical = 12, Hysteresis = 10, CooldownMinutes = 75 },
 	Social = { Min = 0, Max = 100, DecayPerHour = 8, Low = 90, Critical = 18, Hysteresis = 10, CooldownMinutes = 90 },
+	Fun = { Min = 0, Max = 100, DecayPerHour = 10, Low = 80, Critical = 20, Hysteresis = 15, CooldownMinutes = 60 },
 }
 
 export type Circadian = {

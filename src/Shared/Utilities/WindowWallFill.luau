@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local SurfacePalette = require(ReplicatedStorage.Shared.Configurations.Build.SurfacePalette)
+local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 
 export type WindowSpec = {
 	WallVariant: string?,
@@ -192,6 +193,8 @@ local function vectorFromTable(value: any): Vector3?
 	return Vector3.new(xValue, yValue, zValue)
 end
 
+local GAP_EPSILON = 1e-4
+
 local function buildSegmentSolution(model: Model, windowData: { [string]: any }, visual: VisualInfo): SegmentSolution?
 	local frameThickness = 0.2
 	if typeof(windowData.FrameThickness) == "number" and windowData.FrameThickness > 0 then
@@ -210,9 +213,13 @@ local function buildSegmentSolution(model: Model, windowData: { [string]: any },
 
 	local wallWidth = effectiveWallWidth
 
-	local wallHeight = visual.Size.Y
+	local targetHeight = BuildConstants.FloorHeightStuds or 16
+	local wallHeight = math.max(visual.Size.Y, targetHeight)
 	if typeof(windowData.WallSizeY) == "number" then
 		wallHeight = math.max(windowData.WallSizeY, frameThickness * 2)
+		if math.abs(wallHeight - 12) < 0.1 and targetHeight > 12 then
+			wallHeight = targetHeight
+		end
 	end
 
 	local wallThickness = visual.Size.Z
@@ -220,12 +227,14 @@ local function buildSegmentSolution(model: Model, windowData: { [string]: any },
 		wallThickness = math.max(windowData.WallSizeZ, 0.05)
 	end
 
-	local cutoutWidth = wallWidth * 0.6
+	local _, modelSize = model:GetBoundingBox()
+
+	local cutoutWidth = modelSize.X
 	if typeof(windowData.CutoutWidth) == "number" then
 		cutoutWidth = math.min(math.max(windowData.CutoutWidth, frameThickness * 2), wallWidth - frameThickness * 0.5)
 	end
 
-	local cutoutHeight = wallHeight * 0.6
+	local cutoutHeight = modelSize.Y
 	if typeof(windowData.CutoutHeight) == "number" then
 		cutoutHeight =
 			math.min(math.max(windowData.CutoutHeight, frameThickness * 2), wallHeight - frameThickness * 0.5)
@@ -289,30 +298,42 @@ local function buildSegmentSolution(model: Model, windowData: { [string]: any },
 	local windowTop = localCenterY + halfCutoutHeight
 	local windowBottom = localCenterY - halfCutoutHeight
 
+	local hasTopGap = (halfWallHeight - windowTop) > GAP_EPSILON
+	local hasBottomGap = (windowBottom + halfWallHeight) > GAP_EPSILON
+	local hasSideGap = (halfWallWidth - halfCutoutWidth) > GAP_EPSILON
+
 	local topHeight = math.max(halfWallHeight - windowTop, frameThickness)
 	local bottomHeight = math.max(windowBottom + halfWallHeight, frameThickness)
 	local sideWidth = math.max(halfWallWidth - halfCutoutWidth, frameThickness)
 
 	local baseCF = CFrame.fromMatrix(baseOrigin, rightVector, upVector, forwardVector)
 
-	local segments: { SegmentDefinition } = {
-		{
+	local segments: { SegmentDefinition } = {}
+
+	if hasTopGap then
+		table.insert(segments, {
 			Size = Vector3.new(wallWidth, topHeight, wallThickness),
 			CFrame = baseCF * CFrame.new(0, halfCutoutHeight + topHeight * 0.5, 0),
-		},
-		{
+		})
+	end
+
+	if hasBottomGap then
+		table.insert(segments, {
 			Size = Vector3.new(wallWidth, bottomHeight, wallThickness),
 			CFrame = baseCF * CFrame.new(0, -(halfCutoutHeight + bottomHeight * 0.5), 0),
-		},
-		{
+		})
+	end
+
+	if hasSideGap then
+		table.insert(segments, {
 			Size = Vector3.new(sideWidth, cutoutHeight, wallThickness),
 			CFrame = baseCF * CFrame.new(-(halfCutoutWidth + sideWidth * 0.5), 0, 0),
-		},
-		{
+		})
+		table.insert(segments, {
 			Size = Vector3.new(sideWidth, cutoutHeight, wallThickness),
 			CFrame = baseCF * CFrame.new(halfCutoutWidth + sideWidth * 0.5, 0, 0),
-		},
-	}
+		})
+	end
 
 	return {
 		Visual = visual,

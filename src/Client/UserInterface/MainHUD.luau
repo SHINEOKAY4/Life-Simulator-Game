@@ -10,10 +10,10 @@ local Formatter = require(ReplicatedStorage.Shared.Utilities.Formatter)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local VisualFX = require(ReplicatedStorage.Shared.Utilities.VisualFX)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
-local ResidentNeedsUI = require(script.Parent.ResidentNeedsUI)
 local CurrencyPackets = require(ReplicatedStorage.Network.CurrencyPackets)
 local BillingPackets = require(ReplicatedStorage.Network.BillingPackets)
 local SoundtrackManager = require(script.Parent.Parent.Modules.SoundtrackManager)
+local ReviewsUI = require(script.Parent.ReviewsUI)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -82,14 +82,10 @@ local BuyCashButton = TopRight:WaitForChild("BuyCashButton") :: ImageButton
 local BuildButton = BottomRight:WaitForChild("BuildButton") :: TextButton
 local BillsButton = BottomRight:WaitForChild("BillsButton") :: TextButton
 local ExpandButton = BottomRight:WaitForChild("ExpandButton") :: TextButton
-local SettingsButton = BottomRight:WaitForChild("SettingsButton") :: TextButton
+local ReviewsButton = BottomRight:WaitForChild("ReviewsButton") :: TextButton
 local BillImageFrame = BillsButton:WaitForChild("Image") :: Frame
 local TimeTextFrame = BillImageFrame:WaitForChild("TimeTextFrame") :: Frame
 local TimeTextLabel = TimeTextFrame:WaitForChild("TimeTextLabel") :: TextLabel
-local ResidentGui = PlayerGui:WaitForChild("ResidentGui") :: ScreenGui
-local ResidentSelectionFrame = ResidentGui:WaitForChild("ResidentSelectionFrame") :: Frame
-local ResidentRosterBackground = ResidentSelectionFrame:WaitForChild("Background") :: Frame
-local Roster = ResidentRosterBackground:WaitForChild("Roster") :: Frame
 
 local INCOME_RATE_ATTRIBUTE_NAME = "TenantIncomePerSecond"
 
@@ -181,29 +177,6 @@ end
 local function updateIncomePerSecondLabel()
 	local rawValue = Player:GetAttribute(INCOME_RATE_ATTRIBUTE_NAME)
 	IncomePerSecondLabel.Text = formatIncomePerSecond(if typeof(rawValue) == "number" then rawValue else 0)
-end
-
-local function findRosterFrame(targetResidentName: string?): Frame?
-	if typeof(targetResidentName) == "string" and targetResidentName ~= "" then
-		local specificFrame = Roster:FindFirstChild(targetResidentName)
-		if specificFrame and specificFrame:IsA("Frame") then
-			return specificFrame
-		end
-	end
-
-	local selectedModel = ResidentNeedsUI.GetCurrentSelectedResident()
-	if selectedModel then
-		local namedFrame = Roster:FindFirstChild(selectedModel.Name)
-		if namedFrame and namedFrame:IsA("Frame") then
-			return namedFrame
-		end
-	end
-	for _, child in ipairs(Roster:GetChildren()) do
-		if child:IsA("Frame") then
-			return child
-		end
-	end
-	return nil
 end
 
 local function ensurePulseScale(): UIScale
@@ -301,7 +274,7 @@ local function createCashPopup(
 	task.delay(style.Duration + style.CleanupExtraDelay, cleanup)
 end
 
-local function showCashPop(delta: number, targetResidentName: string?)
+local function showCashPop(delta: number, _targetResidentName: string?)
 	if delta <= 0 then
 		return
 	end
@@ -313,35 +286,6 @@ local function showCashPop(delta: number, targetResidentName: string?)
 			pulseScale.Scale = 1
 		end
 	end)
-
-	local targetFrame = findRosterFrame(targetResidentName)
-	if not targetFrame then
-		return
-	end
-
-	local frameSize = targetFrame.AbsoluteSize
-	local backgroundSize = ResidentRosterBackground.AbsoluteSize
-	if (frameSize.X <= 0 or frameSize.Y <= 0) or (backgroundSize.X <= 0 or backgroundSize.Y <= 0) then
-		return
-	end
-
-	local backgroundPosition = ResidentRosterBackground.AbsolutePosition
-	local framePosition = targetFrame.AbsolutePosition
-	local frameCenterX = framePosition.X + (frameSize.X * 0.5)
-	local topOffsetX = frameCenterX - backgroundPosition.X
-	local topOffsetY = framePosition.Y - backgroundPosition.Y
-
-	createCashPopup(
-		delta,
-		CASH_GAIN_STYLE,
-		ResidentRosterBackground,
-		UDim2.fromOffset(math.round(topOffsetX), math.round(topOffsetY)),
-		Vector2.new(0.5, 1),
-		math.max(targetFrame.ZIndex + 5, 10),
-		function()
-			VisualFX.Pulse(targetFrame, 1.03, 0.32, nil)
-		end
-	)
 end
 
 local function showCashDeductionPop(amount: number)
@@ -788,6 +732,7 @@ function MainHUD.Init()
 			SoundtrackManager.PlayBillToggle()
 			BillFrame.Visible = not BillFrame.Visible
 			if BillFrame.Visible then
+				ReviewsUI.SetVisible(false)
 				requestAndUpdateBillingInfo()
 			end
 		end, Player.UserId)
@@ -803,6 +748,11 @@ function MainHUD.Init()
 				warn(message or "Unable to process bill payment")
 			end
 		end, Player.UserId)
+	end)
+
+	ReviewsButton.Activated:Connect(function()
+		BillFrame.Visible = false
+		ReviewsUI.Toggle()
 	end)
 
 	PlotBuilderEnabled.Changed:Connect(function()
@@ -875,7 +825,7 @@ function MainHUD.Init()
 		lastCash = newValue
 	end)
 
-	for _, button in ipairs({ BuildButton, BillsButton, ExpandButton, SettingsButton }) do
+	for _, button in ipairs({ BuildButton, BillsButton, ExpandButton, ReviewsButton }) do
 		configureButtonVisuals(button)
 	end
 

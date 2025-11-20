@@ -185,7 +185,7 @@ end
 
 local function resolveWallDimensionsFromSpec(spec: { [string]: any }?): (number, number, number, number, number)
 	local defaultWidth = 4
-	local defaultHeight = 12
+	local defaultHeight = 16
 	local defaultThickness = 0.5
 	local defaultDiagonalMultiplier = math.sqrt(2)
 	local defaultMinFrame = 0.2
@@ -722,10 +722,9 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 				return false, "Window target missing"
 			end
 
-			local windowConfig = if isWindowVariant then itemData.WindowCutoutConfig else nil
-			if isWindowVariant and typeof(windowConfig) ~= "table" then
-				return false, "Window configuration missing"
-			end
+			local windowConfig = if isWindowVariant and typeof(itemData.WindowCutoutConfig) == "table"
+				then itemData.WindowCutoutConfig
+				else {}
 
 			if isWindowVariant then
 				local existingKey = state:PlacementKeyForType(payload.CellX, payload.CellZ, facing, "Wall", level)
@@ -828,18 +827,20 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 				local maxCutoutWidth = typeof(windowConfig.MaxCutoutWidth) == "number"
 						and math.max(windowConfig.MaxCutoutWidth, minCutoutWidth)
 					or math.max(effectiveWallWidth - frameThickness * 2, minCutoutWidth)
-				local widthRatio = typeof(windowConfig.CutoutWidthRatio) == "number"
-						and math.max(windowConfig.CutoutWidthRatio, 0)
-					or nil
-				local desiredCutoutWidth = effectiveWallWidth * (widthRatio and widthRatio > 0 and widthRatio or 0.7)
+
+				local cutoutWidth = nil
 				if typeof(windowConfig.CutoutWidth) == "number" and windowConfig.CutoutWidth > 0 then
-					desiredCutoutWidth = windowConfig.CutoutWidth
+					cutoutWidth = math.clamp(windowConfig.CutoutWidth, minCutoutWidth, maxCutoutWidth)
+				elseif typeof(windowConfig.CutoutWidthRatio) == "number" and windowConfig.CutoutWidthRatio > 0 then
+					local desired = effectiveWallWidth * windowConfig.CutoutWidthRatio
+					cutoutWidth = math.clamp(desired, minCutoutWidth, maxCutoutWidth)
 				end
-				local cutoutWidth =
-					math.clamp(desiredCutoutWidth, minCutoutWidth, math.max(minCutoutWidth, maxCutoutWidth))
-				cutoutWidth = math.min(cutoutWidth, effectiveWallWidth - frameThickness * 2)
-				if cutoutWidth < frameThickness * 2 then
-					cutoutWidth = frameThickness * 2
+
+				if cutoutWidth then
+					cutoutWidth = math.min(cutoutWidth, effectiveWallWidth - frameThickness * 2)
+					if cutoutWidth < frameThickness * 2 then
+						cutoutWidth = frameThickness * 2
+					end
 				end
 
 				local minCutoutHeight = math.max(
@@ -849,21 +850,23 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 				local maxCutoutHeight = typeof(windowConfig.MaxCutoutHeight) == "number"
 						and math.max(windowConfig.MaxCutoutHeight, minCutoutHeight)
 					or math.max(wallHeight - frameThickness * 2, minCutoutHeight)
-				local heightRatio = typeof(windowConfig.CutoutHeightRatio) == "number"
-						and math.max(windowConfig.CutoutHeightRatio, 0)
-					or nil
-				local desiredCutoutHeight = wallHeight * (heightRatio and heightRatio > 0 and heightRatio or 0.6)
+
+				local cutoutHeight = nil
 				if typeof(windowConfig.CutoutHeight) == "number" and windowConfig.CutoutHeight > 0 then
-					desiredCutoutHeight = windowConfig.CutoutHeight
-				end
-				local cutoutHeight =
-					math.clamp(desiredCutoutHeight, minCutoutHeight, math.max(minCutoutHeight, maxCutoutHeight))
-				cutoutHeight = math.min(cutoutHeight, wallHeight - frameThickness * 2)
-				if cutoutHeight < frameThickness * 2 then
-					cutoutHeight = frameThickness * 2
+					cutoutHeight = math.clamp(windowConfig.CutoutHeight, minCutoutHeight, maxCutoutHeight)
+				elseif typeof(windowConfig.CutoutHeightRatio) == "number" and windowConfig.CutoutHeightRatio > 0 then
+					local desired = wallHeight * windowConfig.CutoutHeightRatio
+					cutoutHeight = math.clamp(desired, minCutoutHeight, maxCutoutHeight)
 				end
 
-				local halfCutout = cutoutHeight * 0.5
+				if cutoutHeight then
+					cutoutHeight = math.min(cutoutHeight, wallHeight - frameThickness * 2)
+					if cutoutHeight < frameThickness * 2 then
+						cutoutHeight = frameThickness * 2
+					end
+				end
+
+				local halfCutout = (cutoutHeight or 4) * 0.5
 				local minCenter = math.max(
 					halfCutout,
 					typeof(windowConfig.MinHeight) == "number" and windowConfig.MinHeight or halfCutout

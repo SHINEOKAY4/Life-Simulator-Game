@@ -59,12 +59,58 @@ local function pickName(def: TenantTierDefinition, rng: Random): string
 	return pool[rng:NextInteger(1, #pool)]
 end
 
-function TenantDefinitions.GetRandomDefinition(randomObject: Random?): (TenantTierDefinition, string)
+function TenantDefinitions.GetRandomDefinition(
+	randomObject: Random?,
+	averageRating: number?
+): (TenantTierDefinition, string)
 	local rng = randomObject or Random.new()
-	local roll = rng:NextNumber() * TOTAL_WEIGHT
+
+	local dynamicWeights = {}
+	local dynamicTotal = 0
+
+	for _, def in ipairs(TIERS) do
+		local weight = def.SpawnWeight
+
+		if averageRating then
+			if def.Id == "Premium" then
+				if averageRating >= 4.5 then
+					weight *= 4.0
+				elseif averageRating >= 4.0 then
+					weight *= 2.5
+				elseif averageRating < 3.0 then
+					weight *= 0.1
+				end
+			elseif def.Id == "Upgraded" then
+				if averageRating >= 4.0 then
+					weight *= 1.8
+				elseif averageRating >= 3.5 then
+					weight *= 1.2
+				elseif averageRating < 2.5 then
+					weight *= 0.4
+				end
+			elseif def.Id == "Cozy" then
+				if averageRating >= 3.0 and averageRating < 4.0 then
+					weight *= 1.2
+				end
+			elseif def.Id == "Barebones" then
+				if averageRating < 2.0 then
+					weight *= 3.0
+				elseif averageRating < 3.0 then
+					weight *= 1.5
+				elseif averageRating >= 4.0 then
+					weight *= 0.3
+				end
+			end
+		end
+
+		dynamicWeights[def.Id] = weight
+		dynamicTotal += weight
+	end
+
+	local roll = rng:NextNumber() * dynamicTotal
 	local running = 0
 	for _, def in ipairs(TIERS) do
-		running += def.SpawnWeight
+		running += dynamicWeights[def.Id] or 0
 		if roll <= running then
 			return def, pickName(def, rng)
 		end

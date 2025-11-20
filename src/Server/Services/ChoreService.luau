@@ -5,6 +5,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local HttpService = game:GetService("HttpService")
+local Workspace = game:GetService("Workspace")
 
 local ChorePackets = require(ReplicatedStorage.Network.ChorePackets)
 local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
@@ -30,6 +31,20 @@ local MESS_REWARD = 15
 local MESS_LIFETIME = 300 -- 5 minutes
 local MAX_MESSES_PER_PLOT = 5
 
+local function getGroundPosition(position: Vector3, ignoreList: { Instance }?): Vector3
+	local rayOrigin = position + Vector3.new(0, 5, 0)
+	local rayDirection = Vector3.new(0, -50, 0)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = ignoreList or {}
+
+	local result = Workspace:Raycast(rayOrigin, rayDirection, params)
+	if result then
+		return result.Position
+	end
+	return position
+end
+
 -- // Mess System Implementation //
 
 function ChoreService.SpawnMess(player: Player, position: Vector3)
@@ -53,7 +68,8 @@ function ChoreService.SpawnMess(player: Player, position: Vector3)
 
 	-- Randomize position slightly so it doesn't stack perfectly
 	local offset = Vector3.new(math.random() * 2 - 1, 0, math.random() * 2 - 1)
-	local finalPos = position + offset
+	local roughPos = position + offset
+	local finalPos = getGroundPosition(roughPos, { player.Character })
 
 	local record: ChoreRecord = {
 		Id = id,
@@ -97,6 +113,16 @@ function ChoreService.RemoveChore(id: string, reason: string)
 			Reason = reason,
 		})
 	end
+end
+
+function ChoreService.GetTrashCount(player: Player): number
+	local count = 0
+	for _, chore in pairs(ActiveChores) do
+		if chore.OwnerPlayer == player and chore.Type == "Trash" then
+			count += 1
+		end
+	end
+	return count
 end
 
 local function completeChore(player: Player, choreId: string): (boolean, string)

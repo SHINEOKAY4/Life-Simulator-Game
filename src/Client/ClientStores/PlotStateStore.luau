@@ -1146,7 +1146,7 @@ function PlotStateStore.GetFloorHeightStuds(): number
 	if info and typeof(info.FloorHeightStuds) == "number" then
 		return info.FloorHeightStuds
 	end
-	return BuildConstants.FloorHeightStuds or 12
+	return BuildConstants.FloorHeightStuds or 16
 end
 
 function PlotStateStore.GetLevelHeight(level: number?): number

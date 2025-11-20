@@ -233,6 +233,10 @@ local function applyWallPreviewScaling(part: BasePart, cellSize: number, span: W
 
 	local axis = part:GetAttribute("PreviewLengthAxis") :: string? or "X"
 	local baseHeight = part:GetAttribute("PreviewBaseHeight") :: number? or part.Size.Y
+	if BuildConstants.FloorHeightStuds then
+		baseHeight = BuildConstants.FloorHeightStuds
+	end
+
 	local baseThickness = part:GetAttribute("PreviewBaseThickness") :: number?
 		or (axis == "X" and part.Size.Z or part.Size.X)
 	local segmentCount = if span and span.SegmentCount and span.SegmentCount > 0 then span.SegmentCount else 1

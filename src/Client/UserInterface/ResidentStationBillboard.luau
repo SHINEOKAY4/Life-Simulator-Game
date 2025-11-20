@@ -319,10 +319,8 @@ local function rebindPlot(plotIndex: number?)
 end
 
 function ResidentStationBillboard.Init()
-	rebindPlot(LocalPlayer:GetAttribute("OwnedPlotIndex") :: number?)
-	LocalPlayer:GetAttributeChangedSignal("OwnedPlotIndex"):Connect(function()
-		rebindPlot(LocalPlayer:GetAttribute("OwnedPlotIndex") :: number?)
-	end)
+	-- Disabled by user request
+	return
 end
 
 return ResidentStationBillboard

@@ -9,7 +9,7 @@ local ChorePackets = {}
 ChorePackets.ChoreSpawned = Packet("ChoreSpawned", {
 	ChoreId = Packet.String,
 	Type = Packet.String, -- "Trash", "Puddle", "BrokenItem"
-	Position = Packet.Vector3,
+	Position = Packet.Vector3F32,
 	PlotIndex = Packet.NumberU8,
 	TargetId = Packet.String, -- Optional: ID of the item broken
 })

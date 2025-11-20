@@ -44,6 +44,23 @@ local TraitConfig: { [string]: TraitProfile } = {
 			Energy = -0.15,
 		},
 	},
+	Lazy = {
+		NeedDecayMultipliers = {
+			Energy = 1.2, -- Gets tired faster
+		},
+		NeedScoreBias = {
+			Energy = 0.2, -- Wants to sleep/sit sooner
+			Fun = -0.1, -- Less interested in active fun
+		},
+	},
+	Playful = {
+		NeedDecayMultipliers = {
+			Fun = 1.5, -- Gets bored faster
+		},
+		NeedScoreBias = {
+			Fun = 0.25, -- Prioritizes fun
+		},
+	},
 }
 
 return TraitConfig

@@ -81,18 +81,35 @@ local function getOrCreateBubble(instance: Instance): BubbleEntry?
 		adornee = adornee,
 		parent = PlayerGui,
 		text = "",
-		textColor = Color3.new(1, 1, 1),
-		backgroundTransparency = 1,
-		size = UDim2.fromScale(4.5, 1.25),
-		studsOffsetWorldSpace = Vector3.new(0, 5, 0),
+		textColor = Color3.new(0, 0, 0), -- Black text
+		backgroundColor = Color3.new(1, 1, 1), -- White background
+		backgroundTransparency = 0, -- Opaque
+		size = UDim2.fromOffset(40, 40), -- Fixed size for circular bubble
+		studsOffsetWorldSpace = Vector3.new(0, 3.5, 0),
 		alwaysOnTop = false,
 		maxDistance = 70,
-		textSize = 18,
-		font = Enum.Font.Gotham,
+		textSize = 24, -- Larger emoji
+		font = Enum.Font.GothamBold,
 		clipsDescendants = false,
 	})
 	local billboard = handle.instance
 	billboard.Enabled = false
+
+	-- Make it circular
+	local uiCorner = Instance.new("UICorner")
+	uiCorner.CornerRadius = UDim.new(1, 0)
+	uiCorner.Parent = handle.label
+
+	-- Add a small tail (triangle) to make it look like a speech bubble
+	local tail = Instance.new("ImageLabel")
+	tail.Name = "Tail"
+	tail.BackgroundTransparency = 1
+	tail.Image = "rbxassetid://1264515756" -- Triangle image or similar
+	tail.ImageColor3 = Color3.new(1, 1, 1)
+	tail.Size = UDim2.fromOffset(10, 10)
+	tail.Position = UDim2.new(0.5, -5, 1, -2)
+	tail.Rotation = 180
+	tail.Parent = handle.label
 
 	local entry: BubbleEntry = {
 		Handle = handle,
@@ -136,7 +153,16 @@ local function onChatMessage(payload)
 		return
 	end
 
-	local duration = if typeof(durationValue) == "number" and durationValue > 0 then durationValue else 3
+	local duration = if typeof(durationValue) == "number" then durationValue else 3
+
+	-- If duration is 0, clear the bubble
+	if duration == 0 then
+		if bubble.Handle.instance.Enabled then
+			bubble.Handle.instance.Enabled = false
+		end
+		return
+	end
+
 	bubble.Token += 1
 	local token = bubble.Token
 
@@ -144,6 +170,11 @@ local function onChatMessage(payload)
 	billboard.Enabled = true
 	billboard.Adornee = bubble.Adornee
 	bubble.Handle:setText(text)
+
+	-- If duration is negative, it's persistent
+	if duration < 0 then
+		return
+	end
 
 	task.delay(duration, function()
 		if bubbles[bubble.Adornee] ~= bubble then

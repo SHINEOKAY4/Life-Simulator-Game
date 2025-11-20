@@ -31,7 +31,7 @@ end
 
 local function resolveWallDimensionsFromSpec(spec: { [string]: any }?): (number, number, number, number, number)
 	local defaultWidth = 4
-	local defaultHeight = 12
+	local defaultHeight = 16
 	local defaultThickness = 0.5
 	local defaultDiagonalMultiplier = math.sqrt(2)
 	local defaultMinFrame = 0.2

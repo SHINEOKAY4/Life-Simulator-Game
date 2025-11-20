@@ -12,7 +12,7 @@
 ```
 src/
 ├── Server/           # ServerScriptService - game logic authority
-│   ├── Services/     # Singleton services (PlotService, ResidentService, MiningService, TenantService, etc.)
+│   ├── Services/     # Singleton services (PlotService, ResidentService, TenantService, etc.)
 │   ├── Classes/      # Stateful objects (ResidentState, PlotState, ActionQueue)
 │   ├── Modules/      # ResidentActionHandlers, TenantValuation
 │   └── Utilities/    # Helpers (ResidentMovement, WorldPlacer, WorldUpdate)
@@ -21,13 +21,12 @@ src/
 │   ├── ClientStores/ # Replicated state caches (PlotStateStore, ResidentsStore)
 │   └── UserInterface/ # UI components (MainHUD, ResidentRoster, etc.)
 ├── Shared/           # ReplicatedStorage - definitions, utilities, configs
-│   ├── Configurations/ # NeedConfig, MiningConfig, TenantConfig, JobCatalog
+│   ├── Configurations/ # NeedConfig, TenantConfig, JobCatalog
 │   ├── Definitions/  # Static game data (items, billing constants, tenant traits)
 │   └── Utilities/    # ItemFinder, PlotFinder, TimeScale, TraitUtils
 └── Network/          # ReplicatedStorage - Packet definitions (typed remotes)
     ├── ResidentsPackets.luau    # Resident creation/deletion/sync
     ├── PlacementPackets.luau    # Plot claiming/building/unlocking
-    ├── MiningPackets.luau       # Resource gathering & state
     ├── TenantPackets.luau       # Tenant offers/evictions
     ├── ChorePackets.luau        # Interactive tasks (messes/repairs)
     └── BillingPackets.luau      # Payment/billing info
@@ -82,14 +81,7 @@ src/
   - Auto-save intervals, manual `dataStore:Save()`, session locking (prevents multi-server corruption)
   - Reconciles template on first load, handles retries, exposes signals (`Saving`, `Saved`, `StateChanged`)
 
-### 6. **Resource Gathering (Mining/Woodcutting)**
-- **Runtime Objects**: `MiningService` and `WoodcuttingService` track world objects via `Runtime` tables (e.g., `RockRuntime`).
-  - **State**: `Ready` -> `Busy` (player interaction) -> `Regrowing` (hidden in Storage).
-  - **Replication**: Uses **Attributes** on the physical `Instance` (`RockStateAttributes`) for visual state (clients listen to AttributeChanged).
-  - **WorldUpdate**: Uses `WorldUpdate.Subscribe` to check regrow timers efficiently.
-  - **Inventory**: Yields items directly to `InventoryState` in `PlayerSession`.
-
-### 7. **Tenant System & Economy**
+### 6. **Tenant System & Economy**
 - **TenantService** (`Server/Services/TenantService.luau`):
   - Manages `TenantState` (Offers, ActiveLeases, MailboxBalance).
   - **Valuation**: `TenantValuation` scores the plot to determine rent offers.
@@ -111,11 +103,6 @@ src/
 3. Add to `ResidentAutonomyService/State.luau`: `NeedToStationType`, evaluation order
 4. Update `NeedConfig.luau` if introducing new need
 
-### Adding a New Resource Node
-1. Define node in `Shared/Definitions/MiningConfig.luau` (or Woodcutting).
-2. Create Model/Part in `Workspace/World/...` and tag with `RockStateAttributes.TypeId`.
-3. `MiningService` automatically binds to tagged instances on Init.
-
 ### Debugging Residents
 - Enable channels in `Server/Main.server.luau`:
   ```lua
@@ -134,8 +121,5 @@ src/
 - **ActionQueue is serial**: Residents execute one action at a time. Queueing multiple actions requires understanding `EnqueueAction()` and `CancelToken` propagation.
 - **Station versioning**: `PlotService.GetStationVersion()` invalidates cache on build changes. Always refresh cache when evaluating needs after placement.
 - **Manual override disables autonomy**: `DirectActionService.AssignStationToResident()` calls `DisableAutomation()` - must re-enable after action completes.
-- **WorldUpdate Loops**: `ResidentAutonomyService`, `MiningService`, and `TenantService` all use `WorldUpdate.Subscribe`. Ensure new loops are performant.
+- **WorldUpdate Loops**: `ResidentAutonomyService` and `TenantService` all use `WorldUpdate.Subscribe`. Ensure new loops are performant.
 - **Time scales**: In-game time (`TimeScale.GetClockTime()`) vs real-time (`os.clock()`). Needs decay per in-game hour; billing/regrow cycles use real-time.
-
-## Related Docs
-- [README.md](../README.md)

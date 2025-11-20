@@ -98,17 +98,11 @@ export type SurfaceMountedMap = { [string]: SavedSurfaceMount }
 
 export type SurfaceMountCounterMap = { [string]: number }
 
-export type FoodSourceCooldownState = {
-	ChargesRemaining: number?,
-	RestockReadyUnix: number?,
-}
-
 export type SaveData = {
 	UnlockedChunks: { SavedChunk },
 	PlacedObjects: PlacedObjectMap,
 	SurfaceMountedObjects: SurfaceMountedMap?,
 	SurfaceMountCounters: SurfaceMountCounterMap?,
-	InteractableCooldowns: { [string]: FoodSourceCooldownState }?,
 }
 
 export type PlotState = {
@@ -420,7 +414,7 @@ PlotState.__index = PlotState
 
 local DEFAULT_LEVEL = 0
 local MAX_FLOOR_LEVELS = 3
-local FLOOR_HEIGHT_STUDS = BuildConstants.FloorHeightStuds or 12
+local FLOOR_HEIGHT_STUDS = BuildConstants.FloorHeightStuds or 16
 
 local function placementKey(cellX: number, cellZ: number, facing: Facing?, yLevel: number?): string
 	return PlacementKey.FromComponents(cellX, cellZ, facing, yLevel)
@@ -610,7 +604,6 @@ function PlotState.new(grid: any, chunkSizeInCells: number, save: SaveData): Plo
 	self.Save.PlacedObjects = self.Save.PlacedObjects or {}
 	self.Save.SurfaceMountedObjects = self.Save.SurfaceMountedObjects or {}
 	self.Save.SurfaceMountCounters = self.Save.SurfaceMountCounters or {}
-	self.Save.InteractableCooldowns = self.Save.InteractableCooldowns or {}
 	self.SurfaceMountedObjects = self.Save.SurfaceMountedObjects :: SurfaceMountedMap
 	self.SurfaceMountCounters = self.Save.SurfaceMountCounters :: SurfaceMountCounterMap
 

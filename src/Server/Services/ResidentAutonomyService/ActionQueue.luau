@@ -4,7 +4,6 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local State = require(script.Parent.State)
 local StationManager = require(script.Parent.StationManager)
-local NeedEffects = require(ServerScriptService.Server.Utilities.NeedEffects)
 
 export type ResidentState = any
 export type NeedDecision = {
@@ -66,43 +65,20 @@ function ActionQueue.enqueueNeedAction(
 	local stationModel = decision.StationModel
 	local actionMode = decision.ActionMode
 
+	-- Mark occupied
 	station.Occupied = true
 	if not table.find(station.Residents, residentName) then
 		table.insert(station.Residents, residentName)
 	end
 
-	State.addPendingStationReservation(resident, station, residentName)
-
-	local pendingNeed = decision.NeedName
-	State.setPending(resident, pendingNeed)
-
-	local consumedReservation = false
 	local releasedReservation = false
-
-	local function clearPending()
-		if pendingNeed and State.getPending(resident) == pendingNeed then
-			State.setPending(resident, nil)
-		end
-	end
-
-	local function markReservationConsumed()
-		if consumedReservation then
-			return
-		end
-		consumedReservation = true
-		State.consumePendingStationReservation(resident, station, residentName)
-	end
 
 	local function releaseReservation()
 		if releasedReservation then
 			return
 		end
 		releasedReservation = true
-		if not consumedReservation then
-			markReservationConsumed()
-		end
 		StationManager.releaseStationOccupancy(station, residentName)
-		clearPending()
 	end
 
 	local assignment = buildAssignment(player, residentName, resident, decision)
@@ -115,33 +91,17 @@ function ActionQueue.enqueueNeedAction(
 
 	local actionName = string.format("Auto:%s:%s", decision.StationType, decision.NeedName)
 	State.clearNextEvaluation(resident)
+
 	resident:EnqueueAction(actionName, function(context)
-		markReservationConsumed()
 		if context.CancelToken.Cancelled then
 			releaseReservation()
 			return
 		end
 		local ok, result = (xpcall :: any)(handler, debug.traceback, context, assignment)
 		releaseReservation()
-		if ok then
-			State.setNeedCooldown(resident, decision.NeedName)
-			return
+		if not ok then
+			warn(string.format("[ResidentAutonomy] Handler for %s failed: %s", decision.StationType, tostring(result)))
 		end
-		local message = if typeof(result) == "string" then result else tostring(result)
-		local abortReason = NeedEffects.ParseAbortReason(message)
-		if abortReason then
-			local now = os.clock()
-			if typeof(abortReason) == "string" and abortReason:sub(1, 11) == "NeedUrgent:" then
-				local urgentNeed = abortReason:sub(12)
-				if urgentNeed ~= "" then
-					State.setForcedNeed(resident, urgentNeed, now)
-				end
-			end
-			State.registerInterruptedNeed(resident, decision.NeedName, now)
-			return
-		end
-		warn(string.format("[ResidentAutonomy] Handler for %s failed: %s", decision.StationType, message))
-		error(result)
 	end, releaseReservation)
 	return true
 end

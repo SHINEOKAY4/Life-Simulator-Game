@@ -90,6 +90,7 @@ function Pipeline.new(context: HandlerContext, assignment: HandlerAssignment)
 			primaryReleased = false,
 			primaryOccupantIndex = nil,
 			primaryOccupantCount = nil,
+			persistentBubbleShown = false,
 		} :: any,
 		Pipeline
 	)
@@ -99,6 +100,7 @@ function Pipeline.new(context: HandlerContext, assignment: HandlerAssignment)
 		self:leaveDiningSeat()
 		self:releaseDiningReservation()
 		self:releasePrimaryReservation()
+		self:clearPersistentBubble()
 	end)
 	self.primaryOccupantIndex, self.primaryOccupantCount =
 		self:_computeOccupantMetadata(assignment.StationRecord, assignment.ItemSpec)
@@ -107,6 +109,13 @@ end
 
 function Pipeline:defer(callback: () -> ())
 	self.cleanupTasks[#self.cleanupTasks + 1] = callback
+end
+
+function Pipeline:clearPersistentBubble()
+	if self.persistentBubbleShown then
+		ResidentChat.ClearPersistentAction(self.assignment.ResidentState)
+		self.persistentBubbleShown = false
+	end
 end
 
 function Pipeline:_computeOccupantMetadata(
@@ -368,6 +377,15 @@ function Pipeline:moveToDining(
 end
 
 function Pipeline:runNeedEffects(behavior: Behavior, metadata: { [string]: any }): (boolean, string?, any?)
+	-- Handle persistent action bubble
+	if not self.persistentBubbleShown then
+		local emoji = behavior.ActionEmoji
+		if emoji and emoji ~= "" then
+			ResidentChat.ShowPersistentAction(self.assignment.ResidentState, emoji)
+			self.persistentBubbleShown = true
+		end
+	end
+
 	if not behavior.ChatIntervalSeconds then
 		local initialLine = ResidentChat.SelectChatText(self.assignment.ResidentState, behavior.ChatPhrases, nil)
 		if initialLine then
