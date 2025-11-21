@@ -9,6 +9,7 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 export type ResidentData = {
 	Name: string,
 	Traits: { string },
+	TenantId: string?,
 }
 
 local ClientResidentPlacer = {}
@@ -87,6 +88,19 @@ local function ensureResidentModel(residentName: string): Model?
 	return model
 end
 
+local function applyResidentAttributes(model: Model, residentData: ResidentData)
+	if typeof(residentData.Name) == "string" and residentData.Name ~= "" then
+		model:SetAttribute("ResidentName", residentData.Name)
+	end
+
+	local tenantIdValue = residentData.TenantId
+	if type(tenantIdValue) == "string" and tenantIdValue ~= "" then
+		model:SetAttribute("TenantId", tenantIdValue)
+	else
+		model:SetAttribute("TenantId", nil)
+	end
+end
+
 function ClientResidentPlacer.Spawn(userId: number, residentData: ResidentData, spawnOverride: CFrame?): Model?
 	local player = Players:GetPlayerByUserId(userId)
 	if not player then
@@ -123,6 +137,7 @@ function ClientResidentPlacer.Spawn(userId: number, residentData: ResidentData, 
 		model:PivotTo(spawnCFrame)
 	end
 
+	applyResidentAttributes(model, residentData)
 	model.Parent = plotResidentsFolder
 
 	return model

@@ -20,6 +20,7 @@ local CurrencyService = require(ServerScriptService.Server.Services.CurrencyServ
 local ChoreService = require(ServerScriptService.Server.Services.ChoreService)
 local WeatherService = require(ServerScriptService.Server.Services.WeatherService)
 local TenantValuation = require(ServerScriptService.Server.Modules.TenantValuation)
+local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 local HttpService = game:GetService("HttpService")
 
@@ -372,11 +373,33 @@ local function getActiveLeases(runtime: RuntimeState): { [string]: TenantLease }
 	return leases :: { [string]: TenantLease }
 end
 
-local function broadcastActiveTenants(runtime: RuntimeState)
+local function unlinkResidentForTenant(runtime: RuntimeState, tenantId: string)
+	local player = runtime.Player
+	local residentName = ResidentService.GetResidentNameByTenantId(player, tenantId)
+	if not residentName then
+		ResidentService.ClearTenantLink(player, tenantId)
+		return
+	end
+
+	local success, message = ResidentService.DeleteResident(player, residentName)
+	if not success then
+		warn(
+			string.format(
+				"[TenantService] Failed to delete resident '%s' for tenant '%s': %s",
+				residentName,
+				tenantId,
+				message or "Unknown error"
+			)
+		)
+		ResidentService.ClearTenantLink(player, tenantId)
+	end
+end
+
+local function buildActiveTenantPayload(runtime: RuntimeState): { any }
 	local leases = getActiveLeases(runtime)
 	local payload = {}
 	for _, lease in pairs(leases) do
-		table.insert(payload, {
+		payload[#payload + 1] = {
 			TenantId = lease.TenantId,
 			Name = lease.TenantName or "Unknown",
 			TierId = lease.TierId,
@@ -384,27 +407,29 @@ local function broadcastActiveTenants(runtime: RuntimeState)
 			Rent = lease.RentPerInterval,
 			RentInterval = lease.RentIntervalSeconds,
 			Boost = lease.RentBoostPercent or 0,
-		})
+		}
 	end
+	return payload
+end
+
+local function broadcastActiveTenants(runtime: RuntimeState)
 	TenantPackets.ActiveTenantsSync:FireClient(runtime.Player, {
 		UserId = runtime.Player.UserId,
-		Tenants = payload,
+		Tenants = buildActiveTenantPayload(runtime),
 	})
 end
 
 local function broadcastTenantDelta(runtime: RuntimeState, tenantId: string, lease: TenantLease?)
-	local tenantData = nil
+	local tenantData = {}
 	if lease then
-		tenantData = {
-			{
-				TenantId = lease.TenantId,
-				Name = lease.TenantName or "Unknown",
-				TierId = lease.TierId,
-				Traits = lease.Traits or {},
-				Rent = lease.RentPerInterval,
-				RentInterval = lease.RentIntervalSeconds,
-				Boost = lease.RentBoostPercent or 0,
-			},
+		tenantData[1] = {
+			TenantId = lease.TenantId,
+			Name = lease.TenantName or "Unknown",
+			TierId = lease.TierId,
+			Traits = lease.Traits or {},
+			Rent = lease.RentPerInterval,
+			RentInterval = lease.RentIntervalSeconds,
+			Boost = lease.RentBoostPercent or 0,
 		}
 	end
 	TenantPackets.TenantDelta:FireClient(runtime.Player, {
@@ -615,6 +640,8 @@ local function concludeLease(runtime: RuntimeState, tenantId: string, reason: st
 	leases[tenantId] = nil
 	lease.LeaseEndUnix = serverNow()
 
+	unlinkResidentForTenant(runtime, tenantId)
+
 	local deposit = lease.DepositHeld or 0
 	if deposit > 0 and reason ~= "Evicted" then
 		local currencyState = resolveCurrencyState(runtime)
@@ -823,7 +850,8 @@ local function refreshValuation(runtime: RuntimeState, now: number)
 	end
 
 	if not plotState then
-		local retry = math.clamp(runtime.ValuationRetrySeconds * 2, MIN_VALUATION_RETRY_SECONDS, MAX_VALUATION_RETRY_SECONDS)
+		local retry =
+			math.clamp(runtime.ValuationRetrySeconds * 2, MIN_VALUATION_RETRY_SECONDS, MAX_VALUATION_RETRY_SECONDS)
 		runtime.ValuationRetrySeconds = retry
 		runtime.NextValuationUnix = now + retry
 		return
@@ -832,7 +860,8 @@ local function refreshValuation(runtime: RuntimeState, now: number)
 	local avgRating = getAverageRating(runtime.Player)
 	local valuation = TenantValuation.Evaluate(plotState, avgRating)
 	if not valuation then
-		local retry = math.clamp(runtime.ValuationRetrySeconds * 2, MIN_VALUATION_RETRY_SECONDS, MAX_VALUATION_RETRY_SECONDS)
+		local retry =
+			math.clamp(runtime.ValuationRetrySeconds * 2, MIN_VALUATION_RETRY_SECONDS, MAX_VALUATION_RETRY_SECONDS)
 		runtime.ValuationRetrySeconds = retry
 		runtime.NextValuationUnix = now + retry
 		return
@@ -1109,6 +1138,23 @@ function TenantService.Init()
 	PlotService.PlotUnclaimed:Connect(function(player: Player)
 		clearMailboxAttribute(player)
 	end)
+
+	TenantPackets.RequestActiveTenants.OnServerInvoke = function(player: Player)
+		local runtime: RuntimeState? = RuntimeByUserId[player.UserId]
+		if not runtime then
+			runtime = hydrateRuntime(player)
+		end
+		if not runtime then
+			return {
+				UserId = player.UserId,
+				Tenants = {},
+			}
+		end
+		return {
+			UserId = player.UserId,
+			Tenants = buildActiveTenantPayload(runtime),
+		}
+	end
 
 	TenantPackets.EvictTenantRequest.OnServerInvoke = function(player: Player, tenantId: string)
 		local success, message = TenantService.EvictTenant(player, tenantId)

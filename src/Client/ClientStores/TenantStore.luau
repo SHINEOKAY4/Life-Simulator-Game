@@ -14,45 +14,53 @@ TenantStore.TenantsUpdated = GoodSignal.new()
 TenantStore.TenantAdded = GoodSignal.new()
 TenantStore.TenantRemoved = GoodSignal.new()
 
+local function applyTenantSnapshot(userId: number?, tenantsPayload: { any }?)
+	if type(userId) ~= "number" then
+		return
+	end
+	if type(tenantsPayload) ~= "table" then
+		return
+	end
+
+	local current = PlayersTenants[userId]
+	if not current then
+		current = {}
+		PlayersTenants[userId] = current
+	end
+
+	local seen: { [string]: boolean } = {}
+	for _, tenant in ipairs(tenantsPayload) do
+		if typeof(tenant) == "table" and type(tenant.TenantId) == "string" then
+			local tenantId = tenant.TenantId
+			seen[tenantId] = true
+			local existing = current[tenantId]
+			current[tenantId] = tenant
+			if existing then
+				TenantStore.TenantsUpdated:Fire(userId, tenant)
+			else
+				TenantStore.TenantAdded:Fire(userId, tenant)
+			end
+		end
+	end
+
+	local toRemove = {}
+	for tenantId in pairs(current) do
+		if not seen[tenantId] then
+			table.insert(toRemove, tenantId)
+		end
+	end
+	for _, tenantId in ipairs(toRemove) do
+		current[tenantId] = nil
+		TenantStore.TenantRemoved:Fire(userId, tenantId)
+	end
+end
+
 function TenantStore.Init()
 	TenantPackets.ActiveTenantsSync.OnClientEvent:Connect(function(payload)
-		local userId = payload.UserId
-		local current = PlayersTenants[userId]
-		if not current then
-			current = {}
-			PlayersTenants[userId] = current
-		end
-
-		local seen: { [string]: boolean } = {}
-		local tenantsPayload = payload.Tenants
-		if type(tenantsPayload) ~= "table" then
+		if typeof(payload) ~= "table" then
 			return
 		end
-
-		for _, tenant in ipairs(tenantsPayload) do
-			if typeof(tenant) == "table" and type(tenant.TenantId) == "string" then
-				local tenantId = tenant.TenantId
-				seen[tenantId] = true
-				local existing = current[tenantId]
-				current[tenantId] = tenant
-				if existing then
-					TenantStore.TenantsUpdated:Fire(userId, tenant)
-				else
-					TenantStore.TenantAdded:Fire(userId, tenant)
-				end
-			end
-		end
-
-		local toRemove = {}
-		for tenantId in pairs(current) do
-			if not seen[tenantId] then
-				table.insert(toRemove, tenantId)
-			end
-		end
-		for _, tenantId in ipairs(toRemove) do
-			current[tenantId] = nil
-			TenantStore.TenantRemoved:Fire(userId, tenantId)
-		end
+		applyTenantSnapshot(payload.UserId, payload.Tenants)
 	end)
 
 	TenantPackets.TenantDelta.OnClientEvent:Connect(function(payload)
@@ -87,6 +95,14 @@ function TenantStore.Init()
 				end
 			end
 		end
+	end)
+
+	task.defer(function()
+		local response = TenantPackets.RequestActiveTenants:Fire({})
+		if typeof(response) ~= "table" then
+			return
+		end
+		applyTenantSnapshot(response.UserId, response.Tenants)
 	end)
 end
 

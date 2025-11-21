@@ -10,8 +10,6 @@ local TenantPackets = require(ReplicatedStorage.Network.TenantPackets)
 local TenantStore = require(script.Parent.Parent.ClientStores.TenantStore)
 local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 local TenantEvictionBillboard = require(script.Parent.Parent.UserInterface.TenantEvictionBillboard)
-local SelectionController = require(script.Parent.SelectionController)
-local TenantProfileUI = require(script.Parent.Parent.UserInterface.TenantProfileUI)
 
 local LocalPlayer = Players.LocalPlayer
 local LOCAL_USER_ID = LocalPlayer.UserId
@@ -29,6 +27,7 @@ type TenantEntry = {
 type ModelRecord = {
 	Model: Model,
 	ResidentName: string,
+	TenantId: string?,
 	Prompt: ProximityPrompt?,
 	Connections: { RBXScriptConnection },
 	PromptConnections: { RBXScriptConnection },
@@ -41,6 +40,7 @@ local isInitialized = false
 local residentsFolderConnections: { RBXScriptConnection } = {}
 local modelRecordsByModel: { [Model]: ModelRecord } = {}
 local modelByResidentName: { [string]: Model } = {}
+local recordsByTenantId: { [string]: ModelRecord } = {}
 local tenantEntries: { [string]: TenantEntry } = {}
 
 local function disconnectConnections(connections: { RBXScriptConnection })
@@ -71,6 +71,9 @@ local function cleanupRecord(record: ModelRecord)
 	if modelByResidentName[record.ResidentName] == record.Model then
 		modelByResidentName[record.ResidentName] = nil
 	end
+	if record.TenantId and recordsByTenantId[record.TenantId] == record then
+		recordsByTenantId[record.TenantId] = nil
+	end
 	if TenantEvictionBillboard.IsVisibleFor(record.Model) then
 		task.defer(TenantEvictionBillboard.Hide)
 	end
@@ -95,12 +98,11 @@ local function findPromptParent(model: Model): Instance?
 	return model:FindFirstChildWhichIsA("BasePart")
 end
 
-local function showEvictionUi(record: ModelRecord, entry: TenantEntry)
+local function showEvictionUi(record: ModelRecord, tenantId: string, entry: TenantEntry?)
 	local model = record.Model
 	if TenantEvictionBillboard.IsVisibleFor(model) then
 		return
 	end
-	local tenantId = entry.TenantId
 	if tenantId == "" then
 		return
 	end
@@ -108,7 +110,7 @@ local function showEvictionUi(record: ModelRecord, entry: TenantEntry)
 
 	TenantEvictionBillboard.Show(model, {
 		ResidentName = record.ResidentName,
-		TenantLabel = entry.Name,
+		TenantLabel = entry and entry.Name or "Tenant",
 		OnCancel = function()
 			record.PromptSuppressed = false
 		end,
@@ -149,17 +151,18 @@ local function onPromptTriggered(record: ModelRecord)
 	if TenantEvictionBillboard.IsVisibleFor(record.Model) then
 		return
 	end
-	local entry = tenantEntries[record.ResidentName]
-	if not entry then
+	local tenantId = record.TenantId
+	if not tenantId or tenantId == "" then
 		return
 	end
-	showEvictionUi(record, entry)
+	local entry = tenantEntries[tenantId]
+	showEvictionUi(record, tenantId, entry)
 end
 
 local function ensurePromptForRecord(record: ModelRecord)
 	disposePrompt(record)
-	local entry = tenantEntries[record.ResidentName]
-	if not entry then
+	local tenantId = record.TenantId
+	if not tenantId or tenantId == "" then
 		if TenantEvictionBillboard.IsVisibleFor(record.Model) then
 			TenantEvictionBillboard.Hide()
 		end
@@ -202,16 +205,11 @@ local function ensurePromptForRecord(record: ModelRecord)
 	end)
 end
 
-local function refreshResidentRecord(residentName: string)
-	local model = modelByResidentName[residentName]
-	if not model then
-		return
+local function refreshRecordByTenantId(tenantId: string)
+	local record = recordsByTenantId[tenantId]
+	if record then
+		ensurePromptForRecord(record)
 	end
-	local record = modelRecordsByModel[model]
-	if not record then
-		return
-	end
-	ensurePromptForRecord(record)
 end
 
 local function updateResidentMapping(record: ModelRecord, newName: string)
@@ -223,7 +221,22 @@ local function updateResidentMapping(record: ModelRecord, newName: string)
 	end
 	record.ResidentName = newName
 	modelByResidentName[newName] = record.Model
-	refreshResidentRecord(newName)
+end
+
+local function updateRecordTenantBinding(record: ModelRecord, newTenantId: string?)
+	local currentTenantId = record.TenantId
+	if currentTenantId and recordsByTenantId[currentTenantId] == record then
+		recordsByTenantId[currentTenantId] = nil
+	end
+
+	if newTenantId and newTenantId ~= "" then
+		record.TenantId = newTenantId
+		recordsByTenantId[newTenantId] = record
+	else
+		record.TenantId = nil
+	end
+
+	ensurePromptForRecord(record)
 end
 
 local function trackModel(model: Model)
@@ -235,6 +248,7 @@ local function trackModel(model: Model)
 	local record: ModelRecord = {
 		Model = model,
 		ResidentName = residentName,
+		TenantId = nil,
 		Prompt = nil,
 		Connections = {},
 		PromptConnections = {},
@@ -261,6 +275,16 @@ local function trackModel(model: Model)
 			else model.Name
 		updateResidentMapping(record, updatedName)
 	end)
+
+	record.Connections[#record.Connections + 1] = model:GetAttributeChangedSignal("TenantId"):Connect(function()
+		local updatedTenantValue = model:GetAttribute("TenantId")
+		local tenantIdValue = if type(updatedTenantValue) == "string" then updatedTenantValue else nil
+		updateRecordTenantBinding(record, tenantIdValue)
+	end)
+
+	local initialTenantAttr = model:GetAttribute("TenantId")
+	local tenantIdValue = if type(initialTenantAttr) == "string" then initialTenantAttr else nil
+	updateRecordTenantBinding(record, tenantIdValue)
 
 	ensurePromptForRecord(record)
 end
@@ -349,20 +373,20 @@ local function applyTenantEntry(tenantData: any)
 	if type(tenantData) ~= "table" then
 		return
 	end
-	local tenantName = tenantData.Name
-	if type(tenantName) ~= "string" or tenantName == "" then
-		return
-	end
 	local tenantId = tenantData.TenantId
 	if type(tenantId) ~= "string" or tenantId == "" then
 		return
 	end
+	local tenantName = tenantData.Name
+	if type(tenantName) ~= "string" or tenantName == "" then
+		tenantName = "Tenant"
+	end
 
-	tenantEntries[tenantName] = {
+	tenantEntries[tenantId] = {
 		TenantId = tenantId,
 		Name = tenantName,
 	}
-	refreshResidentRecord(tenantName)
+	refreshRecordByTenantId(tenantId)
 end
 
 local function onTenantAdded(_userId: number, tenantData: any)
@@ -370,17 +394,8 @@ local function onTenantAdded(_userId: number, tenantData: any)
 end
 
 local function onTenantRemoved(_userId: number, tenantId: string)
-	local nameToRemove = nil
-	for name, entry in pairs(tenantEntries) do
-		if entry.TenantId == tenantId then
-			nameToRemove = name
-			break
-		end
-	end
-	if nameToRemove then
-		tenantEntries[nameToRemove] = nil
-		refreshResidentRecord(nameToRemove)
-	end
+	tenantEntries[tenantId] = nil
+	refreshRecordByTenantId(tenantId)
 end
 
 local function primeTenantEntries()
@@ -388,6 +403,7 @@ local function primeTenantEntries()
 	if not currentTenants then
 		return
 	end
+	table.clear(tenantEntries)
 	for _, tenantData in pairs(currentTenants) do
 		applyTenantEntry(tenantData)
 	end
@@ -402,28 +418,6 @@ function TenantInteractionController.Init()
 	TenantEvictionBillboard.Init()
 	primeTenantEntries()
 	rebindPlotResidents()
-
-	SelectionController.OnSelectionChanged(function(instance, _key)
-		if not instance then
-			TenantProfileUI.Hide()
-			return
-		end
-
-		if not instance:IsA("Model") then
-			TenantProfileUI.Hide()
-			return
-		end
-
-		local record = modelRecordsByModel[instance :: Model]
-		if record then
-			local entry = tenantEntries[record.ResidentName]
-			if entry and entry.TenantId then
-				TenantProfileUI.Show(entry.TenantId, record.Model)
-			end
-		else
-			TenantProfileUI.Hide()
-		end
-	end)
 
 	LocalPlayer:GetAttributeChangedSignal("OwnedPlotIndex"):Connect(rebindPlotResidents)
 

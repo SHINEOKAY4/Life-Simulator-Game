@@ -17,7 +17,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 local ResidentGui = PlayerGui:WaitForChild("ResidentGui")
 local Profile = ResidentGui:WaitForChild("Profile")
 local ResidentSelectionFrame = ResidentGui:WaitForChild("ResidentSelectionFrame")
-local ResidentNeedsFrame = ResidentGui:WaitForChild("ResidentNeedsFrame")
+
 local ResidentButtons = ResidentGui:WaitForChild("ResidentButtons")
 local CustomizeButton = ResidentButtons:FindFirstChild("CustomizeButton") :: TextButton?
 local ProfileButton = ResidentButtons:WaitForChild("ProfileButton") :: TextButton
@@ -291,6 +291,28 @@ local function runDebounced(actionName: string, callback: () -> ()): ()
 	Debounce.RunIfAvailable(key, INPUT_DEBOUNCE_SECONDS, callback, Player.UserId)
 end
 
+local function restorePlayerCameraFocus()
+	CameraUtils.CancelFocus()
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	camera.CameraType = Enum.CameraType.Custom
+	local character = Player.Character
+	if not character then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		camera.CameraSubject = humanoid
+		return
+	end
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart and rootPart:IsA("BasePart") then
+		camera.CameraSubject = rootPart
+	end
+end
+
 local function deselectResident()
 	local currentName = SelectedResidentName
 	if currentName then
@@ -300,11 +322,11 @@ local function deselectResident()
 		end
 	end
 	SelectedResidentName = nil
-	ResidentNeedsFrame.Visible = false
+
 	ResidentButtons.Visible = false
 	Profile.Visible = false
 	TenantProfileUI.Hide()
-	CameraUtils.CancelFocus()
+	restorePlayerCameraFocus()
 	setPlayerMovementEnabled(true)
 end
 
@@ -312,9 +334,7 @@ local function refreshRosterVisibility()
 	local shouldShow = ResidentRosterEnabled.Value and not isRosterBlocked()
 	if shouldShow then
 		setRosterVisible(true)
-		if SelectedResidentName then
-			ResidentNeedsFrame.Visible = true
-		end
+
 		return
 	end
 
@@ -352,7 +372,7 @@ local function selectResident(residentName: string)
 	SelectedResidentName = residentName
 	ResidentRosterEnabled.Value = true
 	setRosterVisible(true)
-	ResidentNeedsFrame.Visible = true
+
 	ResidentButtons.Visible = true
 	local currentData = FrameData[residentName]
 	local snapshot = currentData and currentData.GetResidentSnapshot()
@@ -377,7 +397,7 @@ local function selectResident(residentName: string)
 			})
 		end
 	else
-		CameraUtils.CancelFocus()
+		restorePlayerCameraFocus()
 	end
 	setPlayerMovementEnabled(false)
 end
@@ -531,7 +551,7 @@ local function CreateResidentImageButton(residentData: any)
 	}
 	updateResidentGradient()
 	newFrame.Parent = Roster
-	return newFrame, residentModel
+	return newFrame
 end
 
 function ResidentRoster.Init(): ()
@@ -578,6 +598,9 @@ function ResidentRoster.Init(): ()
 			ResidentGui.Enabled = true
 		end
 		local residentFrame = CreateResidentImageButton(residentData)
+		if not residentFrame then
+			return
+		end
 		local portraitButton = residentFrame.PortraitButton :: TextButton
 		local activationConnection = portraitButton.Activated:Connect(function()
 			runDebounced(string.format("Select/%s", residentData.Name), function()

@@ -281,9 +281,6 @@ function PlotExpansion.Show()
 		if coversFolder then
 			for _, cover in ipairs(coversFolder:GetChildren()) do
 				if cover:IsA("BasePart") then
-					-- Ensure part is invisible but raycastable
-					cover.Transparency = 1
-
 					local chunkX = cover:GetAttribute("ChunkX") :: number
 					local chunkZ = cover:GetAttribute("ChunkZ") :: number
 					local isUnlocked = PlotStateStore.IsChunkUnlocked(chunkX, chunkZ)
@@ -432,19 +429,7 @@ function PlotExpansion.Hide()
 		end)
 	end
 
-	-- Reset covers
-	local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
-	local plotModel = PlotFinder.FindPlot(plotIndex)
-	if plotModel then
-		local coversFolder = plotModel:FindFirstChild("Covers")
-		if coversFolder then
-			for _, cover in ipairs(coversFolder:GetChildren()) do
-				if cover:IsA("BasePart") then
-					cover.Transparency = 1
-				end
-			end
-		end
-	end
+	-- Leave cover transparency untouched; server-side unlock flow drives visibility
 end
 
 return PlotExpansion

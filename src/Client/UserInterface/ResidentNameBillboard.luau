@@ -25,6 +25,7 @@ export type NameplateEntry = {
 	ResidentName: string,
 	Traits: { string }?,
 	TierId: string?,
+	TenantId: string?,
 }
 
 local ResidentNameBillboard = {}
@@ -36,6 +37,7 @@ end
 local currentPlotIndex: number? = nil
 local nameplatesByModel: { [Model]: NameplateEntry } = {}
 local nameplatesByResident: { [string]: NameplateEntry } = {}
+local nameplatesByTenantId: { [string]: NameplateEntry } = {}
 local residentsFolderConnections: { RBXScriptConnection } = {}
 
 local function disconnectAll(connections: { RBXScriptConnection })
@@ -146,44 +148,76 @@ local function applyBillboard(entry: NameplateEntry)
 	entry.Handle.instance.Enabled = true
 end
 
-local function detachResident(model: Model)
-	local entry = nameplatesByModel[model]
-	if not entry then
-		return
-	end
-
-	nameplatesByModel[model] = nil
-	nameplatesByResident[entry.ResidentName] = nil
-	disconnectAll(entry.Connections)
-	entry.Handle:destroy()
-end
-
 local function syncTenantData(entry: NameplateEntry)
-	local tenants = TenantStore.GetTenants(LocalPlayer.UserId)
-	if not tenants then
+	local tenantId = entry.TenantId
+	if not tenantId or tenantId == "" then
 		entry.TierId = nil
 		entry.Traits = nil
 		applyBillboard(entry)
 		return
 	end
 
-	-- Find tenant by name
-	local foundTenant = nil
-	for _, tenant in pairs(tenants) do
-		if tenant.Name == entry.ResidentName then
-			foundTenant = tenant
-			break
-		end
-	end
-
-	if foundTenant then
-		entry.TierId = foundTenant.TierId
-		entry.Traits = foundTenant.Traits
+	local tenant = TenantStore.GetTenant(LocalPlayer.UserId, tenantId)
+	if tenant then
+		entry.TierId = tenant.TierId
+		entry.Traits = tenant.Traits
 	else
 		entry.TierId = nil
 		entry.Traits = nil
 	end
 	applyBillboard(entry)
+end
+
+local function updateEntryTenantBinding(entry: NameplateEntry, newTenantId: string?)
+	local currentId = entry.TenantId
+	if currentId and nameplatesByTenantId[currentId] == entry then
+		nameplatesByTenantId[currentId] = nil
+	end
+
+	if newTenantId and newTenantId ~= "" then
+		entry.TenantId = newTenantId
+		nameplatesByTenantId[newTenantId] = entry
+	else
+		entry.TenantId = nil
+	end
+
+	syncTenantData(entry)
+end
+
+local function resolveTenantIdAttribute(model: Model): string?
+	local rawValue = model:GetAttribute("TenantId")
+	if type(rawValue) == "string" and rawValue ~= "" then
+		return rawValue
+	end
+	return nil
+end
+
+local function resolveResidentDisplayName(model: Model): string?
+	local attr = model:GetAttribute("ResidentName")
+	if type(attr) == "string" and attr ~= "" then
+		return attr
+	end
+	local fallback = model.Name
+	if type(fallback) == "string" and fallback ~= "" then
+		return fallback
+	end
+	return nil
+end
+
+local function detachResident(model: Model)
+	local entry = nameplatesByModel[model]
+	if not entry then
+		return
+	end
+
+	if entry.TenantId and nameplatesByTenantId[entry.TenantId] == entry then
+		nameplatesByTenantId[entry.TenantId] = nil
+	end
+
+	nameplatesByModel[model] = nil
+	nameplatesByResident[entry.ResidentName] = nil
+	disconnectAll(entry.Connections)
+	entry.Handle:destroy()
 end
 
 local function attachResident(model: Model)
@@ -200,8 +234,8 @@ local function attachResident(model: Model)
 		return
 	end
 
-	local residentName = model.Name
-	if type(residentName) ~= "string" or residentName == "" then
+	local residentName = resolveResidentDisplayName(model)
+	if not residentName then
 		return
 	end
 
@@ -220,7 +254,6 @@ local function attachResident(model: Model)
 		font = Enum.Font.GothamBold,
 		outline = true,
 		outlineColor = Color3.new(0, 0, 0),
-		outlineTransparency = 0.45,
 		clipsDescendants = false,
 	})
 	local billboard = handle.instance
@@ -233,12 +266,13 @@ local function attachResident(model: Model)
 		ResidentName = residentName,
 		Traits = nil,
 		TierId = nil,
+		TenantId = nil,
 	}
 
 	nameplatesByModel[model] = entry
 	nameplatesByResident[residentName] = entry
 
-	syncTenantData(entry)
+	updateEntryTenantBinding(entry, resolveTenantIdAttribute(model))
 
 	local function bind(connection: RBXScriptConnection)
 		table.insert(entry.Connections, connection)
@@ -264,13 +298,35 @@ local function attachResident(model: Model)
 		end
 	end))
 
-	applyBillboard(entry)
+	bind(model:GetAttributeChangedSignal("TenantId"):Connect(function()
+		updateEntryTenantBinding(entry, resolveTenantIdAttribute(model))
+	end))
+
+	local function refreshResidentName()
+		local nextName = resolveResidentDisplayName(model)
+		if not nextName or nextName == entry.ResidentName then
+			return
+		end
+		nameplatesByResident[entry.ResidentName] = nil
+		entry.ResidentName = nextName
+		nameplatesByResident[nextName] = entry
+		applyBillboard(entry)
+	end
+
+	bind(model:GetAttributeChangedSignal("ResidentName"):Connect(refreshResidentName))
+	bind(model:GetPropertyChangedSignal("Name"):Connect(function()
+		if model:GetAttribute("ResidentName") then
+			return
+		end
+		refreshResidentName()
+	end))
 end
 
 local function clearAllNameplates()
 	for model in pairs(nameplatesByModel) do
 		detachResident(model)
 	end
+	table.clear(nameplatesByTenantId)
 end
 
 local function detachAllConnections()
@@ -350,7 +406,11 @@ function ResidentNameBillboard.Init()
 		if userId ~= LocalPlayer.UserId then
 			return
 		end
-		local entry = nameplatesByResident[tenantData.Name]
+		local tenantId = tenantData and tenantData.TenantId
+		if type(tenantId) ~= "string" then
+			return
+		end
+		local entry = nameplatesByTenantId[tenantId]
 		if entry then
 			syncTenantData(entry)
 		end
@@ -360,7 +420,11 @@ function ResidentNameBillboard.Init()
 		if userId ~= LocalPlayer.UserId then
 			return
 		end
-		local entry = nameplatesByResident[tenantData.Name]
+		local tenantId = tenantData and tenantData.TenantId
+		if type(tenantId) ~= "string" then
+			return
+		end
+		local entry = nameplatesByTenantId[tenantId]
 		if entry then
 			syncTenantData(entry)
 		end
@@ -370,15 +434,12 @@ function ResidentNameBillboard.Init()
 		if userId ~= LocalPlayer.UserId then
 			return
 		end
-		-- We need to find which resident had this tenantId, or just refresh all matching name?
-		-- TenantStore doesn't give us the name on remove, only ID.
-		-- But we can iterate our nameplates and check if they were linked to this tenant?
-		-- Actually syncTenantData iterates TenantStore. If tenant is gone from store, syncTenantData will clear fields.
-		-- But we need to know WHICH entry to update.
-		-- Since we don't know the name from ID easily without a reverse lookup, we might just refresh all or iterate.
-		-- Iterating all nameplates is cheap enough (usually < 10 residents).
-		for _, entry in pairs(nameplatesByResident) do
-			syncTenantData(entry)
+		local entry = nameplatesByTenantId[_tenantId]
+		if entry then
+			entry.TierId = nil
+			entry.Traits = nil
+			nameplatesByTenantId[_tenantId] = nil
+			applyBillboard(entry)
 		end
 	end)
 end
