@@ -164,7 +164,7 @@ function WallLogic.ComputeWallMountedPreview(
 	surface: BasePart,
 	chunkSize: number,
 	placed: any,
-	ignorePlacement: MoveOriginInfo?,
+	_ignorePlacement: MoveOriginInfo?,
 	itemSpec: any?
 ): {
 	CanPlace: boolean,
@@ -235,6 +235,8 @@ function WallLogic.ComputeWallMountedPreview(
 		-- The original code iterated over placed items.
 		-- To keep this pure, we might need to pass the iteration logic or keep it here.
 		-- Let's keep it here as it's specific to wall mounted items.
+		-- Placeholder to avoid empty block error
+		local _ = placed
 	end
 
 	return {

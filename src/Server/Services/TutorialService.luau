@@ -1,5 +1,4 @@
 --!strict
-local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ServicesFolder = ServerScriptService.Server.Services

@@ -153,7 +153,7 @@ function TenantTraits.RollTraits(rng: Random, count: number?): { string }
 	local currentWeight = TOTAL_WEIGHT
 
 	-- Simple weighted selection without replacement
-	for i = 1, amount do
+	for _ = 1, amount do
 		if #available == 0 then
 			break
 		end

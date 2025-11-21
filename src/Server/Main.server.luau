@@ -5,14 +5,11 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local ServerFolder = ServerScriptService.Server
 local ServicesFolder = ServerFolder.Services
-local ModulesFolder = ServerFolder.Modules
 
 local PlayerSession = require(ServicesFolder.PlayerSession)
 local PlotService = require(ServicesFolder.PlotService)
 local BuildService = require(ServicesFolder.BuildService)
 local ResidentService = require(ServicesFolder.ResidentService)
-local ResidentAutonomyService = require(ServicesFolder.ResidentAutonomyService)
-local ResidentCollapseService = require(ServicesFolder.ResidentCollapseService)
 local WorldEventService = require(ServicesFolder.WorldEventService)
 local BillingService = require(ServicesFolder.BillingService)
 local TenantService = require(ServicesFolder.TenantService)
@@ -21,8 +18,8 @@ local TutorialService = require(ServicesFolder.TutorialService)
 local ChoreService = require(ServicesFolder.ChoreService)
 local TipsService = require(ServicesFolder.TipsService)
 local UtilityService = require(ServicesFolder.UtilityService)
-
-local _ResidentActionHandlers = require(ModulesFolder.ResidentActionHandlers)
+local TemperatureService = require(ServicesFolder.TemperatureService)
+local WeatherService = require(ServicesFolder.WeatherService)
 
 ResidentService.Init()
 BillingService.Init()
@@ -31,11 +28,12 @@ PlotService.Init()
 BuildService.Init()
 TenantService.Init()
 TenantProspectService.Init()
-ResidentAutonomyService.Init()
-ResidentCollapseService.Init()
 TutorialService.Init()
 ChoreService.Init()
 TipsService.Init()
+UtilityService.Init()
+TemperatureService.Init()
+WeatherService.Start()
 
 -- Ensure power state is recalculated whenever a plot finishes loading
 PlotService.PlotClaimed:Connect(function(player)
@@ -44,7 +42,6 @@ PlotService.PlotClaimed:Connect(function(player)
 	end)
 end)
 
-ResidentCollapseService.Refresh()
 local function OnPlayerAdded(player: Player)
 	print("Player added: " .. player.Name)
 	print(PlayerSession.GetDataAwait(player))
@@ -65,6 +62,7 @@ local function OnPlayerRemoving(player: Player)
 	ResidentService.Unload(player) -- This should always be higher in the unload order
 	PlotService.Unclaim(player) -- This should always be lower in the unload order
 	BillingService.Remove(player)
+	UtilityService.ClearCache(player)
 end
 
 Players.PlayerAdded:Connect(OnPlayerAdded)

@@ -78,7 +78,6 @@ local TopRight = MainHUDGui:WaitForChild("TopRight")
 local TextFrame = TopRight:WaitForChild("TextFrame") :: Frame
 local CashLabel = TextFrame:WaitForChild("CashLabel") :: TextLabel
 local IncomePerSecondLabel = TopRight:WaitForChild("IncomePerSecondLabel") :: TextLabel
-local BuyCashButton = TopRight:WaitForChild("BuyCashButton") :: ImageButton
 local BuildButton = BottomRight:WaitForChild("BuildButton") :: TextButton
 local BillsButton = BottomRight:WaitForChild("BillsButton") :: TextButton
 local ExpandButton = BottomRight:WaitForChild("ExpandButton") :: TextButton

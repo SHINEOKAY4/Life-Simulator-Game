@@ -869,7 +869,11 @@ function PlotStateStore.Init()
 					levelValue = defaultLevel
 				end
 				local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
-				local placementKeyType = PlacementBehavior.getPlacementKeyLabel(spec)
+
+				-- Resolve placement key type including subslot ID if present
+				local subSlotId = if metadata then metadata.SubSlotId or metadata.subSlotId else nil
+				local placementKeyType = PlacementBehavior.getPlacementKeyLabelForSubSlot(spec, subSlotId)
+
 				local itemSnapshot = {
 					id = entry.id,
 					cellX = entry.cellX,
@@ -954,7 +958,7 @@ function PlotStateStore.Init()
 		local facing = delta.Item.Facing or "North"
 		local spec = itemId and ItemFinder.FindItemById(itemId) or nil
 		local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
-		local placementKeyType = PlacementBehavior.getPlacementKeyLabel(spec)
+
 		local metadata = normalizeMetadata(delta.Item.Metadata)
 		local deltaSubSlotId = delta.Item.SubSlotId or delta.Item.subSlotId
 		if typeof(deltaSubSlotId) == "string" and deltaSubSlotId ~= "" then
@@ -963,6 +967,11 @@ function PlotStateStore.Init()
 			end
 			metadata.SubSlotId = deltaSubSlotId
 		end
+
+		-- Resolve placement key type including subslot ID if present
+		local subSlotId = if metadata then metadata.SubSlotId or metadata.subSlotId else nil
+		local placementKeyType = PlacementBehavior.getPlacementKeyLabelForSubSlot(spec, subSlotId)
+
 		local widthCells = delta.Item.WidthCells or delta.Item.widthCells
 		local depthCells = delta.Item.DepthCells or delta.Item.depthCells
 		if not widthCells or widthCells <= 0 then

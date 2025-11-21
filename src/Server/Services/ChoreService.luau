@@ -168,18 +168,18 @@ end
 
 -- // Item Breakdown System (Stubbed) //
 
-function ChoreService.RegisterBreakableItem(itemInstance: Instance)
+function ChoreService.RegisterBreakableItem(_itemInstance: Instance)
 	-- TODO: Track item usage and health
 end
 
-function ChoreService.TriggerBreakdown(itemInstance: Instance)
+function ChoreService.TriggerBreakdown(_itemInstance: Instance)
 	-- TODO: Set item state to broken, spawn repair chore
 	-- local id = HttpService:GenerateGUID(false)
 	-- Create ChoreRecord with Type="Repair"
 	-- Fire packet
 end
 
-function ChoreService.RepairItem(player: Player, choreId: string)
+function ChoreService.RepairItem(_player: Player, _choreId: string)
 	-- TODO: Validate repair skill/parts?
 	-- Restore item function
 end

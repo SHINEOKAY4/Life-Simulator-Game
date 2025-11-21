@@ -44,4 +44,46 @@ TenantPackets.ProspectDecision =
 TenantPackets.EvictTenantRequest =
 	Packet("TenantEvictRequest", Packet.String):Response(Packet.Boolean8, Packet.StringLong)
 
+TenantPackets.GetTenantDetails = Packet("GetTenantDetails", Packet.String):Response({
+	TenantId = Packet.String,
+	Name = Packet.String,
+	TierId = Packet.String,
+	Rent = Packet.NumberU32,
+	RentInterval = Packet.NumberU32,
+	Boost = Packet.NumberF32,
+	Traits = { Packet.String },
+	Rating = Packet.NumberF32,
+})
+
+TenantPackets.ActiveTenantsSync = Packet("ActiveTenantsSync", {
+	UserId = Packet.NumberF64,
+	Tenants = {
+		{
+			TenantId = Packet.String,
+			Name = Packet.String,
+			TierId = Packet.String,
+			Traits = { Packet.String },
+			Rent = Packet.NumberU32,
+			RentInterval = Packet.NumberU32,
+			Boost = Packet.NumberF32,
+		},
+	},
+})
+
+TenantPackets.TenantDelta = Packet("TenantDelta", {
+	UserId = Packet.NumberF64,
+	TenantId = Packet.String, -- For deletions
+	TenantData = { -- Optional, if present it's an update/add
+		{
+			TenantId = Packet.String,
+			Name = Packet.String,
+			TierId = Packet.String,
+			Traits = { Packet.String },
+			Rent = Packet.NumberU32,
+			RentInterval = Packet.NumberU32,
+			Boost = Packet.NumberF32,
+		},
+	},
+})
+
 return TenantPackets

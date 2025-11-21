@@ -7,9 +7,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local TenantPackets = require(ReplicatedStorage.Network.TenantPackets)
-local ResidentsStore = require(script.Parent.Parent.ClientStores.ResidentsStore)
+local TenantStore = require(script.Parent.Parent.ClientStores.TenantStore)
 local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 local TenantEvictionBillboard = require(script.Parent.Parent.UserInterface.TenantEvictionBillboard)
+local SelectionController = require(script.Parent.SelectionController)
+local TenantProfileUI = require(script.Parent.Parent.UserInterface.TenantProfileUI)
 
 local LocalPlayer = Players.LocalPlayer
 local LOCAL_USER_ID = LocalPlayer.UserId
@@ -19,14 +21,9 @@ local PROMPT_NAME = "TenantEvictionPrompt"
 local MAX_PROMPT_DISTANCE = 15
 local PROMPT_OFFSET = Vector3.new(0, 0, 0)
 
-export type ResidentDatum = {
-	Name: string,
-	TenantId: string?,
-}
-
 type TenantEntry = {
 	TenantId: string,
-	Resident: ResidentDatum,
+	Name: string,
 }
 
 type ModelRecord = {
@@ -111,7 +108,7 @@ local function showEvictionUi(record: ModelRecord, entry: TenantEntry)
 
 	TenantEvictionBillboard.Show(model, {
 		ResidentName = record.ResidentName,
-		TenantLabel = entry.Resident.Name,
+		TenantLabel = entry.Name,
 		OnCancel = function()
 			record.PromptSuppressed = false
 		end,
@@ -348,43 +345,51 @@ local function rebindPlotResidents()
 	end
 end
 
-local function applyResidentEntry(residentData: ResidentDatum)
-	local residentName = residentData.Name
-	if type(residentName) ~= "string" or residentName == "" then
+local function applyTenantEntry(tenantData: any)
+	if type(tenantData) ~= "table" then
 		return
 	end
-	local tenantIdValue = residentData.TenantId
-	local tenantId = if type(tenantIdValue) == "string" and tenantIdValue ~= "" then tenantIdValue else nil
-	if tenantId then
-		tenantEntries[residentName] = {
-			TenantId = tenantId,
-			Resident = residentData,
-		}
-	else
-		tenantEntries[residentName] = nil
-	end
-	refreshResidentRecord(residentName)
-end
-
-local function onResidentAdded(_userId: number, residentData: any)
-	if type(residentData) ~= "table" then
+	local tenantName = tenantData.Name
+	if type(tenantName) ~= "string" or tenantName == "" then
 		return
 	end
-	applyResidentEntry(residentData :: ResidentDatum)
+	local tenantId = tenantData.TenantId
+	if type(tenantId) ~= "string" or tenantId == "" then
+		return
+	end
+
+	tenantEntries[tenantName] = {
+		TenantId = tenantId,
+		Name = tenantName,
+	}
+	refreshResidentRecord(tenantName)
 end
 
-local function onResidentRemoved(_userId: number, residentName: string)
-	tenantEntries[residentName] = nil
-	refreshResidentRecord(residentName)
+local function onTenantAdded(_userId: number, tenantData: any)
+	applyTenantEntry(tenantData)
+end
+
+local function onTenantRemoved(_userId: number, tenantId: string)
+	local nameToRemove = nil
+	for name, entry in pairs(tenantEntries) do
+		if entry.TenantId == tenantId then
+			nameToRemove = name
+			break
+		end
+	end
+	if nameToRemove then
+		tenantEntries[nameToRemove] = nil
+		refreshResidentRecord(nameToRemove)
+	end
 end
 
 local function primeTenantEntries()
-	local currentResidents = ResidentsStore.GetResidents(LocalPlayer.UserId)
-	if not currentResidents then
+	local currentTenants = TenantStore.GetTenants(LocalPlayer.UserId)
+	if not currentTenants then
 		return
 	end
-	for _, residentData in pairs(currentResidents) do
-		applyResidentEntry(residentData :: ResidentDatum)
+	for _, tenantData in pairs(currentTenants) do
+		applyTenantEntry(tenantData)
 	end
 end
 
@@ -398,27 +403,49 @@ function TenantInteractionController.Init()
 	primeTenantEntries()
 	rebindPlotResidents()
 
+	SelectionController.OnSelectionChanged(function(instance, _key)
+		if not instance then
+			TenantProfileUI.Hide()
+			return
+		end
+
+		if not instance:IsA("Model") then
+			TenantProfileUI.Hide()
+			return
+		end
+
+		local record = modelRecordsByModel[instance :: Model]
+		if record then
+			local entry = tenantEntries[record.ResidentName]
+			if entry and entry.TenantId then
+				TenantProfileUI.Show(entry.TenantId, record.Model)
+			end
+		else
+			TenantProfileUI.Hide()
+		end
+	end)
+
 	LocalPlayer:GetAttributeChangedSignal("OwnedPlotIndex"):Connect(rebindPlotResidents)
 
-	ResidentsStore.ResidentAdded:Connect(function(userId: number, residentData: any)
+	TenantStore.TenantAdded:Connect(function(userId: number, tenantData: any)
 		if userId ~= LOCAL_USER_ID then
 			return
 		end
-		onResidentAdded(userId, residentData)
+		onTenantAdded(userId, tenantData)
 	end)
 
-	ResidentsStore.ResidentsUpdated:Connect(function(userId: number, residentData: any)
+	TenantStore.TenantsUpdated:Connect(function(userId: number, tenantData: any)
 		if userId ~= LOCAL_USER_ID then
 			return
 		end
-		onResidentAdded(userId, residentData)
+		onTenantAdded(userId, tenantData)
 	end)
 
-	ResidentsStore.ResidentRemoved:Connect(function(userId: number, residentName: string)
+	TenantStore.TenantRemoved:Connect(function(userId: number, tenantId: string)
 		if userId ~= LOCAL_USER_ID then
 			return
 		end
-		onResidentRemoved(userId, residentName)
+		onTenantRemoved(userId, tenantId)
 	end)
 end
 

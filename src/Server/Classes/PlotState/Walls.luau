@@ -218,6 +218,9 @@ function Walls.attach(PlotState)
 			yLevel = level,
 			Metadata = metadataCopy,
 		}
+		if self.InvalidateRooms then
+			self:InvalidateRooms(level)
+		end
 		return true
 	end
 
@@ -347,6 +350,9 @@ function Walls.attach(PlotState)
 		self.Save.PlacedObjects[key] = nil
 		if alignment == "DiagonalForward" or alignment == "DiagonalBackward" then
 			occupancy[self.Grid:CellToIndex(cellX, cellZ)] = true
+		end
+		if self.InvalidateRooms then
+			self:InvalidateRooms(level)
 		end
 		return {
 			removedId = removedId,
@@ -521,6 +527,13 @@ function Walls.attach(PlotState)
 		saved.facing = resolvedToFacing
 		saved.yLevel = resolvedToLevel
 		self.Save.PlacedObjects[toKey] = saved
+
+		if self.InvalidateRooms then
+			self:InvalidateRooms(resolvedFromLevel)
+			if resolvedFromLevel ~= resolvedToLevel then
+				self:InvalidateRooms(resolvedToLevel)
+			end
+		end
 
 		return true, nil
 	end

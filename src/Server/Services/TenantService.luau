@@ -17,8 +17,8 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
-local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 local ChoreService = require(ServerScriptService.Server.Services.ChoreService)
+local WeatherService = require(ServerScriptService.Server.Services.WeatherService)
 local TenantValuation = require(ServerScriptService.Server.Modules.TenantValuation)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 local HttpService = game:GetService("HttpService")
@@ -32,6 +32,8 @@ local RentConfig = TenantConfig.Rent
 local UPDATE_TASK_NAME = "TenantService"
 local UPDATE_INTERVAL = 1
 local INFINITE_LEASE_END = math.huge
+local MIN_VALUATION_RETRY_SECONDS = 5
+local MAX_VALUATION_RETRY_SECONDS = 90
 
 local rng = Random.new()
 
@@ -84,6 +86,7 @@ type RuntimeState = {
 	Save: TenantStateSave,
 	CurrencyState: { [string]: number }?,
 	CachedValuation: ValuationResult?,
+	ValuationRetrySeconds: number,
 	LastPropertyValue: number,
 	NextValuationUnix: number,
 	NextOfferUnix: number,
@@ -369,6 +372,48 @@ local function getActiveLeases(runtime: RuntimeState): { [string]: TenantLease }
 	return leases :: { [string]: TenantLease }
 end
 
+local function broadcastActiveTenants(runtime: RuntimeState)
+	local leases = getActiveLeases(runtime)
+	local payload = {}
+	for _, lease in pairs(leases) do
+		table.insert(payload, {
+			TenantId = lease.TenantId,
+			Name = lease.TenantName or "Unknown",
+			TierId = lease.TierId,
+			Traits = lease.Traits or {},
+			Rent = lease.RentPerInterval,
+			RentInterval = lease.RentIntervalSeconds,
+			Boost = lease.RentBoostPercent or 0,
+		})
+	end
+	TenantPackets.ActiveTenantsSync:FireClient(runtime.Player, {
+		UserId = runtime.Player.UserId,
+		Tenants = payload,
+	})
+end
+
+local function broadcastTenantDelta(runtime: RuntimeState, tenantId: string, lease: TenantLease?)
+	local tenantData = nil
+	if lease then
+		tenantData = {
+			{
+				TenantId = lease.TenantId,
+				Name = lease.TenantName or "Unknown",
+				TierId = lease.TierId,
+				Traits = lease.Traits or {},
+				Rent = lease.RentPerInterval,
+				RentInterval = lease.RentIntervalSeconds,
+				Boost = lease.RentBoostPercent or 0,
+			},
+		}
+	end
+	TenantPackets.TenantDelta:FireClient(runtime.Player, {
+		UserId = runtime.Player.UserId,
+		TenantId = tenantId,
+		TenantData = tenantData,
+	})
+end
+
 local function hydrateRuntime(player: Player): RuntimeState?
 	local tenantSave = PlayerSession.GetDataAwait(player, "TenantState")
 	if not tenantSave then
@@ -413,6 +458,7 @@ local function hydrateRuntime(player: Player): RuntimeState?
 		Save = tenantSave,
 		CurrencyState = currencyState,
 		CachedValuation = nil,
+		ValuationRetrySeconds = MIN_VALUATION_RETRY_SECONDS,
 		LastPropertyValue = 0,
 		NextValuationUnix = 0,
 		NextOfferUnix = now + OffersConfig.MinIntervalSeconds,
@@ -431,6 +477,7 @@ local function hydrateRuntime(player: Player): RuntimeState?
 	end)
 	updateIncomeRateAttribute(runtime)
 	broadcastPropertyValue(runtime)
+	broadcastActiveTenants(runtime)
 
 	task.defer(function()
 		local active = RuntimeByUserId[player.UserId]
@@ -457,6 +504,44 @@ local function generateReview(runtime: RuntimeState, lease: TenantLease, reason:
 		rating = math.max(1, rating - penalty)
 	end
 
+	-- Temperature impact
+	local plotState = PlotService.GetState(runtime.Player)
+	local totalTemp, roomCount = 0, 0
+	if plotState then
+		for level = 0, plotState.MaxFloorLevel do
+			for _, room in ipairs(plotState:GetRoomsForLevel(level)) do
+				if room.CellCount > 0 and room.InsulationScore > 0.2 then
+					totalTemp += room.CurrentTemperature
+					roomCount += 1
+				end
+			end
+		end
+	end
+
+	local avgTemp = if roomCount > 0 then totalTemp / roomCount else WeatherService.GetCurrentTemperature()
+	local tempConfig = TenantConfig.Temperature
+	local tempPenalty = 0
+	local tempComment = nil
+
+	if avgTemp < tempConfig.IdealMin then
+		if avgTemp < tempConfig.FreezingThreshold then
+			tempPenalty = 2
+			tempComment = "It's absolutely freezing in here! Turn on the heat!"
+		else
+			tempPenalty = 1
+			tempComment = "A bit too cold for my taste."
+		end
+	elseif avgTemp > tempConfig.IdealMax then
+		if avgTemp > tempConfig.OverheatThreshold then
+			tempPenalty = 2
+			tempComment = "It's like a sauna in here! Unbearable heat."
+		else
+			tempPenalty = 1
+			tempComment = "It's too hot inside. Do you have AC?"
+		end
+	end
+	rating = math.clamp(rating - tempPenalty, 1, 5)
+
 	if reason == "Evicted" then
 		rating = 1
 	end
@@ -481,7 +566,9 @@ local function generateReview(runtime: RuntimeState, lease: TenantLease, reason:
 
 	local pool = comments[rating] or comments[3]
 
-	if trashCount > 0 and rating <= 3 then
+	if tempComment and rating <= 3 then
+		pool = { tempComment }
+	elseif trashCount > 0 and rating <= 3 then
 		local trashComments = {
 			"The place was a dump! Trash everywhere.",
 			"Disgusting. Garbage all over the floor.",
@@ -538,6 +625,7 @@ local function concludeLease(runtime: RuntimeState, tenantId: string, reason: st
 
 	updateIncomeRateAttribute(runtime)
 	scheduleNextOffer(runtime)
+	broadcastTenantDelta(runtime, tenantId, nil)
 end
 
 local function getAverageRating(player: Player): number?
@@ -623,6 +711,7 @@ local function startLease(runtime: RuntimeState, offer: TenantOffer, now: number
 	leases[uniqueId] = lease
 	scheduleNextOffer(runtime, now + OffersConfig.CooldownSeconds)
 	updateIncomeRateAttribute(runtime)
+	broadcastTenantDelta(runtime, uniqueId, lease)
 	return uniqueId
 end
 
@@ -734,14 +823,18 @@ local function refreshValuation(runtime: RuntimeState, now: number)
 	end
 
 	if not plotState then
-		runtime.NextValuationUnix = now + 5
+		local retry = math.clamp(runtime.ValuationRetrySeconds * 2, MIN_VALUATION_RETRY_SECONDS, MAX_VALUATION_RETRY_SECONDS)
+		runtime.ValuationRetrySeconds = retry
+		runtime.NextValuationUnix = now + retry
 		return
 	end
 
 	local avgRating = getAverageRating(runtime.Player)
 	local valuation = TenantValuation.Evaluate(plotState, avgRating)
 	if not valuation then
-		runtime.NextValuationUnix = now + 5
+		local retry = math.clamp(runtime.ValuationRetrySeconds * 2, MIN_VALUATION_RETRY_SECONDS, MAX_VALUATION_RETRY_SECONDS)
+		runtime.ValuationRetrySeconds = retry
+		runtime.NextValuationUnix = now + retry
 		return
 	end
 
@@ -749,6 +842,7 @@ local function refreshValuation(runtime: RuntimeState, now: number)
 	runtime.Save.LastKnownScore = valuation.Score
 	broadcastPropertyValue(runtime, valuation.Score)
 	runtime.NextValuationUnix = now + ValuationConfig.RefreshIntervalSeconds
+	runtime.ValuationRetrySeconds = MIN_VALUATION_RETRY_SECONDS
 end
 
 local function tryExpireOffer(runtime: RuntimeState, now: number)
@@ -946,15 +1040,6 @@ function TenantService.EvictTenant(player: Player, tenantId: string): (boolean, 
 		return false, "Tenant not found."
 	end
 
-	local residentName = ResidentService.GetResidentNameByTenantId(player, tenantId)
-	if residentName then
-		local deleted, message = ResidentService.DeleteResident(player, residentName)
-		if not deleted then
-			return false, message or "Resident could not be removed."
-		end
-	end
-
-	ResidentService.ClearTenantLink(player, tenantId)
 	concludeLease(runtime, tenantId, "Evicted")
 	return true, nil
 end
@@ -1028,6 +1113,46 @@ function TenantService.Init()
 	TenantPackets.EvictTenantRequest.OnServerInvoke = function(player: Player, tenantId: string)
 		local success, message = TenantService.EvictTenant(player, tenantId)
 		return success, message or ""
+	end
+
+	TenantPackets.GetTenantDetails.OnServerInvoke = function(player: Player, tenantId: string)
+		local leases = TenantService.GetActiveLeases(player)
+		if not leases then
+			return {
+				TenantId = "",
+				Name = "Not Found",
+				TierId = "",
+				Rent = 0,
+				RentInterval = 0,
+				Boost = 0,
+				Traits = {},
+				Rating = 0,
+			}
+		end
+		local lease = leases[tenantId]
+		if not lease then
+			return {
+				TenantId = "",
+				Name = "Not Found",
+				TierId = "",
+				Rent = 0,
+				RentInterval = 0,
+				Boost = 0,
+				Traits = {},
+				Rating = 0,
+			}
+		end
+
+		return {
+			TenantId = lease.TenantId,
+			Name = lease.TenantName or "Unknown",
+			TierId = lease.TierId,
+			Rent = lease.RentPerInterval,
+			RentInterval = lease.RentIntervalSeconds,
+			Boost = lease.RentBoostPercent or 0,
+			Traits = lease.Traits or {},
+			Rating = 0,
+		}
 	end
 
 	ReviewPackets.GetReviewsRequest.OnServerInvoke = function(player: Player)

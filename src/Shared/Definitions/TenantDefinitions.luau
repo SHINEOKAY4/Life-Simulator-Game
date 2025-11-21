@@ -7,6 +7,7 @@ export type TenantTierDefinition = {
 	SpawnWeight: number,
 	RentBoostPercent: number,
 	Names: { string },
+	DisplayColor: Color3,
 }
 
 local TenantDefinitions = {}
@@ -17,24 +18,28 @@ local TIERS: { TenantTierDefinition } = {
 		SpawnWeight = 45,
 		RentBoostPercent = 0,
 		Names = { "Maya", "Dion", "Rafi", "Emilia" },
+		DisplayColor = Color3.fromHex("#999999"),
 	},
 	{
 		Id = "Cozy",
 		SpawnWeight = 30,
 		RentBoostPercent = 0.12,
 		Names = { "June", "Kade", "Nisha", "Reid" },
+		DisplayColor = Color3.fromHex("#55FF55"),
 	},
 	{
 		Id = "Upgraded",
 		SpawnWeight = 18,
 		RentBoostPercent = 0.22,
 		Names = { "Sel", "Theo", "Vera" },
+		DisplayColor = Color3.fromHex("#5555FF"),
 	},
 	{
 		Id = "Premium",
 		SpawnWeight = 7,
 		RentBoostPercent = 0.35,
 		Names = { "Zuri", "Lena", "Atlas" },
+		DisplayColor = Color3.fromHex("#FFD700"),
 	},
 }
 

@@ -1,11 +1,9 @@
 --!strict
--- ResidentMovement.lua
+-- Client/Modules/ClientResidentMovement.luau
 -- Pathfinding and interaction helpers for steering residents toward station objects.
 
 local PathfindingService = game:GetService("PathfindingService")
 local RunService = game:GetService("RunService")
-local ServerScriptService = game:GetService("ServerScriptService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DEFAULT_TIMEOUT = 25
 local ARRIVAL_TOLERANCE = 2
@@ -33,11 +31,8 @@ type StationArrival = {
 	EntryAttachment: Attachment?,
 }
 
-local ResidentMovement = {}
-local ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
-local NeedConfig = require(ReplicatedStorage.Shared.Configurations.NeedConfig)
+local ClientResidentMovement = {}
 
-local MOVEMENT_CHANNEL = "Movement"
 local restPoseState = setmetatable({}, { __mode = "k" })
 
 type RestPoseRecord = {
@@ -48,7 +43,6 @@ type RestPoseRecord = {
 	JumpHeight: number?,
 	UseJumpPower: boolean?,
 	RootAnchored: boolean,
-	RootOwner: Player?,
 	StandCFrame: CFrame?,
 	RootCFrame: CFrame?,
 }
@@ -82,16 +76,6 @@ local function getVectorAttribute(source: Instance?, attributeName: string): Vec
 	return nil
 end
 
-local function getResidentName(residentState: any): string
-	local save = residentState and residentState.Save
-	local name = if save
-			and typeof(save) == "table"
-			and typeof(save.Name) == "string"
-		then save.Name
-		else "UnknownResident"
-	return name
-end
-
 local PATH_VARIANTS = {
 	{
 		AgentHeight = 4,
@@ -115,16 +99,14 @@ local PATH_VARIANTS = {
 	},
 }
 
-local function getHumanoid(residentState: any): Humanoid?
-	local model = residentState and residentState.Model
+local function getHumanoid(model: Model?): Humanoid?
 	if not model then
 		return nil
 	end
 	return model:FindFirstChildOfClass("Humanoid")
 end
 
-local function getHumanoidRootPart(residentState: any): BasePart?
-	local model = residentState and residentState.Model
+local function getHumanoidRootPart(model: Model?): BasePart?
 	if not model then
 		return nil
 	end
@@ -142,48 +124,16 @@ local function stopHumanoid(humanoid: Humanoid)
 	humanoid:Move(Vector3.zero)
 end
 
-local function getNeedValue(residentState: any, needName: string): number
-	if residentState and typeof(residentState.GetNeed) == "function" then
-		local value = residentState:GetNeed(needName)
-		if typeof(value) == "number" then
-			return value
-		end
-	end
-	local config = NeedConfig.Needs[needName]
-	if config then
-		return config.Max
-	end
-	return 100
-end
-
-local CACHED_HUNGER_DEF = NeedConfig.Needs.Hunger
-local CACHED_ENERGY_DEF = NeedConfig.Needs.Energy
-
-local function shouldRunToTarget(residentState: any, origin: Vector3, destination: Vector3): boolean
+local function shouldRunToTarget(origin: Vector3, destination: Vector3): boolean
 	local distance = (origin - destination).Magnitude
 	if distance < RUN_DISTANCE_THRESHOLD then
 		return false
 	end
-
-	if CACHED_HUNGER_DEF then
-		local hunger = getNeedValue(residentState, "Hunger")
-		if hunger <= CACHED_HUNGER_DEF.Critical then
-			return false
-		end
-	end
-
-	if CACHED_ENERGY_DEF then
-		local energy = getNeedValue(residentState, "Energy")
-		if energy <= CACHED_ENERGY_DEF.Critical or energy <= CACHED_ENERGY_DEF.Low then
-			return false
-		end
-	end
-
 	return true
 end
 
-local function pickTravelSpeed(residentState: any, origin: Vector3, destination: Vector3): number
-	if shouldRunToTarget(residentState, origin, destination) then
+local function pickTravelSpeed(origin: Vector3, destination: Vector3): number
+	if shouldRunToTarget(origin, destination) then
 		return RUN_SPEED
 	end
 	return WALK_SPEED
@@ -272,17 +222,9 @@ local function waitForMoveFinished(
 	return finished and reached
 end
 
-local function followWaypoints(
-	humanoid: Humanoid,
-	token: CancelToken?,
-	waypoints: { PathWaypoint },
-	residentName: string
-): boolean
-	for index, waypoint in ipairs(waypoints) do
+local function followWaypoints(humanoid: Humanoid, token: CancelToken?, waypoints: { PathWaypoint }): boolean
+	for _, waypoint in ipairs(waypoints) do
 		if token and token.Cancelled then
-			ResidentDebug.Trace(MOVEMENT_CHANNEL, string.format("Waypoint cancelled for %s", residentName), {
-				WaypointIndex = index,
-			})
 			return false
 		end
 		if waypoint.Action == Enum.PathWaypointAction.Jump then
@@ -290,10 +232,6 @@ local function followWaypoints(
 		end
 		local ok = waitForMoveFinished(humanoid, waypoint.Position, token, WAYPOINT_TIMEOUT)
 		if not ok then
-			ResidentDebug.Trace(MOVEMENT_CHANNEL, string.format("Waypoint failed for %s", residentName), {
-				WaypointIndex = index,
-				WaypointPosition = waypoint.Position,
-			})
 			return false
 		end
 	end
@@ -301,42 +239,30 @@ local function followWaypoints(
 end
 
 local function moveToTarget(
-	residentState: any,
+	model: Model,
 	targetPosition: Vector3,
 	cancelToken: CancelToken?,
-	timeoutSeconds: number?,
-	debugLabel: string?
-): (boolean, { [string]: any }?)
-	local humanoid = getHumanoid(residentState)
-	local root = getHumanoidRootPart(residentState)
+	timeoutSeconds: number?
+): boolean
+	local humanoid = getHumanoid(model)
+	local root = getHumanoidRootPart(model)
 	if not humanoid or not root then
-		return false, nil
+		return false
 	end
-	ResidentMovement.LeaveSeat(residentState, nil)
-	local residentName = getResidentName(residentState)
+	ClientResidentMovement.LeaveSeat(model, nil)
+
 	local originalSpeed = humanoid.WalkSpeed
-	local desiredSpeed = pickTravelSpeed(residentState, root.Position, targetPosition)
+	local desiredSpeed = pickTravelSpeed(root.Position, targetPosition)
 	if typeof(humanoid.WalkSpeed) == "number" and desiredSpeed ~= humanoid.WalkSpeed then
 		humanoid.WalkSpeed = desiredSpeed
 	end
-	local label = debugLabel or "Target"
-	local startClock = os.clock()
-	if residentState.SetDestination then
-		residentState:SetDestination(targetPosition)
-	end
-	local path, attemptsMeta = computePathWithVariants(root.Position, targetPosition)
-	local computeError = nil
-	local pathStatus = "NoPath"
+
+	local path, _attemptsMeta = computePathWithVariants(root.Position, targetPosition)
 	local reached = false
 	if path then
-		pathStatus = path.Status.Name
 		local waypoints = path:GetWaypoints()
-		reached = followWaypoints(humanoid, cancelToken, waypoints, residentName)
+		reached = followWaypoints(humanoid, cancelToken, waypoints)
 	else
-		if #attemptsMeta > 0 then
-			local lastAttempt = attemptsMeta[#attemptsMeta]
-			computeError = lastAttempt.Error
-		end
 		local timeoutBudget = timeoutSeconds and math.max(timeoutSeconds, 1) or DEFAULT_TIMEOUT
 		reached = waitForMoveFinished(humanoid, targetPosition, cancelToken, timeoutBudget)
 	end
@@ -344,21 +270,8 @@ local function moveToTarget(
 	if humanoid.Parent and typeof(originalSpeed) == "number" and humanoid.WalkSpeed ~= originalSpeed then
 		humanoid.WalkSpeed = originalSpeed
 	end
-	if residentState.SetDestination then
-		residentState:SetDestination(nil)
-	end
-	if reached and residentState.DestinationCompleted then
-		residentState.DestinationCompleted:Fire(targetPosition)
-	end
-	return reached,
-		{
-			Duration = os.clock() - startClock,
-			Attempts = attemptsMeta,
-			PathStatus = pathStatus,
-			ComputeError = computeError,
-			GoalPosition = targetPosition,
-			Label = label,
-		}
+
+	return reached
 end
 
 local ENTRY_ATTACHMENT_PATTERNS = {
@@ -816,10 +729,6 @@ local function ensureAutoSeat(
 		autoSeat.TopSurface = Enum.SurfaceType.Smooth
 		autoSeat.BottomSurface = Enum.SurfaceType.Smooth
 		autoSeat.Parent = stationModel
-		ResidentDebug.Trace(MOVEMENT_CHANNEL, "Created auto seat", {
-			StationModel = stationModel:GetFullName(),
-			SeatName = autoSeatName,
-		})
 	end
 	autoSeat.Disabled = false
 	autoSeat.CFrame = computeSeatCFrame(entryCFrame, entryAttachment)
@@ -840,12 +749,12 @@ local function ensureSeatForOccupant(
 	return ensureAutoSeat(stationModel, entryCFrame, entryAttachment, occupantIndex)
 end
 
-function ResidentMovement.ApplyRestPose(residentState: any, options: RestPoseOptions): boolean
-	local humanoid = getHumanoid(residentState)
+function ClientResidentMovement.ApplyRestPose(model: Model, options: RestPoseOptions): boolean
+	local humanoid = getHumanoid(model)
 	if not humanoid then
 		return false
 	end
-	local root = getHumanoidRootPart(residentState)
+	local root = getHumanoidRootPart(model)
 	if not root then
 		return false
 	end
@@ -857,9 +766,8 @@ function ResidentMovement.ApplyRestPose(residentState: any, options: RestPoseOpt
 	if not baseCFrame then
 		return false
 	end
-	local record = restPoseState[residentState]
+	local record = restPoseState[model]
 	if not record then
-		local networkOwner: Player? = root:GetNetworkOwner()
 		record = {
 			AutoRotate = humanoid.AutoRotate,
 			PlatformStand = humanoid.PlatformStand,
@@ -868,11 +776,10 @@ function ResidentMovement.ApplyRestPose(residentState: any, options: RestPoseOpt
 			JumpHeight = if typeof(humanoid.JumpHeight) == "number" then humanoid.JumpHeight else nil,
 			UseJumpPower = humanoid.UseJumpPower,
 			RootAnchored = root.Anchored,
-			RootOwner = networkOwner,
 			StandCFrame = baseCFrame,
 			RootCFrame = root.CFrame,
 		}
-		restPoseState[residentState] = record
+		restPoseState[model] = record
 	else
 		record.StandCFrame = baseCFrame
 		record.RootCFrame = root.CFrame
@@ -959,7 +866,6 @@ function ResidentMovement.ApplyRestPose(residentState: any, options: RestPoseOpt
 	root.AssemblyLinearVelocity = Vector3.new()
 	root.AssemblyAngularVelocity = Vector3.new()
 	root.CFrame = finalCFrame
-	root:SetNetworkOwner(nil)
 	root.Anchored = true
 	humanoid:Move(Vector3.zero)
 	humanoid.Sit = false
@@ -982,13 +888,13 @@ function ResidentMovement.ApplyRestPose(residentState: any, options: RestPoseOpt
 	return true
 end
 
-function ResidentMovement.ClearRestPose(residentState: any): boolean
-	local record = restPoseState[residentState]
+function ClientResidentMovement.ClearRestPose(model: Model): boolean
+	local record = restPoseState[model]
 	if not record then
 		return false
 	end
-	local humanoid = getHumanoid(residentState)
-	local root = getHumanoidRootPart(residentState)
+	local humanoid = getHumanoid(model)
+	local root = getHumanoidRootPart(model)
 	if humanoid and root then
 		root.AssemblyLinearVelocity = Vector3.new()
 		root.AssemblyAngularVelocity = Vector3.new()
@@ -1003,13 +909,8 @@ function ResidentMovement.ClearRestPose(residentState: any): boolean
 			root.CFrame = CFrame.new(standPosition, lookTarget)
 		end
 		root.Anchored = record.RootAnchored
-		if record.RootOwner then
-			root:SetNetworkOwner(record.RootOwner :: Player)
-		else
-			root:SetNetworkOwner(nil)
-		end
 	end
-	restPoseState[residentState] = nil
+	restPoseState[model] = nil
 	if humanoid then
 		humanoid.AutoRotate = record.AutoRotate
 		humanoid.PlatformStand = record.PlatformStand
@@ -1038,15 +939,14 @@ function ResidentMovement.ClearRestPose(residentState: any): boolean
 	return true
 end
 
-function ResidentMovement.GoToStation(
-	residentState: any,
+function ClientResidentMovement.GoToStation(
+	model: Model,
 	stationModel: Model,
 	opts: MoveOptions?
 ): (boolean, StationArrival?)
 	if not stationModel then
 		return false, nil
 	end
-	local residentName = getResidentName(residentState)
 	local approachDistance = if opts and opts.ApproachDistance then math.max(opts.ApproachDistance, 0.5) else 3
 	local entryCFrame, entryAttachment, selectedSeat = computeEntryInfo(stationModel, approachDistance, opts)
 	local goalPosition = entryCFrame.Position
@@ -1057,91 +957,41 @@ function ResidentMovement.GoToStation(
 		seatForArrival = ensureSeatForOccupant(selectedSeat, stationModel, entryCFrame, entryAttachment, occupantIndex)
 	end
 	local timeout = if opts and opts.TimeoutSeconds then math.max(opts.TimeoutSeconds, 1) else DEFAULT_TIMEOUT
-	ResidentDebug.Trace(
-		MOVEMENT_CHANNEL,
-		string.format("GoToStation start: %s -> %s", residentName, stationModel.Name),
-		{
-			Resident = residentName,
-			StationModel = stationModel:GetFullName(),
-			GoalPosition = goalPosition,
-			ApproachDistance = approachDistance,
-		}
-	)
+
 	local cancelToken = opts and opts.CancelToken or nil
-	local reached, moveMeta = moveToTarget(residentState, goalPosition, cancelToken, timeout, stationModel.Name)
-	if moveMeta == nil then
-		moveMeta = {
-			GoalPosition = goalPosition,
-			Label = stationModel.Name,
-		}
-	end
-	local metadata = moveMeta :: { [string]: any }
-	metadata.Resident = residentName
-	metadata.StationModel = stationModel:GetFullName()
-	metadata.ApproachDistance = approachDistance
-	metadata.EnsureSeat = ensureSeatFlag
-	metadata.OccupantIndex = occupantIndex
-	metadata.SelectedSeat = seatForArrival and seatForArrival.Name or nil
-	if ensureSeatFlag and seatForArrival then
-		metadata.EnsuredSeat = seatForArrival.Name
-	end
+	local reached = moveToTarget(model, goalPosition, cancelToken, timeout)
+
 	if reached then
-		ResidentDebug.Trace(MOVEMENT_CHANNEL, string.format("Arrived at station: %s", residentName), metadata)
 		local seat = seatForArrival or findSeat(stationModel)
 		return true, { EntryCFrame = entryCFrame, Seat = seat, EntryAttachment = entryAttachment }
 	end
-	ResidentDebug.Trace(MOVEMENT_CHANNEL, string.format("Failed to reach station: %s", residentName), metadata)
 	return false, nil
 end
 
-function ResidentMovement.GoToWorldPosition(residentState: any, targetPosition: Vector3, opts: MoveOptions?): boolean
+function ClientResidentMovement.GoToWorldPosition(model: Model, targetPosition: Vector3, opts: MoveOptions?): boolean
 	local cancelToken = opts and opts.CancelToken or nil
 	local timeout = if opts and opts.TimeoutSeconds then math.max(opts.TimeoutSeconds, 1) else DEFAULT_TIMEOUT
-	local labelCandidate = opts and opts.DebugName or nil
-	local label = if labelCandidate and labelCandidate ~= "" then labelCandidate else "Roam"
-	local reached, moveMeta = moveToTarget(residentState, targetPosition, cancelToken, timeout, label)
-	if moveMeta == nil then
-		moveMeta = {
-			GoalPosition = targetPosition,
-			Label = label,
-		}
-	end
-	local metadata = moveMeta :: { [string]: any }
-	metadata.Resident = getResidentName(residentState)
-	if reached then
-		ResidentDebug.Trace(MOVEMENT_CHANNEL, string.format("Arrived at %s: %s", label, metadata.Resident), metadata)
-	else
-		ResidentDebug.Trace(
-			MOVEMENT_CHANNEL,
-			string.format("Failed to reach %s: %s", label, metadata.Resident),
-			metadata
-		)
-	end
+	local reached = moveToTarget(model, targetPosition, cancelToken, timeout)
 	return reached
 end
 
-function ResidentMovement.FaceStation(residentState: any, entryCFrame: CFrame)
-	local root = getHumanoidRootPart(residentState)
+function ClientResidentMovement.FaceStation(model: Model, entryCFrame: CFrame)
+	local root = getHumanoidRootPart(model)
 	if not root then
 		return
 	end
-	ResidentDebug.Trace(MOVEMENT_CHANNEL, string.format("Facing station for %s", getResidentName(residentState)), {
-		EntryPosition = entryCFrame.Position,
-	})
 	local position = root.Position
 	local forward = entryCFrame.LookVector
 	local orientation = CFrame.new(position, position + forward)
 	root.CFrame = orientation
 end
 
-function ResidentMovement.SeatResident(residentState: any, seat: Seat, token: CancelToken?): boolean
-	local humanoid = getHumanoid(residentState)
+function ClientResidentMovement.SeatResident(model: Model, seat: Seat, token: CancelToken?): boolean
+	local humanoid = getHumanoid(model)
 	if not humanoid then
 		return false
 	end
-	ResidentDebug.Trace(MOVEMENT_CHANNEL, string.format("Seat attempt for %s", getResidentName(residentState)), {
-		SeatName = seat.Name,
-	})
+
 	local function waitForSeatAvailability(timeout: number)
 		local deadline = os.clock() + timeout
 		while true do
@@ -1167,10 +1017,6 @@ function ResidentMovement.SeatResident(residentState: any, seat: Seat, token: Ca
 		local start = os.clock()
 		while humanoid.SeatPart ~= seat do
 			if token and token.Cancelled then
-				ResidentDebug.Trace(
-					MOVEMENT_CHANNEL,
-					string.format("Seat cancelled for %s", getResidentName(residentState))
-				)
 				return false
 			end
 			if os.clock() - start > timeout then
@@ -1184,41 +1030,23 @@ function ResidentMovement.SeatResident(residentState: any, seat: Seat, token: Ca
 	waitForSeatAvailability(1.5)
 	local occupantAfterWait = seat.Occupant
 	if occupantAfterWait and occupantAfterWait ~= humanoid then
-		ResidentDebug.Trace(
-			MOVEMENT_CHANNEL,
-			string.format("Seat occupied for %s", getResidentName(residentState)),
-			{ SeatName = seat.Name }
-		)
 		return false
 	end
 	local success = attemptSeat(3)
 	if not success and (not token or not token.Cancelled) then
-		local currentOccupant = seat.Occupant
-		if currentOccupant and currentOccupant ~= humanoid then
-			ResidentDebug.Trace(
-				MOVEMENT_CHANNEL,
-				string.format("Seat claimed during attempt for %s", getResidentName(residentState)),
-				{ SeatName = seat.Name }
-			)
-			return false
-		end
 		waitForSeatAvailability(0.5)
 		success = attemptSeat(1.5)
 	end
 
-	ResidentDebug.Trace(
-		MOVEMENT_CHANNEL,
-		string.format("Seat result for %s: %s", getResidentName(residentState), success and "success" or "failed")
-	)
 	return success
 end
 
-function ResidentMovement.LeaveSeat(residentState: any, seat: Seat?)
-	local humanoid = getHumanoid(residentState)
+function ClientResidentMovement.LeaveSeat(model: Model, seat: Seat?)
+	local humanoid = getHumanoid(model)
 	if not humanoid then
 		return
 	end
-	local root = getHumanoidRootPart(residentState)
+	local root = getHumanoidRootPart(model)
 	local currentSeat = seat
 	if not currentSeat then
 		local seatPart = humanoid.SeatPart
@@ -1229,9 +1057,7 @@ function ResidentMovement.LeaveSeat(residentState: any, seat: Seat?)
 	if not currentSeat or humanoid.SeatPart ~= currentSeat then
 		return
 	end
-	ResidentDebug.Trace(MOVEMENT_CHANNEL, string.format("Leaving seat for %s", getResidentName(residentState)), {
-		SeatName = currentSeat.Name,
-	})
+
 	local disabledSeatedState = false
 	do
 		local ok, seatedEnabled = pcall(humanoid.GetStateEnabled, humanoid, Enum.HumanoidStateType.Seated)
@@ -1265,13 +1091,6 @@ function ResidentMovement.LeaveSeat(residentState: any, seat: Seat?)
 		RunService.Heartbeat:Wait()
 	end
 	if humanoid.SeatPart == currentSeat then
-		ResidentDebug.Trace(
-			MOVEMENT_CHANNEL,
-			string.format("Seat release fallback for %s", getResidentName(residentState)),
-			{
-				SeatName = currentSeat.Name,
-			}
-		)
 		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 		humanoid.Sit = false
 		local weld: Instance? = currentSeat:FindFirstChild("SeatWeld")
@@ -1293,30 +1112,10 @@ function ResidentMovement.LeaveSeat(residentState: any, seat: Seat?)
 		while humanoid.SeatPart == currentSeat and os.clock() - releaseStart < 0.5 do
 			RunService.Heartbeat:Wait()
 		end
-		if humanoid.SeatPart == currentSeat then
-			ResidentDebug.Trace(
-				MOVEMENT_CHANNEL,
-				string.format("Seat release still pending for %s", getResidentName(residentState)),
-				{
-					SeatName = currentSeat.Name,
-				}
-			)
-		else
-			ResidentDebug.Trace(
-				MOVEMENT_CHANNEL,
-				string.format("Seat release recovered for %s", getResidentName(residentState)),
-				{
-					SeatName = currentSeat.Name,
-				}
-			)
-		end
 	end
 	if disabledSeatedState then
 		humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
 	end
-	if root then
-		root:SetNetworkOwner(nil)
-	end
 end
 
-return ResidentMovement
+return ClientResidentMovement

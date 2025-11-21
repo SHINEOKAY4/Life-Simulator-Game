@@ -17,14 +17,6 @@ ResidentsPackets.PlayerResidentDelta = Packet("PlayerResidentDelta", {
 			Name = Packet.String,
 			TenantId = Packet.String,
 			Traits = { Packet.String },
-			Needs = {
-				Hunger = Packet.NumberU8,
-				Bladder = Packet.NumberU8,
-				Energy = Packet.NumberU8,
-				Hygiene = Packet.NumberU8,
-				Fun = Packet.NumberU8,
-				Social = Packet.NumberU8,
-			},
 		},
 	},
 })
@@ -35,14 +27,6 @@ ResidentsPackets.PlayersResidentsSync = Packet("ResidentStateSync", {
 			Name = Packet.String,
 			TenantId = Packet.String,
 			Traits = { Packet.String },
-			Needs = {
-				Hunger = Packet.NumberU8,
-				Bladder = Packet.NumberU8,
-				Energy = Packet.NumberU8,
-				Hygiene = Packet.NumberU8,
-				Fun = Packet.NumberU8,
-				Social = Packet.NumberU8,
-			},
 		},
 	},
 })

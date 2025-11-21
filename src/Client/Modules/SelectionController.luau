@@ -33,14 +33,24 @@ local function onInputBegan(input: InputObject, gameProcessed: boolean)
 		end
 
 		local container = plotModel:FindFirstChild("Container")
-		if not container then
+		local residents = plotModel:FindFirstChild("Residents")
+
+		local filterList = {}
+		if container then
+			table.insert(filterList, container)
+		end
+		if residents then
+			table.insert(filterList, residents)
+		end
+
+		if #filterList == 0 then
 			return
 		end
 
 		local ray = getMouseRay()
 		local params = RaycastParams.new()
 		params.FilterType = Enum.RaycastFilterType.Include
-		params.FilterDescendantsInstances = { container }
+		params.FilterDescendantsInstances = filterList
 		params.IgnoreWater = true
 
 		local result = Workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
@@ -52,13 +62,13 @@ local function onInputBegan(input: InputObject, gameProcessed: boolean)
 			-- Find the model or part that represents the placed object
 			-- The container has children named by their PlacementKey
 			local candidate = result.Instance
-			while candidate and candidate.Parent ~= container do
+			while candidate and candidate.Parent do
+				if candidate.Parent == container or candidate.Parent == residents then
+					newSelection = candidate
+					newKey = candidate.Name
+					break
+				end
 				candidate = candidate.Parent
-			end
-
-			if candidate and candidate.Parent == container then
-				newSelection = candidate
-				newKey = candidate.Name
 			end
 		end
 

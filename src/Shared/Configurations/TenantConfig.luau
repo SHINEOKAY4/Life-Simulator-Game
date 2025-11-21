@@ -52,10 +52,19 @@ export type RentConfig = {
 	LateFeePercent: number,
 }
 
+export type TemperatureConfig = {
+	IdealMin: number,
+	IdealMax: number,
+	FreezingThreshold: number,
+	OverheatThreshold: number,
+	ReviewPenalty: number,
+}
+
 export type TenantConfig = {
 	Valuation: ValuationConfig,
 	Offers: OffersConfig,
 	Rent: RentConfig,
+	Temperature: TemperatureConfig,
 }
 
 local Valuation: ValuationConfig = {
@@ -139,10 +148,19 @@ local Rent: RentConfig = {
 	LateFeePercent = 0.05,
 }
 
+local Temperature: TemperatureConfig = {
+	IdealMin = 18,
+	IdealMax = 24,
+	FreezingThreshold = 10,
+	OverheatThreshold = 32,
+	ReviewPenalty = 1,
+}
+
 local TenantConfig: TenantConfig = {
 	Valuation = Valuation,
 	Offers = Offers,
 	Rent = Rent,
+	Temperature = Temperature,
 }
 
 return TenantConfig

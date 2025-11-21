@@ -3,6 +3,7 @@
 
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 
 local PlotState = require(ServerScriptService.Server.Classes.PlotState)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
@@ -794,6 +795,20 @@ function WorldPlacer.Spawn(
 	end
 
 	applySurfacePaletteToModel(model, placementType, spec, metadata)
+
+	if spec.Interactable then
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.ObjectText = spec.Name
+		prompt.ActionText = spec.InteractionActionText or "Interact"
+		prompt.RequiresLineOfSight = false
+		prompt.MaxActivationDistance = 8
+		prompt.Parent = model.PrimaryPart or model
+
+		if spec.Name == "Thermostat" then
+			prompt.Style = Enum.ProximityPromptStyle.Custom
+			CollectionService:AddTag(prompt, "ThermostatPrompt")
+		end
+	end
 
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") then

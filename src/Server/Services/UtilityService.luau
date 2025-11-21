@@ -10,6 +10,7 @@ local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 
 local UtilityService = {}
+local LightCache = {} -- [number (UserId)] -> { [string (PlacementKey)] -> Light }
 
 local function findLight(instance: Instance): Light?
 	if instance:IsA("Model") then
@@ -37,28 +38,69 @@ local function findLight(instance: Instance): Light?
 	return nil
 end
 
-local function setServerLightState(player: Player, placementKey: string, spec: { [string]: any }, powered: boolean)
-	local tags = spec.Tags
-	if typeof(tags) ~= "table" or not table.find(tags, "Light") then
-		return
+local function resolveLight(player: Player, placementKey: string): Light?
+	local userId = player.UserId
+	local playerCache = LightCache[userId]
+	if not playerCache then
+		playerCache = {}
+		LightCache[userId] = playerCache
+	end
+
+	local cached = playerCache[placementKey]
+	if cached then
+		if cached.Parent then
+			return cached
+		else
+			playerCache[placementKey] = nil
+		end
 	end
 
 	local model = WorldPlacer.GetPlacementModel(player, placementKey)
 	if not model then
-		return
+		return nil
 	end
 
 	local light = findLight(model)
-	if not light then
-		return
+	if light then
+		playerCache[placementKey] = light
 	end
+	return light
+end
 
-	if light.Enabled ~= powered then
-		light.Enabled = powered
+function UtilityService.Init()
+	Packets.TogglePowerRequest.OnServerInvoke = function(player, payload)
+		local key = payload.Key
+		local isOn = payload.IsOn
+
+		local plotState = PlotService.GetState(player)
+		if not plotState then
+			return false, "No plot"
+		end
+
+		local obj = plotState.Save.PlacedObjects[key]
+		if not obj then
+			return false, "Object not found"
+		end
+
+		local metadata: { [string]: any } = obj.Metadata or {}
+		if typeof(metadata) ~= "table" then
+			metadata = {}
+		end
+		metadata.IsOn = isOn
+		obj.Metadata = metadata
+
+		-- Trigger recalculate to update visuals/logic
+		UtilityService.Recalculate(player, { [key] = true })
+
+		return true, "Success"
 	end
 end
 
-function UtilityService.Recalculate(player: Player)
+function UtilityService.ClearCache(player: Player)
+	LightCache[player.UserId] = nil
+end
+
+function UtilityService.Recalculate(player: Player, forceUpdateKeys: { [string]: boolean }?)
 	print("[UtilityService] Recalculate called for:", player.Name)
 	local plotState = PlotService.GetState(player)
 	if not plotState then
@@ -80,13 +122,20 @@ function UtilityService.Recalculate(player: Player)
 		end
 
 		if spec.PowerSource then
-			table.insert(powerSources, {
-				key = key,
-				x = obj.cellX,
-				z = obj.cellZ,
-				radius = spec.PowerRadius or 8,
-				yLevel = obj.yLevel or 0,
-			})
+			local isGridPower = spec.Tags and table.find(spec.Tags, "GridPower")
+			local isOutage = player:GetAttribute("BillingPowerOutageActive") == true
+
+			if isGridPower and isOutage then
+				print("[UtilityService] Grid Power disabled due to outage:", spec.Name, key)
+			else
+				table.insert(powerSources, {
+					key = key,
+					x = obj.cellX,
+					z = obj.cellZ,
+					radius = spec.PowerRadius or 8,
+					yLevel = obj.yLevel or 0,
+				})
+			end
 		end
 
 		if spec.WaterSource then
@@ -106,18 +155,11 @@ function UtilityService.Recalculate(player: Player)
 	end
 
 	-- 2. Calculate Power Network (Graph Traversal)
-	local poweredNodes = {} -- [key] = {x, z, radius}
 	local poweredConductors = {} -- [key] = true
 
 	-- Initialize with sources
 	local powerQueue = {}
 	for _, source in ipairs(powerSources) do
-		poweredNodes[source.key] = {
-			x = source.x,
-			z = source.z,
-			radius = source.radius,
-			yLevel = source.yLevel,
-		}
 		table.insert(powerQueue, source.key)
 	end
 
@@ -145,34 +187,21 @@ function UtilityService.Recalculate(player: Player)
 					local targetObj = plotState.Save.PlacedObjects[targetKey]
 					if targetObj then
 						local targetSpec = ItemFinder.FindItemById(targetObj.id)
-						if targetSpec and (targetSpec.PowerConductor or targetSpec.PowerSource) then
-							visitedPower[targetKey] = true
-							poweredConductors[targetKey] = true
-							poweredNodes[targetKey] = {
-								x = targetObj.cellX,
-								z = targetObj.cellZ,
-								radius = targetSpec.PowerRadius or 0,
-								yLevel = targetObj.yLevel or 0,
-							}
-							table.insert(powerQueue, targetKey)
+						if targetSpec then
+							if targetSpec.PowerConductor or targetSpec.PowerSource then
+								visitedPower[targetKey] = true
+								poweredConductors[targetKey] = true
+								table.insert(powerQueue, targetKey)
+							elseif targetSpec.RequiresPower then
+								-- Consumers are powered if connected, but don't extend the network
+								visitedPower[targetKey] = true
+								poweredConductors[targetKey] = true
+							end
 						end
 					end
 				end
 			end
 		end
-	end
-
-	local function isPowered(cx: number, cz: number, cy: number?)
-		cy = cy or 0
-		for _, node in pairs(poweredNodes) do
-			local dx = cx - node.x
-			local dz = cz - node.z
-			local dy = (cy :: number) - (node.yLevel or 0)
-			if dx * dx + dz * dz + dy * dy <= node.radius * node.radius then
-				return true
-			end
-		end
-		return false
 	end
 
 	-- 3. Calculate Water Network (Graph Traversal - Same as Power)
@@ -245,6 +274,8 @@ function UtilityService.Recalculate(player: Player)
 
 	-- 4. Update Consumers AND Conductors
 	local changes = {}
+	local levelsToUpdate = {} -- [level] = true
+
 	for _, item in ipairs(consumers) do
 		local obj = item.obj
 		local spec = item.spec
@@ -254,17 +285,39 @@ function UtilityService.Recalculate(player: Player)
 			metadata = {}
 		end
 
+		if forceUpdateKeys and forceUpdateKeys[item.key] then
+			needsUpdate = true
+		end
+
 		-- Check Power
-		if spec.RequiresPower then
-			local powered = isPowered(obj.cellX, obj.cellZ, obj.yLevel)
-			setServerLightState(player, item.key, spec, powered)
-			if metadata.IsPowered ~= powered then
-				metadata.IsPowered = powered
-				needsUpdate = true
-			end
-		elseif spec.PowerConductor then
-			-- Conductors are powered if they are part of the active network
+		if spec.RequiresPower or spec.PowerConductor then
+			-- Items are powered if connected to the power network
 			local powered = poweredConductors[item.key] == true
+
+			-- Check manual switch state
+			local isOn = true
+			if metadata.IsOn ~= nil then
+				isOn = metadata.IsOn
+			end
+
+			-- Update light state for lighting items
+			if spec.RequiresPower then
+				local tags = spec.Tags
+				if typeof(tags) == "table" and table.find(tags, "Light") then
+					print(`[UtilityService] Checking light item: {spec.Name}, Key: {item.key}, Powered: {powered}`)
+					local light = resolveLight(player, item.key)
+					if light then
+						local shouldBeEnabled = powered and isOn
+						print(`[UtilityService] Found light instance, setting Enabled to {shouldBeEnabled}`)
+						if light.Enabled ~= shouldBeEnabled then
+							light.Enabled = shouldBeEnabled
+						end
+					else
+						warn(`[UtilityService] Could not resolve Light instance for {spec.Name} at key: {item.key}`)
+					end
+				end
+			end
+
 			if metadata.IsPowered ~= powered then
 				metadata.IsPowered = powered
 				needsUpdate = true
@@ -293,12 +346,22 @@ function UtilityService.Recalculate(player: Player)
 				Key = item.key,
 				Metadata = metadata,
 			})
+			if plotState.NormalizeLevel then
+				levelsToUpdate[plotState:NormalizeLevel(obj.yLevel)] = true
+			end
 		end
 	end
 
 	-- Send updates
 	if #changes > 0 then
 		Packets.UtilityUpdate:FireClient(player, changes)
+
+		-- Update Room Stats
+		for level, _ in pairs(levelsToUpdate) do
+			if (plotState :: any).UpdateRoomStats then
+				(plotState :: any):UpdateRoomStats(level)
+			end
+		end
 	end
 end
 

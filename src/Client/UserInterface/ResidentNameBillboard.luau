@@ -7,9 +7,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local BillboardText = require(script.Parent:WaitForChild("BillboardText"))
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local TenantTraits = require(ReplicatedStorage.Shared.Definitions.TenantTraits)
+local TenantDefinitions = require(ReplicatedStorage.Shared.Definitions.TenantDefinitions)
 local ClientFolder = script.Parent.Parent
 local ClientStoresFolder = ClientFolder:WaitForChild("ClientStores")
-local ResidentsStore = require(ClientStoresFolder:WaitForChild("ResidentsStore"))
+local TenantStore = require(ClientStoresFolder:WaitForChild("TenantStore"))
 
 type BillboardTextHandle = BillboardText.BillboardTextHandle
 
@@ -23,9 +24,14 @@ export type NameplateEntry = {
 	Connections: { RBXScriptConnection },
 	ResidentName: string,
 	Traits: { string }?,
+	TierId: string?,
 }
 
 local ResidentNameBillboard = {}
+
+local function toHex(color: Color3): string
+	return string.format("#%02X%02X%02X", color.R * 255, color.G * 255, color.B * 255)
+end
 
 local currentPlotIndex: number? = nil
 local nameplatesByModel: { [Model]: NameplateEntry } = {}
@@ -116,9 +122,20 @@ local function applyBillboard(entry: NameplateEntry)
 
 	local residentName = entry.ResidentName
 
-	local titleLine = string.format("<b>%s</b>", escapeRichText(residentName))
+	local titleLine = string.format('<font size="16"><b>%s</b></font>', escapeRichText(residentName))
 
 	local lines = { titleLine }
+
+	if entry.TierId then
+		local tierDef = TenantDefinitions.GetDefinition(entry.TierId)
+		if tierDef then
+			lines[#lines + 1] = string.format(
+				'<font size="12" color="%s">%s</font>',
+				toHex(tierDef.DisplayColor),
+				escapeRichText(entry.TierId)
+			)
+		end
+	end
 
 	local boostText = getBoostString(entry.Traits)
 	if boostText then
@@ -141,13 +158,30 @@ local function detachResident(model: Model)
 	entry.Handle:destroy()
 end
 
-local function updateResidentNameplate(residentName: string, traits: { string }?)
-	local entry = nameplatesByResident[residentName]
-	if not entry then
+local function syncTenantData(entry: NameplateEntry)
+	local tenants = TenantStore.GetTenants(LocalPlayer.UserId)
+	if not tenants then
+		entry.TierId = nil
+		entry.Traits = nil
+		applyBillboard(entry)
 		return
 	end
-	if traits then
-		entry.Traits = traits
+
+	-- Find tenant by name
+	local foundTenant = nil
+	for _, tenant in pairs(tenants) do
+		if tenant.Name == entry.ResidentName then
+			foundTenant = tenant
+			break
+		end
+	end
+
+	if foundTenant then
+		entry.TierId = foundTenant.TierId
+		entry.Traits = foundTenant.Traits
+	else
+		entry.TierId = nil
+		entry.Traits = nil
 	end
 	applyBillboard(entry)
 end
@@ -192,18 +226,19 @@ local function attachResident(model: Model)
 	local billboard = handle.instance
 	billboard.Enabled = true
 
-	local residentData = ResidentsStore.GetResident(LocalPlayer.UserId, residentName)
-
 	local entry: NameplateEntry = {
 		Model = model,
 		Handle = handle,
 		Connections = {},
 		ResidentName = residentName,
-		Traits = residentData and residentData.Traits,
+		Traits = nil,
+		TierId = nil,
 	}
 
 	nameplatesByModel[model] = entry
 	nameplatesByResident[residentName] = entry
+
+	syncTenantData(entry)
 
 	local function bind(connection: RBXScriptConnection)
 		table.insert(entry.Connections, connection)
@@ -310,33 +345,40 @@ function ResidentNameBillboard.Init()
 		rebindPlot(LocalPlayer:GetAttribute("OwnedPlotIndex") :: number?)
 	end)
 
-	ResidentsStore.ResidentAdded:Connect(function(userId: number, residentData: any)
+	-- Listen to TenantStore updates to refresh billboards
+	TenantStore.TenantAdded:Connect(function(userId: number, tenantData: any)
 		if userId ~= LocalPlayer.UserId then
 			return
 		end
-		if type(residentData.Name) ~= "string" then
-			return
-		end
-		updateResidentNameplate(residentData.Name, residentData.Traits)
-	end)
-
-	ResidentsStore.ResidentsUpdated:Connect(function(userId: number, residentData: any)
-		if userId ~= LocalPlayer.UserId then
-			return
-		end
-		if type(residentData.Name) ~= "string" then
-			return
-		end
-		updateResidentNameplate(residentData.Name, residentData.Traits)
-	end)
-
-	ResidentsStore.ResidentRemoved:Connect(function(userId: number, residentName: string)
-		if userId ~= LocalPlayer.UserId then
-			return
-		end
-		local entry = nameplatesByResident[residentName]
+		local entry = nameplatesByResident[tenantData.Name]
 		if entry then
-			detachResident(entry.Model)
+			syncTenantData(entry)
+		end
+	end)
+
+	TenantStore.TenantsUpdated:Connect(function(userId: number, tenantData: any)
+		if userId ~= LocalPlayer.UserId then
+			return
+		end
+		local entry = nameplatesByResident[tenantData.Name]
+		if entry then
+			syncTenantData(entry)
+		end
+	end)
+
+	TenantStore.TenantRemoved:Connect(function(userId: number, _tenantId: string)
+		if userId ~= LocalPlayer.UserId then
+			return
+		end
+		-- We need to find which resident had this tenantId, or just refresh all matching name?
+		-- TenantStore doesn't give us the name on remove, only ID.
+		-- But we can iterate our nameplates and check if they were linked to this tenant?
+		-- Actually syncTenantData iterates TenantStore. If tenant is gone from store, syncTenantData will clear fields.
+		-- But we need to know WHICH entry to update.
+		-- Since we don't know the name from ID easily without a reverse lookup, we might just refresh all or iterate.
+		-- Iterating all nameplates is cheap enough (usually < 10 residents).
+		for _, entry in pairs(nameplatesByResident) do
+			syncTenantData(entry)
 		end
 	end)
 end

@@ -8,17 +8,77 @@ local Workspace = game:GetService("Workspace")
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local SelectionController = require(script.Parent.SelectionController)
+local CutawayViewController = require(script.Parent.CutawayViewController)
 
 local UtilityVisuals = {}
 local Icons = {} -- [key] = BillboardGui
 local RadiusVisual: BasePart? = nil
 local SelectionHighlight: Highlight? = nil
 local ConnectionCountVisual: BillboardGui? = nil
-local WireBeams = {} -- [connectionKey] = {Beam, Attachment0, Attachment1}
+local WireBeams = {} -- [connectionKey] = { {Beam, Attachment0, Attachment1}, ... }
 
-local POWER_ICON = "⚡"
-local POWER_OFF_ICON = "🔌" -- Plug icon for unpowered state
-local WATER_ICON = "💧"
+local CUTAWAY_SOURCE = "UtilityMode"
+
+local function getFloorY(level: number?): number
+	local surface = PlotStateStore.GetSurface()
+	if not surface then
+		return 0
+	end
+	local baseHeight = surface.Position.Y + surface.Size.Y / 2
+	local lvl = level or PlotStateStore.GetActiveLevel()
+	return baseHeight + (lvl * PlotStateStore.GetFloorHeightStuds()) + 0.2 -- +0.2 offset to sit on top of floor
+end
+
+function UtilityVisuals.GetWirePath(p1: Vector3, p2: Vector3, floorY: number): { Vector3 }
+	local points = {}
+
+	-- Start
+	table.insert(points, p1)
+
+	local p1Ground = Vector3.new(p1.X, floorY, p1.Z)
+	local p2Ground = Vector3.new(p2.X, floorY, p2.Z)
+
+	-- Drop to floor if needed
+	if math.abs(p1.Y - floorY) > 0.5 then
+		table.insert(points, p1Ground)
+	end
+
+	-- Corner (Manhattan)
+	-- Try to route along X then Z, or Z then X?
+	-- Simple X then Z for now
+	local corner = Vector3.new(p2Ground.X, floorY, p1Ground.Z)
+
+	-- Only add corner if it creates a distinct segment
+	local last = points[#points]
+	if (corner - last).Magnitude > 0.1 and (corner - p2Ground).Magnitude > 0.1 then
+		table.insert(points, corner)
+	end
+
+	-- Move to under target
+	if (p2Ground - points[#points]).Magnitude > 0.1 then
+		table.insert(points, p2Ground)
+	end
+
+	-- Rise to target if needed
+	if math.abs(p2.Y - floorY) > 0.5 then
+		table.insert(points, p2)
+	else
+		-- If we are already at floor level, ensure the last point connects to p2
+		if (p2 - points[#points]).Magnitude > 0.1 then
+			table.insert(points, p2)
+		end
+	end
+
+	-- Filter close points
+	local filtered = { points[1] }
+	for i = 2, #points do
+		if (points[i] - filtered[#filtered]).Magnitude > 0.1 then
+			table.insert(filtered, points[i])
+		end
+	end
+
+	return filtered
+end
 
 local function getWireAttachmentPosition(instance: Instance, spec: any): Vector3
 	if instance:IsA("Model") then
@@ -48,8 +108,14 @@ local function getWireKey(key1: string, key2: string)
 	end
 end
 
-local function drawWire(key1: string, key2: string)
-	local wKey = getWireKey(key1, key2)
+local function drawWire(keyA: string, keyB: string)
+	-- Enforce deterministic order so the path (L-shape vs Gamma-shape) is consistent
+	local key1, key2 = keyA, keyB
+	if key1 > key2 then
+		key1, key2 = key2, key1
+	end
+
+	local wKey = key1 .. "_" .. key2
 	if WireBeams[wKey] then
 		return
 	end
@@ -73,39 +139,98 @@ local function drawWire(key1: string, key2: string)
 		return
 	end
 
+	-- Determine floor Y
+	local level = entry1.Level or 0
+	local floorY = getFloorY(level)
+
+	local path = UtilityVisuals.GetWirePath(pos1, pos2, floorY)
+	local segments = {}
 	local terrain = Workspace.Terrain
-	local att0 = Instance.new("Attachment")
-	att0.WorldPosition = pos1
-	att0.Parent = terrain
-
-	local att1 = Instance.new("Attachment")
-	att1.WorldPosition = pos2
-	att1.Parent = terrain
-
-	local beam = Instance.new("Beam")
-	beam.Attachment0 = att0
-	beam.Attachment1 = att1
 
 	-- Determine color based on type
 	local isWater = spec1 and (spec1.WaterSource or spec1.WaterConductor)
-	if isWater then
-		beam.Color = ColorSequence.new(Color3.fromRGB(0, 150, 255)) -- Blue for water
-	else
-		beam.Color = ColorSequence.new(Color3.fromRGB(255, 170, 0)) -- Bright Orange/Gold for power
+	local color = if isWater then Color3.fromRGB(0, 150, 255) else Color3.fromRGB(255, 170, 0)
+
+	for i = 1, #path - 1 do
+		local pA = path[i]
+		local pB = path[i + 1]
+
+		local att0 = Instance.new("Attachment")
+		att0.WorldPosition = pA
+		att0.Parent = terrain
+
+		local att1 = Instance.new("Attachment")
+		att1.WorldPosition = pB
+		att1.Parent = terrain
+
+		local beam = Instance.new("Beam")
+		beam.Attachment0 = att0
+		beam.Attachment1 = att1
+		beam.Color = ColorSequence.new(color)
+		beam.FaceCamera = true
+		beam.Width0 = 0.15
+		beam.Width1 = 0.15
+		beam.Transparency = NumberSequence.new(0)
+		beam.Texture = "rbxassetid://956427044"
+		beam.TextureMode = Enum.TextureMode.Stretch
+		beam.TextureSpeed = 0
+		beam.CurveSize0 = 0
+		beam.CurveSize1 = 0
+		beam.Parent = terrain
+
+		table.insert(segments, { Beam = beam, Attachment0 = att0, Attachment1 = att1 })
 	end
 
-	beam.FaceCamera = true
-	beam.Width0 = 0.2
-	beam.Width1 = 0.2
-	beam.Transparency = NumberSequence.new(0)
-	beam.Parent = terrain
-
-	WireBeams[wKey] = { Beam = beam, Attachment0 = att0, Attachment1 = att1 }
+	WireBeams[wKey] = segments
 end
 
 local forceShowWires = false
 
+local function isAnyConflictingUIActive(): boolean
+	local PlayerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
+	if not PlayerGui then
+		return false
+	end
+
+	local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
+	if ActiveQueryFolder then
+		local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
+		if PlotBuilderEnabled and PlotBuilderEnabled:IsA("BoolValue") and PlotBuilderEnabled.Value then
+			return true
+		end
+
+		local ResidentUIEnabled = ActiveQueryFolder:FindFirstChild("ResidentUIEnabled")
+		if ResidentUIEnabled and ResidentUIEnabled:IsA("BoolValue") and ResidentUIEnabled.Value then
+			return true
+		end
+
+		local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
+		if PlotExpansionEnabled and PlotExpansionEnabled:IsA("BoolValue") and PlotExpansionEnabled.Value then
+			return true
+		end
+	end
+
+	local MainHUD = PlayerGui:FindFirstChild("MainHUD")
+	if MainHUD then
+		local BillFrame = MainHUD:FindFirstChild("BillFrame")
+		if BillFrame and BillFrame:IsA("Frame") and BillFrame.Visible then
+			return true
+		end
+	end
+
+	local ReviewsUI = PlayerGui:FindFirstChild("ReviewsUI")
+	if ReviewsUI and ReviewsUI:IsA("ScreenGui") and ReviewsUI.Enabled then
+		return true
+	end
+
+	return false
+end
+
 local function shouldShowWires()
+	if isAnyConflictingUIActive() then
+		return false
+	end
+
 	if forceShowWires then
 		return true
 	end
@@ -133,6 +258,41 @@ local function shouldShowWires()
 		or spec.WaterConductor
 end
 
+local function updateCutaway()
+	if shouldShowWires() then
+		CutawayViewController.Request(CUTAWAY_SOURCE, {
+			Priority = 10,
+			TargetLevel = PlotStateStore.GetActiveLevel(),
+		})
+	else
+		CutawayViewController.Release(CUTAWAY_SOURCE)
+	end
+end
+
+local function getConnectedNetwork(startKey: string): { [string]: boolean }
+	local visited = {}
+	local queue = { startKey }
+	visited[startKey] = true
+
+	local head = 1
+	while head <= #queue do
+		local currentKey = queue[head]
+		head += 1
+
+		local entry = PlotStateStore.GetPlacementEntry(currentKey)
+		if entry and entry.Metadata and entry.Metadata.Connections then
+			for _, neighborKey in ipairs(entry.Metadata.Connections) do
+				if not visited[neighborKey] then
+					visited[neighborKey] = true
+					table.insert(queue, neighborKey)
+				end
+			end
+		end
+	end
+
+	return visited
+end
+
 local function updateWires()
 	local state = PlotStateStore.GetStateSnapshot()
 	if not state or not state.PlacedItems then
@@ -143,10 +303,28 @@ local function updateWires()
 	local activeWireKeys = {}
 
 	if show then
+		local _, selectedKey = SelectionController.GetSelection()
+		local visibleKeys = nil
+
+		-- If we are not forcing show (dragging), and we have a selection, filter by network
+		if not forceShowWires and selectedKey then
+			visibleKeys = getConnectedNetwork(selectedKey)
+		end
+
 		for key, entry in pairs(state.PlacedItems) do
+			-- Optimization: Skip if key is not in visible network (if filtering is active)
+			if visibleKeys and not visibleKeys[key] then
+				continue
+			end
+
 			local metadata = entry.Metadata or {}
 			if metadata.Connections then
 				for _, otherKey in ipairs(metadata.Connections) do
+					-- Double check visibility for the other end too (should be in network if key is)
+					if visibleKeys and not visibleKeys[otherKey] then
+						continue
+					end
+
 					local wKey = getWireKey(key, otherKey)
 					activeWireKeys[wKey] = true
 					drawWire(key, otherKey)
@@ -156,16 +334,18 @@ local function updateWires()
 	end
 
 	-- Cleanup removed wires
-	for wKey, data in pairs(WireBeams) do
+	for wKey, segments in pairs(WireBeams) do
 		if not activeWireKeys[wKey] then
-			if data.Beam then
-				data.Beam:Destroy()
-			end
-			if data.Attachment0 then
-				data.Attachment0:Destroy()
-			end
-			if data.Attachment1 then
-				data.Attachment1:Destroy()
+			for _, data in ipairs(segments) do
+				if data.Beam then
+					data.Beam:Destroy()
+				end
+				if data.Attachment0 then
+					data.Attachment0:Destroy()
+				end
+				if data.Attachment1 then
+					data.Attachment1:Destroy()
+				end
 			end
 			WireBeams[wKey] = nil
 		end
@@ -310,7 +490,18 @@ local function updateSelectionVisuals()
 
 			local current = 0
 			if selectedEntry and selectedEntry.Metadata and selectedEntry.Metadata.Connections then
-				current = #selectedEntry.Metadata.Connections
+				for _, otherKey in ipairs(selectedEntry.Metadata.Connections) do
+					local otherEntry = PlotStateStore.GetPlacementEntry(otherKey)
+					if otherEntry then
+						local otherSpec = ItemFinder.FindItemById(otherEntry.id)
+						if otherSpec then
+							local isSource = otherSpec.PowerSource or otherSpec.WaterSource
+							if not isSource then
+								current += 1
+							end
+						end
+					end
+				end
 			end
 
 			local frame = bb:FindFirstChild("Frame")
@@ -382,6 +573,13 @@ local function updateVisuals()
 				lbl.Font = Enum.Font.GothamBold
 				lbl.Parent = icon
 
+				-- Add a subtle stroke to make icons pop
+				local stroke = Instance.new("UIStroke")
+				stroke.Thickness = 2
+				stroke.Transparency = 0.5
+				stroke.Color = Color3.new(0, 0, 0)
+				stroke.Parent = lbl
+
 				local instance = PlotStateStore.ResolvePlacementInstance(key)
 				if instance and instance:IsA("Model") and instance.PrimaryPart then
 					icon.Adornee = instance.PrimaryPart
@@ -398,25 +596,77 @@ local function updateVisuals()
 
 			local lbl = icon:FindFirstChildOfClass("TextLabel")
 			if lbl then
+				local connectionCount = 0
+				if metadata.Connections then
+					connectionCount = #metadata.Connections
+				end
+
 				if needsPower then
 					if isPowered then
-						lbl.Text = POWER_ICON
-						lbl.TextColor3 = Color3.fromRGB(255, 220, 0) -- Yellow for powered
-						lbl.TextTransparency = 0 -- Fully visible when powered
+						-- Powered (Good)
+						if spec.PowerConductor and not spec.PowerSource then
+							-- Outlet/Conductor: Less intrusive dot
+							lbl.Text = "•"
+							lbl.TextColor3 = Color3.fromRGB(100, 255, 100) -- Bright Green
+							lbl.TextTransparency = 0.2
+						else
+							-- Source or Consumer: Bolt
+							lbl.Text = "⚡"
+							lbl.TextColor3 = Color3.fromRGB(255, 220, 0) -- Yellow
+							lbl.TextTransparency = 0
+						end
 					else
-						-- Unpowered state (Consumer OR Conductor)
-						lbl.Text = POWER_OFF_ICON
-						lbl.TextColor3 = Color3.fromRGB(255, 50, 50)
-						lbl.TextTransparency = 0
+						-- Not Powered (Bad)
+						if spec.RequiresPower and not spec.PowerSource and not spec.PowerConductor then
+							-- Consumer (e.g. Lamp)
+							if connectionCount == 0 then
+								-- Unplugged
+								lbl.Text = "🔌" -- Plug
+								lbl.TextColor3 = Color3.fromRGB(255, 80, 80) -- Redish
+							else
+								-- Plugged but dead grid
+								lbl.Text = "⚠️" -- Warning
+								lbl.TextColor3 = Color3.fromRGB(255, 150, 0) -- Orange
+							end
+						elseif spec.PowerSource then
+							-- Generator Off/Empty
+							lbl.Text = "🛑" -- Stop
+							lbl.TextColor3 = Color3.fromRGB(255, 50, 50)
+						else
+							-- Conductor (Outlet) Unpowered
+							lbl.Text = "•" -- Dot
+							lbl.TextColor3 = Color3.fromRGB(255, 50, 50) -- Red
+						end
 					end
 				elseif needsWater then
-					lbl.Text = WATER_ICON
 					if isWatered then
-						lbl.TextColor3 = Color3.fromRGB(0, 150, 255) -- Blue for watered
-						lbl.TextTransparency = 0.2
+						if spec.WaterConductor and not spec.WaterSource then
+							-- Pipe: Dot
+							lbl.Text = "•"
+							lbl.TextColor3 = Color3.fromRGB(100, 200, 255)
+							lbl.TextTransparency = 0.2
+						else
+							-- Source or Consumer: Droplet
+							lbl.Text = "💧"
+							lbl.TextColor3 = Color3.fromRGB(0, 150, 255)
+							lbl.TextTransparency = 0
+						end
 					else
-						lbl.TextColor3 = Color3.fromRGB(255, 50, 50) -- Red for unwatered
-						lbl.TextTransparency = 0
+						if spec.RequiresWater and not spec.WaterSource and not spec.WaterConductor then
+							if connectionCount == 0 then
+								-- Unplumbed
+								lbl.Text = "🚱" -- Non-potable / No water
+								lbl.TextColor3 = Color3.fromRGB(255, 80, 80)
+							else
+								-- Plumbed but dry
+								lbl.Text = "🪣" -- Bucket / Dry
+								lbl.TextColor3 = Color3.fromRGB(255, 150, 0)
+							end
+						else
+							-- Dry Pipe/Source
+							lbl.Text = "💧"
+							lbl.TextColor3 = Color3.fromRGB(150, 150, 150) -- Greyed out
+						end
 					end
 				end
 			end
@@ -442,11 +692,13 @@ function UtilityVisuals.Init()
 		updateVisuals()
 		updateWires()
 		updateSelectionVisuals()
+		updateCutaway()
 	end)
 	PlotStateStore.OnRoomSnapshotChanged(function()
 		updateVisuals()
 		updateSelectionVisuals()
 		updateWires()
+		updateCutaway()
 	end)
 
 	-- Listen for selection changes to show radius
@@ -454,12 +706,20 @@ function UtilityVisuals.Init()
 		updateSelectionVisuals()
 		updateWires()
 		updateVisuals()
+		updateCutaway()
+	end)
+
+	PlotStateStore.OnActiveLevelChanged(function()
+		if shouldShowWires() then
+			updateCutaway()
+		end
 	end)
 end
 
 function UtilityVisuals.SetForceShow(val: boolean)
 	forceShowWires = val
 	updateWires()
+	updateCutaway()
 end
 
 return UtilityVisuals

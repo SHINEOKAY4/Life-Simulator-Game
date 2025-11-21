@@ -8,6 +8,7 @@ local TipsPackets = {
 		Amount = Packet.NumberU16,
 		SourcePosition = Packet.Vector3F32,
 		Reason = Packet.String,
+		ResidentName = Packet.String,
 	}),
 	ClaimTip = Packet("ClaimTip", {
 		TipId = Packet.String,

@@ -3,7 +3,6 @@
 -- Handles visual representation and interaction for chores (messes).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 
 local ChorePackets = require(ReplicatedStorage.Network.ChorePackets)
@@ -12,7 +11,6 @@ local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 local ChoreController = {}
 
 local ActiveChores: { [string]: Model | Part } = {}
-local LocalPlayer = Players.LocalPlayer
 
 local function createTrashVisual(position: Vector3): Model | BasePart
 	-- Try to find the TrashBag model
@@ -178,6 +176,26 @@ local function onChoreRemoved(payload: { ChoreId: string, Reason: string })
 		end
 		ActiveChores[payload.ChoreId] = nil
 	end
+end
+
+function ChoreController.GetNearbyChores(position: Vector3, radius: number): { { Type: string, Position: Vector3 } }
+	local found = {}
+	for _, visual in pairs(ActiveChores) do
+		if visual:IsA("Model") or visual:IsA("BasePart") then
+			local chorePos = if visual:IsA("Model")
+				then (visual.PrimaryPart and visual.PrimaryPart.Position or visual:GetPivot().Position)
+				else visual.Position
+			if (chorePos - position).Magnitude <= radius then
+				-- Determine type based on name or other props (simplified for now)
+				local choreType = "Trash" -- Default
+				if visual.Name:find("Trash") then
+					choreType = "Trash"
+				end
+				table.insert(found, { Type = choreType, Position = chorePos })
+			end
+		end
+	end
+	return found
 end
 
 function ChoreController.Init()

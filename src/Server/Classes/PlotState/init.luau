@@ -10,6 +10,7 @@ local Floors = require(script.Floors)
 local Roofs = require(script.Roofs)
 local Walls = require(script.Walls)
 local Attachments = require(script.Attachments)
+local Rooms = require(script.Rooms)
 
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
@@ -99,6 +100,22 @@ export type SavedSurfaceMount = {
 export type SurfaceMountedMap = { [string]: SavedSurfaceMount }
 
 export type SurfaceMountCounterMap = { [string]: number }
+
+export type Room = {
+	Id: number,
+	Level: number,
+	Cells: { number },
+	CellCount: number,
+	MinX: number,
+	MinZ: number,
+	MaxX: number,
+	MaxZ: number,
+	InsulationScore: number,
+	HeatingPower: number,
+	CoolingPower: number,
+	CurrentTemperature: number,
+	LightingScore: number,
+}
 
 export type SaveData = {
 	UnlockedChunks: { SavedChunk },
@@ -436,6 +453,10 @@ export type PlotState = {
 	RotateFloor: (self: PlotState) -> (boolean, string?),
 	RotateRoof: (self: PlotState, itemId: string, fromKey: string, toF: Facing) -> (boolean, string?),
 	RotateWall: (self: PlotState, itemId: string, fromKey: string, toF: Facing) -> (boolean, string?),
+	InvalidateRooms: (self: PlotState, yLevel: number?) -> (),
+	GetRoomsForLevel: (self: PlotState, yLevel: number?) -> { Room },
+	GetRoomAt: (self: PlotState, cellX: number, cellZ: number, yLevel: number?) -> Room?,
+	RecalculateRooms: (self: PlotState, yLevel: number?) -> { Room },
 }
 
 local PlotState = {} :: any
@@ -890,5 +911,6 @@ Floors.attach(PlotState)
 Roofs.attach(PlotState)
 Walls.attach(PlotState)
 Attachments.attach(PlotState)
+Rooms.attach(PlotState)
 
 return PlotState

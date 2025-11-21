@@ -78,7 +78,12 @@ function Attachments.attach(PlotState)
 			facing = facing,
 			yLevel = level,
 			Metadata = clonedMetadata,
+			placementType = "WallMounted", -- Explicitly save type
 		}
+
+		if self.InvalidateRooms then
+			self:InvalidateRooms(level)
+		end
 
 		return true, nil
 	end
@@ -88,6 +93,11 @@ function Attachments.attach(PlotState)
 		local key = self:PlacementKeyForType(cellX, cellZ, facing, "WallMounted", level)
 		local saved = self.Save.PlacedObjects[key]
 		self.Save.PlacedObjects[key] = nil
+
+		if self.InvalidateRooms then
+			self:InvalidateRooms(level)
+		end
+
 		return saved
 	end
 
@@ -156,7 +166,13 @@ function Attachments.attach(PlotState)
 			facing = facing,
 			yLevel = level,
 			Metadata = clonedMetadata,
+			placementType = "Ceiling", -- Explicitly save type
 		}
+
+		if self.InvalidateRooms then
+			self:InvalidateRooms(level)
+		end
+
 		return true, nil
 	end
 
@@ -165,6 +181,11 @@ function Attachments.attach(PlotState)
 		local key = self:PlacementKeyForType(cellX, cellZ, facing, "Ceiling", level)
 		local saved = self.Save.PlacedObjects[key]
 		self.Save.PlacedObjects[key] = nil
+
+		if self.InvalidateRooms then
+			self:InvalidateRooms(level)
+		end
+
 		return saved
 	end
 end

@@ -384,6 +384,9 @@ function CellObjects.attach(PlotState)
 			placementType = placementType,
 			Metadata = if candidateMetadata ~= nil then table.clone(candidateMetadata) else nil,
 		}
+		if self.InvalidateRooms then
+			self:InvalidateRooms(level)
+		end
 		return true, key
 	end
 
@@ -432,6 +435,9 @@ function CellObjects.attach(PlotState)
 				and (saved.yLevel or self.DefaultLevel) == level
 			then
 				self.Save.PlacedObjects[key] = nil
+				if self.InvalidateRooms then
+					self:InvalidateRooms(level)
+				end
 			end
 		end
 	end
@@ -567,6 +573,14 @@ function CellObjects.attach(PlotState)
 		saved.placementType = placementKeyType
 		toKey = self:PlacementKeyForType(toX, toZ, toF, placementKeyType, resolvedToLevel)
 		self.Save.PlacedObjects[toKey] = saved
+
+		if self.InvalidateRooms then
+			self:InvalidateRooms(resolvedFromLevel)
+			if resolvedFromLevel ~= resolvedToLevel then
+				self:InvalidateRooms(resolvedToLevel)
+			end
+		end
+
 		return true, nil
 	end
 

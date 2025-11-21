@@ -73,10 +73,6 @@ local function PlaceRoofArea(player: Player, payload: Payload): (boolean, string
 		return false, "Selection too large"
 	end
 
-	if state:AnyFloorInFootprint(minCellX, minCellZ, widthCells, depthCells, facing, level) then
-		return false, "Remove the floor at this level before placing a roof"
-	end
-
 	if not state:CanPlaceRoof(minCellX, minCellZ, widthCells, depthCells, facing, level) then
 		return false, "Selection blocked"
 	end

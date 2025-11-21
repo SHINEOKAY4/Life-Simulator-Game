@@ -200,9 +200,10 @@ local function initializeServiceConnections()
 		showPromptUI(prompt, false)
 	end)
 
-	ProximityPromptService.PromptTriggered:Connect(function(prompt: ProximityPrompt)
-		showPromptUI(prompt, false)
-	end)
+	-- Removed PromptTriggered hiding to allow toggle-style prompts to remain visible
+	-- ProximityPromptService.PromptTriggered:Connect(function(prompt: ProximityPrompt)
+	-- 	showPromptUI(prompt, false)
+	-- end)
 
 	-- Update input type when user switches input methods
 	UserInputService.InputBegan:Connect(function(input)

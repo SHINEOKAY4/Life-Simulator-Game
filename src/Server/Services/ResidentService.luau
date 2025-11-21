@@ -7,7 +7,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 local ResidentState = require(ServerScriptService.Server.Classes.ResidentState)
-local ResidentPlacer = require(ServerScriptService.Server.Utilities.ResidentPlacer)
 local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
@@ -158,16 +157,11 @@ local function prepareResidentForRemoval(residentState, timeoutSeconds: number?)
 		return false, "Resident state missing"
 	end
 
-	local autoActions = residentState.AutoActionsEnabled
-	local autoJob = residentState.AutoJobEnabled
-	residentState:DisableAutomation()
 	residentState:ClearManualOverrideState()
 	residentState:CancelCurrentAction("DeleteResident")
 
 	local idle = residentState:WaitUntilIdle(timeoutSeconds)
 	if not idle then
-		residentState:SetAutoActionEnabled(autoActions)
-		residentState:SetAutoJobEnabled(autoJob)
 		residentState:ResetCancelToken()
 		return false, "Resident is busy"
 	end
@@ -246,8 +240,6 @@ function ResidentService.Load(player: Player)
 		else
 			setTenantLinkInternal(userId, residentName, nil)
 		end
-
-		ResidentPlacer.Spawn(player, residentState)
 	end
 
 	local arrayLength = #incomingResidents
@@ -273,7 +265,7 @@ function ResidentService.Load(player: Player)
 	ResidentsPackets.PlayersResidentsSync:Fire(payload)
 end
 
-function ResidentService.CreateResident(player: Player, residentData: ResidentData, spawnOverride: CFrame?)
+function ResidentService.CreateResident(player: Player, residentData: ResidentData, _spawnOverride: CFrame?)
 	local data = ensureHouseholdState(player, PlayerSession.GetDataAwait(player, "HouseholdState"))
 	if not data then
 		return false, "Household data not available. Please try again."
@@ -308,14 +300,6 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 	local newResidentData = {
 		Name = residentData.Name,
 		Traits = residentData.Traits or { "Balanced" },
-		Needs = {
-			Hunger = 100,
-			Bladder = 100,
-			Energy = 100,
-			Hygiene = 100,
-			Fun = 100,
-			Social = 100,
-		},
 	}
 
 	stripCareerData(newResidentData)
@@ -336,7 +320,6 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 	PlayersResidents[player.UserId][residentName] = residentState
 	NameToIndexMap[player.UserId][residentName] = newIndex
 
-	ResidentPlacer.Spawn(player, residentState, spawnOverride)
 	setTenantLinkInternal(player.UserId, residentName, nil)
 	ResidentService.PlayerResidentsChanged:Fire(player)
 	ResidentsPackets.PlayerResidentDelta:Fire(payload)
@@ -391,7 +374,6 @@ function ResidentService.DeleteResident(player: Player, residentName: string)
 		ResidentDelta = {},
 	}
 
-	ResidentPlacer.Despawn(resident)
 	resident:Destroy()
 	clearTenantLinkByResident(userId, residentName)
 	ResidentService.PlayerResidentsChanged:Fire(player)
@@ -402,7 +384,6 @@ end
 function ResidentService.Unload(player: Player)
 	local userId = player.UserId
 	for _, resident in pairs(PlayersResidents[userId] or {}) do
-		ResidentPlacer.Despawn(resident)
 		resident:Destroy()
 	end
 	PlayersResidents[userId] = nil

@@ -30,6 +30,7 @@ local SPAWN_DELAY_MAX = 80
 local PROSPECT_LIFETIME = 210
 local EXIT_WALK_SECONDS = 3
 local UPDATE_TASK_NAME = "TenantProspects"
+local TARGET_ATTRIBUTE_EPSILON = 0.25
 
 local REST_STATION_TYPE = "RestStation"
 local BED_TAG = "Bed"
@@ -70,6 +71,7 @@ export type PlayerProspectState = {
 	Prospects: { ProspectRecord? },
 	NextSpawnUnix: { number },
 	ResidentsFolder: Folder?,
+	LastTargetAttributes: { Vector3? },
 	PlotModel: Model?,
 	SpawnPoints: { CFrame },
 	RoamCenter: Vector3?,
@@ -269,9 +271,25 @@ local function setTargetAttribute(state: PlayerProspectState, slot: number, posi
 	if not folder or not attrName then
 		return
 	end
+	local lastTargets = state.LastTargetAttributes
+	if not lastTargets then
+		local newTargets = {} :: { Vector3? }
+		state.LastTargetAttributes = newTargets
+		lastTargets = newTargets
+	end
+
+	local last = lastTargets[slot]
 	if position then
+		if last and (last - position).Magnitude <= TARGET_ATTRIBUTE_EPSILON then
+			return
+		end
+		lastTargets[slot] = position
 		folder:SetAttribute(attrName, position)
 	else
+		if last == nil then
+			return
+		end
+		lastTargets[slot] = nil
 		folder:SetAttribute(attrName, nil)
 	end
 end
@@ -386,7 +404,7 @@ local function buildProspectSpawnPayload(record: ProspectRecord)
 		Deposit = record.Offer.Deposit,
 		LeaseSeconds = 0,
 		RentBoostPercent = record.Offer.RentBoostPercent or 0,
-		Traits = record.Offer.Traits,
+		Traits = record.Offer.Traits or {},
 	}
 end
 
@@ -448,6 +466,7 @@ local function ensureStateForPlayer(player: Player): PlayerProspectState
 		Prospects = table.create(MAX_PROSPECTS),
 		NextSpawnUnix = table.create(MAX_PROSPECTS),
 		ResidentsFolder = nil,
+		LastTargetAttributes = table.create(MAX_PROSPECTS),
 		PlotModel = nil,
 		SpawnPoints = {},
 		RoamCenter = nil,

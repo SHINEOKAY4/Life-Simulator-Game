@@ -6,6 +6,7 @@ local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 
 local TipsPackets = require(ReplicatedStorage.Network.TipsPackets)
+local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local SoundtrackManager = require(script.Parent.SoundtrackManager)
 
 local TipsController = {}
@@ -206,7 +207,27 @@ function TipsController.Start()
 			return
 		end
 
-		local visual, trail = createCashVisual(packet.Amount, packet.SourcePosition, packet.Reason)
+		local sourcePos = packet.SourcePosition
+		if packet.ResidentName and packet.ResidentName ~= "" then
+			local plotIndex = player:GetAttribute("OwnedPlotIndex")
+			if typeof(plotIndex) == "number" then
+				local plotModel = PlotFinder.FindPlot(plotIndex)
+				if plotModel then
+					local residents = plotModel:FindFirstChild("Residents")
+					if residents then
+						local resident = residents:FindFirstChild(packet.ResidentName)
+						if resident and resident:IsA("Model") then
+							local root = resident:FindFirstChild("HumanoidRootPart")
+							if root and root:IsA("BasePart") then
+								sourcePos = root.Position
+							end
+						end
+					end
+				end
+			end
+		end
+
+		local visual, trail = createCashVisual(packet.Amount, sourcePos, packet.Reason)
 		local spawnTime = os.clock()
 		local flying = false
 

@@ -4,7 +4,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local ResidentNeedsUI = require(script.Parent.ResidentNeedsUI)
+local TenantProfileUI = require(script.Parent.TenantProfileUI)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local CameraUtils = require(ReplicatedStorage.Shared.Utilities.CameraUtils)
 local ResidentsStore = require(script.Parent.Parent.ClientStores.ResidentsStore) :: any
@@ -303,7 +303,7 @@ local function deselectResident()
 	ResidentNeedsFrame.Visible = false
 	ResidentButtons.Visible = false
 	Profile.Visible = false
-	ResidentNeedsUI.Hide()
+	TenantProfileUI.Hide()
 	CameraUtils.CancelFocus()
 	setPlayerMovementEnabled(true)
 end
@@ -354,9 +354,13 @@ local function selectResident(residentName: string)
 	setRosterVisible(true)
 	ResidentNeedsFrame.Visible = true
 	ResidentButtons.Visible = true
-	ResidentNeedsUI.Show(residentModel)
-
 	local currentData = FrameData[residentName]
+	local snapshot = currentData and currentData.GetResidentSnapshot()
+	local tenantId = snapshot and snapshot.TenantId
+	if tenantId then
+		TenantProfileUI.Show(tenantId, residentModel)
+	end
+
 	if currentData then
 		currentData.PlaySizeTween(HoverSizeGoal)
 		currentData.ResidentModel = residentModel
@@ -378,11 +382,35 @@ local function selectResident(residentName: string)
 	setPlayerMovementEnabled(false)
 end
 
+local function waitForResidentModel(plotModel: Model, residentName: string, timeout: number): Model?
+	local startTime = os.clock()
+	while os.clock() - startTime < timeout do
+		local residentsFolder = plotModel:FindFirstChild("Residents")
+		if residentsFolder then
+			local model = residentsFolder:FindFirstChild(residentName)
+			if model and model:IsA("Model") then
+				return model
+			end
+		end
+		task.wait(0.2)
+	end
+	return nil
+end
+
 local function CreateResidentImageButton(residentData: any)
 	local plotIndex = Player:GetAttribute("OwnedPlotIndex") :: number
 	local plotModel = PlotFinder.FindPlot(plotIndex)
-	local residentsFolder = plotModel:FindFirstChild("Residents") :: Folder
-	local residentModel = residentsFolder:FindFirstChild(residentData.Name) :: Model
+	if not plotModel then
+		warn("[ResidentRoster] Plot model not found for index:", plotIndex)
+		return nil, nil
+	end
+
+	local residentModel = waitForResidentModel(plotModel, residentData.Name, 5)
+	if not residentModel then
+		warn("[ResidentRoster] Resident model not found for:", residentData.Name)
+		return nil, nil
+	end
+
 	local imageModel = residentModel:Clone()
 
 	local newFrame = TemplateFrame:Clone()

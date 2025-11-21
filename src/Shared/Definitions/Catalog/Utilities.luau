@@ -15,7 +15,7 @@ local Utilities = {
 			ModelPath = { "Furnitures", "SmallGenerator" }, -- Placeholder
 			AssetId = 0,
 			PowerSource = true,
-			PowerRadius = 0, -- No wireless power
+			ConnectionRadius = 20,
 			MaxConnections = 4,
 			EffectSummary = {
 				"Generates electricity.",
@@ -38,14 +38,17 @@ local Utilities = {
 			DepthCells = 1,
 			Facing = { "North", "East", "South", "West" },
 			Cost = 200,
-			Description = "Durable electric box that safely houses electrical components.",
+			Description = "Main grid connection point. Stops working if bills are unpaid.",
 			Rules = { RequiresFloorUnderAllCells = false },
-			Tags = { "Basic", "Electrical" },
+			Tags = { "Basic", "Electrical", "GridPower" },
 			ModelPath = { "Furnitures", "ElectricBox" },
 			AssetId = 78735881138394,
+			PowerSource = true,
+			ConnectionRadius = 20,
+			MaxConnections = 8,
 			EffectSummary = {
-				"Provides a safe enclosure for electrical systems.",
-				"Built to withstand various environmental conditions.",
+				"Provides power from the city grid.",
+				"Subject to power outages if bills are unpaid.",
 			},
 		},
 		WallOutlet = {
@@ -69,11 +72,11 @@ local Utilities = {
 			ModelPath = { "Furnitures", "WallOutlet" }, -- Placeholder
 			AssetId = 0,
 			PowerConductor = true,
-			ConnectionRadius = 12, -- Can connect to source/outlet within 12 studs
-			PowerRadius = 8, -- Powers appliances within 8 studs
+			ConnectionRadius = 12,
+			MaxConnections = 2,
 			EffectSummary = {
 				"Connects to nearby power sources.",
-				"Powers nearby appliances.",
+				"Powers connected appliances.",
 			},
 		},
 	},
@@ -133,26 +136,128 @@ local Utilities = {
 				"Connect pipes to distribute water.",
 			},
 		},
-		WaterPipe = {
-			Name = "Water Pipe",
+	},
+	Safety = {},
+	HVAC = {
+		SmallHeater = {
+			Name = "Portable Heater",
 			PlacementType = "CellObject",
 			WidthCells = 1,
 			DepthCells = 1,
 			Facing = { "North", "East", "South", "West" },
-			Cost = 10,
-			Description = "Standard PVC pipe for water distribution.",
-			Rules = { RequiresFloorUnderAllCells = true },
-			Tags = { "Utility", "Water", "Pipe" },
-			ModelPath = { "Furnitures", "WaterPipe" }, -- Placeholder
+			Cost = 150,
+			Description = "A small electric heater to keep the chill away.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Utility", "HVAC", "Heat" },
+			ModelPath = { "Furnitures", "SmallHeater" }, -- Placeholder
 			AssetId = 0,
-			WaterConductor = true,
+			EnergyConsumptionPerHour = 10,
+			RequiresPower = true,
+			MaxConnections = 1,
+			TemperatureConfig = {
+				Type = "Heater",
+				Power = 50, -- Degrees added max
+				Radius = 15, -- Studs
+				TargetTemp = 25,
+			},
 			EffectSummary = {
-				"Connects water sources to sinks and showers.",
+				"Warms up a small area.",
+				"Consumes electricity while running.",
+			},
+		},
+		WallAC = {
+			Name = "Wall AC Unit",
+			PlacementType = "WallMounted",
+			WallMountConfig = {
+				AttachmentSurface = "Back",
+				OffsetFromWall = 0.1,
+				MinHeight = 4,
+				MaxHeight = 8,
+				RequiresFloorSupport = false,
+				CollisionCheck = true,
+			},
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 350,
+			Description = "Wall-mounted air conditioner for hot summer days.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Utility", "HVAC", "Cool" },
+			ModelPath = { "Furnitures", "WallAC" }, -- Placeholder
+			AssetId = 0,
+			EnergyConsumptionPerHour = 25,
+			RequiresPower = true,
+			MaxConnections = 1,
+			TemperatureConfig = {
+				Type = "Cooler",
+				Power = 60, -- Degrees removed max
+				Radius = 25, -- Studs
+				TargetTemp = 18,
+			},
+			EffectSummary = {
+				"Cools down a medium-sized room.",
+				"High energy consumption.",
+			},
+		},
+		CeilingFan = {
+			Name = "Ceiling Fan",
+			PlacementType = "Ceiling",
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 120,
+			Description = "A classic ceiling fan to circulate air.",
+			Rules = { RequiresFloorUnderAllCells = true },
+			Tags = { "Utility", "HVAC", "Cool" },
+			ModelPath = { "Furnitures", "CeilingFan" }, -- Placeholder
+			AssetId = 0,
+			EnergyConsumptionPerHour = 5,
+			RequiresPower = true,
+			MaxConnections = 1,
+			TemperatureConfig = {
+				Type = "Cooler",
+				Power = 15, -- Gentle cooling
+				Radius = 15,
+				TargetTemp = 22,
+			},
+			CeilingMountConfig = {
+				MinDropStuds = 1,
+				MaxDropStuds = 3,
+				DefaultDropStuds = 1.5,
+			},
+			EffectSummary = {
+				"Provides a gentle breeze.",
+				"Low energy consumption.",
+			},
+		},
+		Thermostat = {
+			Name = "Thermostat",
+			PlacementType = "WallMounted",
+			WallMountConfig = {
+				AttachmentSurface = "Back",
+				OffsetFromWall = 0.05,
+				MinHeight = 3,
+				MaxHeight = 5,
+				RequiresFloorSupport = false,
+				CollisionCheck = true,
+			},
+			WidthCells = 1,
+			DepthCells = 1,
+			Facing = { "North", "East", "South", "West" },
+			Cost = 75,
+			Description = "Controls the temperature of the entire room.",
+			Rules = { RequiresFloorUnderAllCells = false },
+			Tags = { "Utility", "HVAC", "Control" },
+			ModelPath = { "Furnitures", "Thermostat" }, -- Placeholder
+			AssetId = 0,
+			Interactable = true,
+			InteractionType = "Thermostat",
+			EffectSummary = {
+				"Allows setting target temperature for the room.",
+				"Connects to HVAC systems automatically.",
 			},
 		},
 	},
-	Safety = {},
-	HVAC = {},
 	Storage = {
 		WoodenRackShelf = {
 			Name = "Wooden Rack Shelf",

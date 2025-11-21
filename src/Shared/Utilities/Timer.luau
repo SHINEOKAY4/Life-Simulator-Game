@@ -50,6 +50,13 @@ local function getCurrentServerTime(): number
 	return Workspace:GetServerTimeNow()
 end
 
+local function removeTimerAt(index: number, lastIndex: number): number
+	local replacement = ActiveTimerList[lastIndex]
+	ActiveTimerList[index] = replacement
+	ActiveTimerList[lastIndex] = nil
+	return lastIndex - 1
+end
+
 --- Advances all active timers by one frame. Called from Heartbeat.
 local function stepAllTimers()
 	local listSize = #ActiveTimerList
@@ -62,11 +69,15 @@ local function stepAllTimers()
 	end
 
 	local currentTime = getCurrentServerTime()
-	for index = listSize, 1, -1 do
+	local lastIndex = listSize
+	local index = lastIndex
+	while index >= 1 do
 		local timer = ActiveTimerList[index]
+		local removed = false
 
 		if (not timer._isRunning) or timer._isStopped then
-			table.remove(ActiveTimerList, index)
+			lastIndex = removeTimerAt(index, lastIndex)
+			removed = true
 		else
 			-- Compute remaining using absolute end time (drift-free).
 			local remainingSeconds = math.max(0, timer._endTime - currentTime)
@@ -87,10 +98,22 @@ local function stepAllTimers()
 				timer._isRunning = false
 				timer._isPaused = false
 				timer._isStopped = true
-				table.remove(ActiveTimerList, index)
+				lastIndex = removeTimerAt(index, lastIndex)
+				removed = true
 				timer._endedSignal:Fire()
 			end
 		end
+
+		if removed then
+			index = math.min(index, lastIndex)
+		else
+			index -= 1
+		end
+	end
+
+	if lastIndex == 0 and RunnerHeartbeatConnection then
+		RunnerHeartbeatConnection:Disconnect()
+		RunnerHeartbeatConnection = nil
 	end
 end
 

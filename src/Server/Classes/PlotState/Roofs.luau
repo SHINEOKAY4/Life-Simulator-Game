@@ -2,7 +2,7 @@
 -- ServerScriptService/Server/Classes/PlotState/Roofs.lua
 local Roofs = {}
 
-type Facing = "North" | "East" | "South" | "West"
+type Facing = "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest"
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
@@ -13,6 +13,13 @@ local function normalize(value: number?): number
 end
 
 function Roofs.attach(PlotState)
+	function PlotState:HasRoofCoverage(yLevel: number?, cellX: number, cellZ: number): boolean
+		local level = self:NormalizeLevel(yLevel)
+		local index = self.Grid:CellToIndex(cellX, cellZ)
+		local levelRoofs = self:GetRoofFilledForLevel(level)
+		return levelRoofs[index] == true
+	end
+
 	function PlotState:AnyRoofInFootprint(
 		cellX: number,
 		cellZ: number,
@@ -53,10 +60,9 @@ function Roofs.attach(PlotState)
 
 		local indices = self.Grid:FootprintCells(cellX, cellZ, widthCells, depthCells, facing)
 		local levelRoofs = self:GetRoofFilledForLevel(level)
-		local levelFloors = self:GetFloorFilledForLevel(level)
 		for i = 1, #indices do
 			local index = indices[i]
-			if levelRoofs[index] or levelFloors[index] then
+			if levelRoofs[index] then
 				return false
 			end
 		end

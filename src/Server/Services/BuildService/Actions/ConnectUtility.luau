@@ -42,17 +42,37 @@ local function ConnectUtility(player: Player, payload: { SourceKey: string, Targ
 	local canConnect = false
 	local connectionRadius = 0
 
-	local isPower = (sourceSpec.PowerSource or sourceSpec.PowerConductor)
-		and (targetSpec.PowerConductor or targetSpec.PowerSource)
-	local isWater = (sourceSpec.WaterSource or sourceSpec.WaterConductor)
-		and (targetSpec.WaterConductor or targetSpec.WaterSource)
+	-- Power Network: Provider (Source/Conductor) can connect to Consumer (RequiresPower) or another Provider
+	local sourceIsPowerProvider = sourceSpec.PowerSource or sourceSpec.PowerConductor
+	local targetIsPowerProvider = targetSpec.PowerSource or targetSpec.PowerConductor
+	local sourceIsPowerConsumer = sourceSpec.RequiresPower
+	local targetIsPowerConsumer = targetSpec.RequiresPower
+
+	-- At least one must be a provider, and both must be power-related
+	local isPower = (sourceIsPowerProvider or targetIsPowerProvider)
+		and (sourceIsPowerProvider or sourceIsPowerConsumer)
+		and (targetIsPowerProvider or targetIsPowerConsumer)
+
+	-- Water Network: Provider (Source/Conductor) can connect to Consumer (RequiresWater) or another Provider
+	local sourceIsWaterProvider = sourceSpec.WaterSource or sourceSpec.WaterConductor
+	local targetIsWaterProvider = targetSpec.WaterSource or targetSpec.WaterConductor
+	local sourceIsWaterConsumer = sourceSpec.RequiresWater
+	local targetIsWaterConsumer = targetSpec.RequiresWater
+
+	local isWater = (sourceIsWaterProvider or targetIsWaterProvider)
+		and (sourceIsWaterProvider or sourceIsWaterConsumer)
+		and (targetIsWaterProvider or targetIsWaterConsumer)
 
 	if isPower or isWater then
-		-- Check distance
-		-- Use the radius of the Conductor (Target usually, or Source if it's a relay)
+		-- Check distance using provider's ConnectionRadius
 		local r1 = sourceSpec.ConnectionRadius or 0
 		local r2 = targetSpec.ConnectionRadius or 0
 		connectionRadius = math.max(r1, r2)
+
+		-- If no radius defined, use generous default (e.g. provider to provider with no radius set)
+		if connectionRadius == 0 then
+			connectionRadius = 20
+		end
 		canConnect = true
 	end
 
@@ -102,6 +122,48 @@ local function ConnectUtility(player: Player, payload: { SourceKey: string, Targ
 		if key == sourceKey then
 			return false, "Already connected"
 		end
+	end
+
+	-- Helper to count connections excluding sources
+	local function getEffectiveConnectionCount(connections: { string })
+		local count = 0
+		for _, otherKey in ipairs(connections) do
+			local otherObj = plotState.Save.PlacedObjects[otherKey]
+			if otherObj then
+				local otherSpec = ItemFinder.FindItemById(otherObj.id)
+				if otherSpec then
+					local isSource = otherSpec.PowerSource or otherSpec.WaterSource
+					if not isSource then
+						count += 1
+					end
+				end
+			end
+		end
+		return count
+	end
+
+	-- Check Max Connections
+	local sourceMax = sourceSpec.MaxConnections or 1
+	local targetMax = targetSpec.MaxConnections or 1
+
+	local targetIsSource = targetSpec.PowerSource or targetSpec.WaterSource
+	local sourceCount = getEffectiveConnectionCount(sourceConnections)
+	if not targetIsSource then
+		sourceCount += 1
+	end
+
+	if sourceCount > sourceMax then
+		return false, "Source has reached max connections"
+	end
+
+	local sourceIsSource = sourceSpec.PowerSource or sourceSpec.WaterSource
+	local targetCount = getEffectiveConnectionCount(targetConnections)
+	if not sourceIsSource then
+		targetCount += 1
+	end
+
+	if targetCount > targetMax then
+		return false, "Target has reached max connections"
 	end
 
 	table.insert(sourceConnections, targetKey)

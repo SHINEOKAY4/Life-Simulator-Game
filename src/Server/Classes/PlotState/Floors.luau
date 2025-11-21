@@ -6,13 +6,20 @@ local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 
 local Floors = {}
 
-type Facing = "North" | "East" | "South" | "West"
+type Facing = "North" | "East" | "South" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest"
 
 local function defaultFacing(facing: Facing?): Facing
 	return facing or "North"
 end
 
 function Floors.attach(PlotState)
+	function PlotState:HasFloorAtCell(yLevel: number?, cellX: number, cellZ: number): boolean
+		local level = self:NormalizeLevel(yLevel)
+		local index = self.Grid:CellToIndex(cellX, cellZ)
+		local levelFloors = self:GetFloorFilledForLevel(level)
+		return levelFloors[index] == true
+	end
+
 	function PlotState:HasFloorUnderFootprint(
 		cellX: number,
 		cellZ: number,
@@ -85,10 +92,9 @@ function Floors.attach(PlotState)
 
 		local indices = self.Grid:FootprintCells(cellX, cellZ, w, d, f)
 		local levelFloors = self:GetFloorFilledForLevel(level)
-		local levelRoofs = self:GetRoofFilledForLevel(level)
 		for i = 1, #indices do
 			local index = indices[i]
-			if levelFloors[index] or levelRoofs[index] then
+			if levelFloors[index] then
 				return false
 			end
 		end
@@ -150,6 +156,9 @@ function Floors.attach(PlotState)
 			yLevel = level,
 			Metadata = metadata,
 		}
+		if self.InvalidateRooms then
+			self:InvalidateRooms(level)
+		end
 		return true
 	end
 
@@ -192,6 +201,9 @@ function Floors.attach(PlotState)
 
 		if saved then
 			self.Save.PlacedObjects[placementKey] = nil
+		end
+		if self.InvalidateRooms then
+			self:InvalidateRooms(level)
 		end
 	end
 
@@ -308,6 +320,13 @@ function Floors.attach(PlotState)
 			}
 		end
 		self.Save.PlacedObjects[toKey] = saved
+
+		if self.InvalidateRooms then
+			self:InvalidateRooms(resolvedFromLevel)
+			if resolvedFromLevel ~= resolvedToLevel then
+				self:InvalidateRooms(resolvedToLevel)
+			end
+		end
 
 		return true, nil
 	end

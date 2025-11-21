@@ -218,4 +218,9 @@ PlacementPackets.DisconnectUtilityRequest = Packet("DisconnectUtilityRequest", {
 	TargetKey = Packet.String,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
+PlacementPackets.TogglePowerRequest = Packet("TogglePowerRequest", {
+	Key = Packet.String,
+	IsOn = Packet.Boolean8,
+}):Response(Packet.Boolean8, Packet.StringLong)
+
 return PlacementPackets

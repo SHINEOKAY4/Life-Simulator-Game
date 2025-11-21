@@ -38,10 +38,10 @@ local function updateResidentCutaway()
 	if not CurrentSelected then
 		return
 	end
-	CutawayViewController.Request(CUTAWAY_SOURCE, {
-		Priority = 8,
-		TargetLevel = PlotStateStore.GetActiveLevel(),
-	})
+	-- CutawayViewController.Request(CUTAWAY_SOURCE, {
+	-- 	Priority = 8,
+	-- 	TargetLevel = PlotStateStore.GetActiveLevel(),
+	-- })
 end
 
 local function releaseResidentCutaway()

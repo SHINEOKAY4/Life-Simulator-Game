@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local TenantTraits = require(ReplicatedStorage.Shared.Definitions.TenantTraits)
+local TenantDefinitions = require(ReplicatedStorage.Shared.Definitions.TenantDefinitions)
 
 export type ProspectOfferPayload = {
 	ProspectId: string,
@@ -193,7 +194,10 @@ local function renderPanel(payload: ProspectOfferPayload, callbacks: PromptCallb
 	tierLabel.Size = UDim2.fromScale(1, 0)
 	tierLabel.AutomaticSize = Enum.AutomaticSize.Y
 	tierLabel.Font = Enum.Font.GothamMedium
-	tierLabel.TextColor3 = Color3.fromRGB(150, 150, 160)
+
+	local tierDef = TenantDefinitions.GetDefinition(payload.TierId)
+	tierLabel.TextColor3 = tierDef and tierDef.DisplayColor or Color3.fromRGB(150, 150, 160)
+
 	tierLabel.TextSize = 14
 	tierLabel.TextXAlignment = Enum.TextXAlignment.Center
 	tierLabel.Text = string.upper(payload.TierId)

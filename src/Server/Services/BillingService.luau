@@ -11,15 +11,13 @@ local BillingPackets = require(ReplicatedStorage.Network.BillingPackets)
 local PlayerSession = require(script.Parent.PlayerSession)
 local PlotService = require(script.Parent.PlotService)
 local CurrencyService = require(script.Parent.CurrencyService)
-local ResidentService = require(script.Parent.ResidentService)
+local UtilityService = require(script.Parent.UtilityService)
 local BillingState = require(ServerScriptService.Server.Classes.BillingState)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 local BillingCalculator = require(ServerScriptService.Server.Utilities.BillingCalculator)
 local EnergyUsageTracker = require(ServerScriptService.Server.Utilities.EnergyUsageTracker)
 local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
-local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
-local StationManager = require(ServerScriptService.Server.Services.ResidentAutonomyService.StationManager)
 
 type OutstandingBreakdown = {
 	PlotTax: number,
@@ -40,10 +38,8 @@ local BILLING_GRACE_PERIOD_SECONDS = 10
 local EARLY_PAYMENT_WINDOW_SECONDS =
 	math.clamp(BillingConstants.EarlyPaymentWindowSeconds or 480, 0, BILLING_DURATION_SECONDS)
 local CHECK_INTERVAL_SECONDS = 2
+local PASSIVE_UPDATE_INTERVAL_SECONDS = 6
 local BASE_CYCLE_CHARGE = 100
-local POWER_OUTAGE_OVERRIDE = BillingConstants.PowerOutageOverrideKey or "BillingPowerOutage"
-local WATER_SHUTOFF_OVERRIDE = BillingConstants.WaterShutoffOverrideKey or "BillingWaterShutoff"
-local INTERNET_DISCONNECT_OVERRIDE = BillingConstants.InternetDisconnectOverrideKey or "BillingInternetDisconnect"
 local EARLY_PAYMENT_WINDOW_HOURS =
 	math.max(1, math.floor(TimeScale.GameHoursFromRealDelta(EARLY_PAYMENT_WINDOW_SECONDS) + 0.5))
 
@@ -60,6 +56,7 @@ local MINIMUM_OVERDUE_INTEREST = if typeof(rawMinimumInterest) == "number"
 
 local BillingService = {}
 local PlayerBillingStates: { [number]: BillingState.BillingState } = {}
+local PassiveUpdateAccumulators: { [number]: number } = {}
 
 local function resolveDueClockTime(billingState: BillingState.BillingState): number
 	local serverNow = Workspace:GetServerTimeNow()
@@ -83,145 +80,12 @@ local function sanitizeChargeAmount(amount: number): number
 	return integerAmount
 end
 
-local energyStationCache: { [string]: boolean } = {}
-local waterStationCache: { [string]: boolean } = {}
-local internetStationCache: { [string]: boolean } = {}
-
-local function isEnergyConsumingStationId(itemId: string?): boolean
-	if typeof(itemId) ~= "string" or itemId == "" then
-		return false
-	end
-
-	local cached = energyStationCache[itemId]
-	if cached ~= nil then
-		return cached
-	end
-
-	local itemSpec = ItemFinder.FindItemById(itemId)
-	local result = false
-	if itemSpec then
-		local energyPerHour = itemSpec.EnergyConsumptionPerHour
-		if typeof(energyPerHour) == "number" and energyPerHour > 0 then
-			result = true
-		end
-	end
-
-	energyStationCache[itemId] = result
-	return result
+local function enforceServiceInterruptions(_player: Player)
+	-- TODO: Re-implement service interruption logic for tenants
 end
 
-local function isWaterConsumingStationId(itemId: string?): boolean
-	if typeof(itemId) ~= "string" or itemId == "" then
-		return false
-	end
-
-	local cached = waterStationCache[itemId]
-	if cached ~= nil then
-		return cached
-	end
-
-	local itemSpec = ItemFinder.FindItemById(itemId)
-	local result = false
-	if itemSpec then
-		local waterPerHour = itemSpec.WaterConsumptionPerHour
-		if typeof(waterPerHour) == "number" and waterPerHour > 0 then
-			result = true
-		end
-	end
-
-	waterStationCache[itemId] = result
-	return result
-end
-
-local function isInternetConsumingStationId(itemId: string?): boolean
-	if typeof(itemId) ~= "string" or itemId == "" then
-		return false
-	end
-
-	local cached = internetStationCache[itemId]
-	if cached ~= nil then
-		return cached
-	end
-
-	local itemSpec = ItemFinder.FindItemById(itemId)
-	local result = false
-	if itemSpec then
-		if itemSpec.RequiresInternet then
-			result = true
-		end
-	end
-
-	internetStationCache[itemId] = result
-	return result
-end
-
-local function interruptStation(player: Player, station: any, overrideKey: string)
-	local occupants: { string } = {}
-	if typeof(station.Residents) == "table" then
-		for _, residentName in ipairs(station.Residents) do
-			if typeof(residentName) == "string" and residentName ~= "" then
-				occupants[#occupants + 1] = residentName
-			end
-		end
-	end
-
-	for _, residentName in ipairs(occupants) do
-		StationManager.releaseStationOccupancy(station, residentName)
-		local residentState = ResidentService.GetResident(player, residentName)
-		if residentState then
-			local cancelAction = residentState.CancelCurrentAction
-			if typeof(cancelAction) == "function" then
-				cancelAction(residentState, "ServiceInterruption")
-			end
-			local clearOverride = residentState.ClearManualOverrideState
-			if typeof(clearOverride) == "function" then
-				clearOverride(residentState)
-			end
-			local enableAutomation = residentState.EnableAutomation
-			if typeof(enableAutomation) == "function" then
-				enableAutomation(residentState)
-			end
-		end
-	end
-
-	station.ActiveOverride = overrideKey
-end
-
-local function enforceServiceInterruptions(player: Player)
-	local stationCache = PlotService.GetStationsForPlayer(player)
-	for _, stationScope in pairs(stationCache) do
-		for _, station in pairs(stationScope) do
-			-- Power Outage
-			if isEnergyConsumingStationId(station.Id) then
-				interruptStation(player, station, POWER_OUTAGE_OVERRIDE)
-			end
-
-			-- Water Shutoff
-			if isWaterConsumingStationId(station.Id) then
-				interruptStation(player, station, WATER_SHUTOFF_OVERRIDE)
-			end
-
-			-- Internet Disconnect
-			if isInternetConsumingStationId(station.Id) then
-				interruptStation(player, station, INTERNET_DISCONNECT_OVERRIDE)
-			end
-		end
-	end
-end
-
-local function clearServiceInterruptions(player: Player)
-	local stationCache = PlotService.GetStationsForPlayer(player)
-	for _, stationScope in pairs(stationCache) do
-		for _, station in pairs(stationScope) do
-			if
-				station.ActiveOverride == POWER_OUTAGE_OVERRIDE
-				or station.ActiveOverride == WATER_SHUTOFF_OVERRIDE
-				or station.ActiveOverride == INTERNET_DISCONNECT_OVERRIDE
-			then
-				station.ActiveOverride = nil
-			end
-		end
-	end
+local function clearServiceInterruptions(_player: Player)
+	-- TODO: Re-implement service interruption logic for tenants
 end
 
 local broadcastBillingUpdate: (player: Player, billingState: BillingState.BillingState) -> ()
@@ -498,6 +362,7 @@ local function applyOverdueState(
 	player:SetAttribute("BillingOverdueCount", overdueCount)
 	player:SetAttribute("BillingPowerOutageActive", true)
 	enforceServiceInterruptions(player)
+	UtilityService.Recalculate(player)
 	if isNewState then
 		BillingService.OnOverdueTriggered(player, billingState, overdueCount)
 	end
@@ -506,6 +371,7 @@ end
 local function clearOverdueState(player: Player, billingState: BillingState.BillingState)
 	player:SetAttribute("BillingPowerOutageActive", false)
 	clearServiceInterruptions(player)
+	UtilityService.Recalculate(player)
 	if player:GetAttribute("BillingOverdueActive") ~= true then
 		return
 	end
@@ -707,6 +573,7 @@ local function ensureBillingState(player: Player)
 	local billingStateData = PlayerSession.GetDataAwait(player, "BillingState")
 	local billingState = BillingState.new(BILLING_DURATION_SECONDS, BILLING_GRACE_PERIOD_SECONDS, billingStateData)
 	PlayerBillingStates[playerIdentifier] = billingState
+	PassiveUpdateAccumulators[playerIdentifier] = 0
 
 	local currencyStateData = PlayerSession.GetDataAwait(player, "CurrencyState")
 	if typeof(currencyStateData) == "table" then
@@ -808,7 +675,27 @@ function BillingService.UpdateBilling(deltaSeconds: number)
 			continue
 		end
 
-		billingState:Update(deltaSeconds)
+		local accumulator = PassiveUpdateAccumulators[playerIdentifier] or 0
+		local timeRemaining = billingState:GetTimeRemaining()
+		local resolvedRemaining = if typeof(timeRemaining) == "number" then timeRemaining else 0
+		local isHotState = billingState:IsInGrace() or billingState:IsOverdue()
+		local shouldProcessNow = isHotState or resolvedRemaining <= EARLY_PAYMENT_WINDOW_SECONDS
+		local appliedDelta = deltaSeconds
+
+		if not shouldProcessNow then
+			accumulator += deltaSeconds
+			if accumulator < PASSIVE_UPDATE_INTERVAL_SECONDS then
+				PassiveUpdateAccumulators[playerIdentifier] = accumulator
+				continue
+			end
+			appliedDelta = accumulator
+			accumulator = 0
+		else
+			accumulator = 0
+		end
+
+		PassiveUpdateAccumulators[playerIdentifier] = accumulator
+		billingState:Update(appliedDelta)
 
 		if billingState:IsInGrace() then
 			BillingService.ProcessGrace(player, billingState, currencyStateData)
@@ -891,6 +778,7 @@ function BillingService.Remove(player: Player)
 	clearGraceState(player, billingState)
 	clearOverdueState(player, billingState)
 	PlayerBillingStates[player.UserId] = nil
+	PassiveUpdateAccumulators[player.UserId] = nil
 	EnergyUsageTracker.RemovePlayer(player)
 end
 

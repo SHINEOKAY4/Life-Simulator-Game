@@ -193,11 +193,7 @@ local function copyShallow<T>(t: T): T
 	local c: any = {}
 	for k, v in pairs(t :: any) do
 		if type(v) == "table" then
-			local subt: any = {}
-			for sk, sv in pairs(v) do
-				subt[sk] = sv
-			end
-			c[k] = subt
+			c[k] = table.clone(v)
 		else
 			c[k] = v
 		end
@@ -206,11 +202,7 @@ local function copyShallow<T>(t: T): T
 end
 
 local function copyBoolMap(m: { [string]: boolean }): { [string]: boolean }
-	local c: { [string]: boolean } = {}
-	for k, v in pairs(m) do
-		c[k] = v
-	end
-	return c
+	return table.clone(m)
 end
 
 local function propsWithoutQty(props: { [string]: any }): { [string]: any }
@@ -1014,7 +1006,7 @@ end
 ---@param player Player
 ---@param playerData table
 ---@return Item[]
-function Inventory:GetEquippedItems(player: Player, playerData: { [string]: any }): { Item }
+function Inventory:GetEquippedItems(_player: Player, playerData: { [string]: any }): { Item }
 	local bag = self:PeekBag(playerData)
 	if not bag then
 		return {}
@@ -1051,11 +1043,7 @@ function Inventory:GetConsumedActivationIds(_player: Player, playerData: { [stri
 	if not bag then
 		return {}
 	end
-	local c: { [ActivationId]: boolean } = {}
-	for id, v in pairs(bag.consumed) do
-		c[id] = v
-	end
-	return c
+	return table.clone(bag.consumed)
 end
 
 --- Get COPIES of active-consumed metadata by activation id.
@@ -1106,10 +1094,7 @@ function Inventory:EmitBagSnapshot(player: Player, playerData: { [string]: any }
 	for id, it in pairs(bag.items) do
 		itemsCopy[id] = copyShallow(it)
 	end
-	local consumedCopy: { [ActivationId]: boolean } = {}
-	for id, v in pairs(bag.consumed) do
-		consumedCopy[id] = v
-	end
+	local consumedCopy = table.clone(bag.consumed)
 	local consumedMetaCopy: { [ActivationId]: ActiveConsumedMeta } = {}
 	for id, m in pairs(bag.consumedMeta) do
 		consumedMetaCopy[id] = copyShallow(m)

@@ -35,7 +35,7 @@ local ObjectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnab
 type Facing = ObjectPreview.Facing
 type WallStripSelectionInfo = ObjectPreview.WallStripSelectionInfo
 type RoofSelectionInfo = ObjectPreview.RoofSelectionInfo
-type PreviewPose = ObjectPreview.PreviewPose
+--type PreviewPose = ObjectPreview.PreviewPose
 
 local PlotBuilder = {}
 local INPUT_DEBOUNCE_SECONDS = 0.25
@@ -67,7 +67,7 @@ local function cancelPendingPreviewRestore()
 	previewRestoreToken += 1
 end
 
-local function temporarilyHidePreviewForPlacement(pose: PreviewPose)
+local function temporarilyHidePreviewForPlacement(pose)
 	if pose.Kind ~= "CellObject" then
 		return
 	end

@@ -1,11 +1,7 @@
 -- TooltipModule.lua
 -- Revamped for modern UI with structured stats support
 
-local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
-local TextService = game:GetService("TextService")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 
 local TooltipModule = {}
 TooltipModule.__index = TooltipModule
@@ -102,7 +98,7 @@ local function createGui(options)
 	titleLabel.TextSize = options.titleTextSize
 	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
 	titleLabel.TextWrapped = true
-	titleLabel.Size = UDim2.new(1, 0, 0, 0)
+	titleLabel.Size = UDim2.fromScale(1, 0)
 	titleLabel.AutomaticSize = Enum.AutomaticSize.Y
 	titleLabel.LayoutOrder = 1
 	titleLabel.Parent = frame
@@ -111,7 +107,7 @@ local function createGui(options)
 	local bodyFrame = Instance.new("Frame")
 	bodyFrame.Name = "Body"
 	bodyFrame.BackgroundTransparency = 1
-	bodyFrame.Size = UDim2.new(1, 0, 0, 0)
+	bodyFrame.Size = UDim2.fromScale(1, 0)
 	bodyFrame.AutomaticSize = Enum.AutomaticSize.Y
 	bodyFrame.LayoutOrder = 2
 	bodyFrame.Parent = frame
@@ -145,14 +141,14 @@ local function createGui(options)
 	descriptionLabel.TextWrapped = true
 	descriptionLabel.TextXAlignment = Enum.TextXAlignment.Left
 	descriptionLabel.AutomaticSize = Enum.AutomaticSize.Y
-	descriptionLabel.Size = UDim2.new(1, 0, 0, 0)
+	descriptionLabel.Size = UDim2.fromScale(1, 0)
 	descriptionLabel.Parent = bodyFrame
 
 	-- Stats Container
 	local statsFrame = Instance.new("Frame")
 	statsFrame.Name = "Stats"
 	statsFrame.BackgroundTransparency = 1
-	statsFrame.Size = UDim2.new(1, 0, 0, 0)
+	statsFrame.Size = UDim2.fromScale(1, 0)
 	statsFrame.AutomaticSize = Enum.AutomaticSize.Y
 	statsFrame.LayoutOrder = 3
 	statsFrame.Parent = frame
@@ -240,13 +236,13 @@ function TooltipModule:_renderStats(stats)
 		label.Font = Enum.Font.GothamMedium
 		label.TextSize = 12
 		label.AutomaticSize = Enum.AutomaticSize.X
-		label.Size = UDim2.new(0, 0, 1, 0)
+		label.Size = UDim2.fromScale(0, 1)
 		label.Parent = row
 
 		-- Spacer
 		local spacer = Instance.new("Frame")
 		spacer.BackgroundTransparency = 1
-		spacer.Size = UDim2.new(1, 0, 1, 0) -- Will fill remaining space? No, UIListLayout doesn't fill.
+		spacer.Size = UDim2.fromScale(1, 1) -- Will fill remaining space? No, UIListLayout doesn't fill.
 		-- We can use a flexible frame if we want right alignment.
 		-- Actually, let's just put Value on the right.
 		-- Since UIListLayout stacks left-to-right, we can't easily right-align the last item without a wrapper or script.
@@ -267,7 +263,7 @@ function TooltipModule:_renderStats(stats)
 		value.Font = Enum.Font.GothamBold
 		value.TextSize = 12
 		value.AutomaticSize = Enum.AutomaticSize.X
-		value.Size = UDim2.new(0, 0, 1, 0)
+		value.Size = UDim2.fromScale(0, 1)
 		value.LayoutOrder = 3
 		value.Parent = row
 
@@ -277,12 +273,12 @@ function TooltipModule:_renderStats(stats)
 		-- Alternative: Don't use UIListLayout for the row. Use direct positioning.
 		rowLayout:Destroy()
 
-		label.Position = UDim2.new(0, 0, 0, 0)
-		label.Size = UDim2.new(0.6, 0, 1, 0)
+		label.Position = UDim2.fromScale(0, 0)
+		label.Size = UDim2.fromScale(0.6, 1)
 		label.TextXAlignment = Enum.TextXAlignment.Left
 
-		value.Position = UDim2.new(0.6, 0, 0, 0)
-		value.Size = UDim2.new(0.4, 0, 1, 0)
+		value.Position = UDim2.fromScale(0.6, 0)
+		value.Size = UDim2.fromScale(0.4, 1)
 		value.TextXAlignment = Enum.TextXAlignment.Right
 	end
 end
@@ -300,7 +296,7 @@ function TooltipModule:SetItemContent(content)
 		self._descriptionLabel.Size = UDim2.new(1, -(self._options.imageSize.X + 8), 0, 0)
 	else
 		self._thumbnailHolder.Visible = false
-		self._descriptionLabel.Size = UDim2.new(1, 0, 0, 0)
+		self._descriptionLabel.Size = UDim2.fromScale(1, 0)
 	end
 
 	self:_renderStats(content.Stats)

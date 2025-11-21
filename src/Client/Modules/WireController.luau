@@ -22,15 +22,23 @@ local sourceKey: string? = nil
 local sourceInstance: Instance? = nil
 local sourceSpec: { [string]: any }? = nil
 
-local dragBeam: Beam? = nil
-local dragAtt0: Attachment? = nil
-local dragAtt1: Attachment? = nil
+local dragSegments = {} -- { {Beam, Att0, Att1}, ... }
 local dragConnection: RBXScriptConnection? = nil
 local snapVisual: BasePart? = nil
 local lastValidTargetKey: string? = nil
 
 local currentValidTargetKey: string? = nil
 local currentValidTargetPos: Vector3? = nil
+
+local function getFloorY(level: number?): number
+	local surface = PlotStateStore.GetSurface()
+	if not surface then
+		return 0
+	end
+	local baseHeight = surface.Position.Y + surface.Size.Y / 2
+	local lvl = level or PlotStateStore.GetActiveLevel()
+	return baseHeight + (lvl * PlotStateStore.GetFloorHeightStuds()) + 0.2
+end
 
 local function getWireAttachmentPosition(instance: Instance, spec: any): Vector3
 	if instance:IsA("Model") then
@@ -93,31 +101,35 @@ local function raycast(): (Instance?, Vector3)
 	return nil, terrainResult and terrainResult.Position or (ray.Origin + ray.Direction * 20)
 end
 
-local function createDragVisuals(startPos: Vector3)
+local function ensureDragSegment(index: number)
+	if not dragSegments[index] then
+		local terrain = Workspace.Terrain
+		local att0 = Instance.new("Attachment")
+		att0.Parent = terrain
+		local att1 = Instance.new("Attachment")
+		att1.Parent = terrain
+
+		local beam = Instance.new("Beam")
+		beam.Attachment0 = att0
+		beam.Attachment1 = att1
+		beam.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+		beam.FaceCamera = true
+		beam.Width0 = 0.3
+		beam.Width1 = 0.3
+		beam.Texture = "rbxassetid://7151723058" -- Dashed line
+		beam.TextureMode = Enum.TextureMode.Wrap
+		beam.TextureLength = 2
+		beam.TextureSpeed = 2
+		beam.Transparency = NumberSequence.new(0.2)
+		beam.Parent = terrain
+
+		dragSegments[index] = { Beam = beam, Attachment0 = att0, Attachment1 = att1 }
+	end
+	return dragSegments[index]
+end
+
+local function createDragVisuals(_startPos: Vector3)
 	local terrain = Workspace.Terrain
-
-	local att0 = Instance.new("Attachment")
-	att0.WorldPosition = startPos
-	att0.Parent = terrain
-
-	local att1 = Instance.new("Attachment")
-	att1.WorldPosition = startPos
-	att1.Parent = terrain
-
-	local beam = Instance.new("Beam")
-	beam.Attachment0 = att0
-	beam.Attachment1 = att1
-	beam.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
-	beam.FaceCamera = true
-	beam.Width0 = 0.3
-	beam.Width1 = 0.3
-	beam.Texture = "rbxassetid://7151723058" -- Dashed line
-	beam.TextureMode = Enum.TextureMode.Wrap
-	beam.TextureLength = 2
-	beam.TextureSpeed = 2
-	beam.Transparency = NumberSequence.new(0.2)
-	beam.Parent = terrain
-
 	local snap = Instance.new("Part")
 	snap.Name = "WireSnapVisual"
 	snap.Shape = Enum.PartType.Ball
@@ -130,29 +142,21 @@ local function createDragVisuals(startPos: Vector3)
 	snap.CastShadow = false
 	snap.Parent = terrain
 
-	dragBeam = beam
-	dragAtt0 = att0
-	dragAtt1 = att1
 	snapVisual = snap
 end
 
 local function destroyDragVisuals()
 	UtilityVisuals.SetForceShow(false)
-	if dragBeam then
-		dragBeam:Destroy()
+	for _, seg in ipairs(dragSegments) do
+		seg.Beam:Destroy()
+		seg.Attachment0:Destroy()
+		seg.Attachment1:Destroy()
 	end
-	if dragAtt0 then
-		dragAtt0:Destroy()
-	end
-	if dragAtt1 then
-		dragAtt1:Destroy()
-	end
+	dragSegments = {}
+
 	if snapVisual then
 		snapVisual:Destroy()
 	end
-	dragBeam = nil
-	dragAtt0 = nil
-	dragAtt1 = nil
 	snapVisual = nil
 	lastValidTargetKey = nil
 end
@@ -194,16 +198,31 @@ local function startDragging()
 			local isValid = false
 			local isDisconnect = false
 
-			if targetObj and targetObj ~= sourceInstance and sourceSpec and dragAtt0 then
+			if targetObj and targetObj ~= sourceInstance and sourceSpec then
 				local tKey = targetObj.Name
 				local tEntry = PlotStateStore.GetPlacementEntry(tKey)
 				if tEntry then
 					local tSpec = ItemFinder.FindItemById(tEntry.id)
 					if tSpec then
-						local isPower = (sourceSpec.PowerSource or sourceSpec.PowerConductor)
-							and (tSpec.PowerConductor or tSpec.PowerSource)
-						local isWater = (sourceSpec.WaterSource or sourceSpec.WaterConductor)
-							and (tSpec.WaterConductor or tSpec.WaterSource)
+						-- Power: At least one must be provider, both must be power-related
+						local sourceIsPowerProvider = sourceSpec.PowerSource or sourceSpec.PowerConductor
+						local tIsPowerProvider = tSpec.PowerConductor or tSpec.PowerSource
+						local sourceIsPowerConsumer = sourceSpec.RequiresPower
+						local tIsPowerConsumer = tSpec.RequiresPower
+
+						local isPower = (sourceIsPowerProvider or tIsPowerProvider)
+							and (sourceIsPowerProvider or sourceIsPowerConsumer)
+							and (tIsPowerProvider or tIsPowerConsumer)
+
+						-- Water: At least one must be provider, both must be water-related
+						local sourceIsWaterProvider = sourceSpec.WaterSource or sourceSpec.WaterConductor
+						local tIsWaterProvider = tSpec.WaterConductor or tSpec.WaterSource
+						local sourceIsWaterConsumer = sourceSpec.RequiresWater
+						local tIsWaterConsumer = tSpec.RequiresWater
+
+						local isWater = (sourceIsWaterProvider or tIsWaterProvider)
+							and (sourceIsWaterProvider or sourceIsWaterConsumer)
+							and (tIsWaterProvider or tIsWaterConsumer)
 
 						if isPower or isWater then
 							-- Check radius
@@ -213,7 +232,7 @@ local function startDragging()
 
 							-- Snap to target attachment
 							local snapPos = getWireAttachmentPosition(targetObj, tSpec)
-							local dist = (dragAtt0.WorldPosition - snapPos).Magnitude
+							local dist = (startPos - snapPos).Magnitude
 
 							if dist <= maxR + 1 then
 								isValid = true
@@ -230,30 +249,60 @@ local function startDragging()
 				end
 			end
 
-			if dragAtt1 then
-				dragAtt1.WorldPosition = targetPos
+			-- Update Visuals
+			local floorY = getFloorY()
+
+			-- Enforce deterministic path direction to match UtilityVisuals
+			local p1 = startPos
+			local p2 = targetPos
+			if sourceKey and currentValidTargetKey then
+				if sourceKey > currentValidTargetKey then
+					p1 = targetPos
+					p2 = startPos
+				end
 			end
 
-			if dragBeam then
+			local path = UtilityVisuals.GetWirePath(p1, p2, floorY)
+
+			-- Ensure segments
+			for i = 1, #path - 1 do
+				local seg = ensureDragSegment(i)
+				seg.Attachment0.WorldPosition = path[i]
+				seg.Attachment1.WorldPosition = path[i + 1]
+				seg.Beam.Enabled = true
+
 				if isValid then
 					if isDisconnect then
-						dragBeam.Color = ColorSequence.new(Color3.fromRGB(255, 50, 50)) -- Red for disconnect
-						if snapVisual then
-							snapVisual.Color = Color3.fromRGB(255, 50, 50)
-							snapVisual.Position = targetPos
-							snapVisual.Transparency = 0.2
-						end
+						seg.Beam.Color = ColorSequence.new(Color3.fromRGB(255, 50, 50))
+					else
+						local isWater = sourceSpec and (sourceSpec.WaterSource or sourceSpec.WaterConductor)
+						local color = if isWater then Color3.fromRGB(0, 150, 255) else Color3.fromRGB(0, 255, 0)
+						seg.Beam.Color = ColorSequence.new(color)
+					end
+				else
+					seg.Beam.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+				end
+			end
+
+			-- Hide unused segments
+			for i = #path, #dragSegments do
+				dragSegments[i].Beam.Enabled = false
+			end
+
+			if snapVisual then
+				if isValid then
+					if isDisconnect then
+						snapVisual.Color = Color3.fromRGB(255, 50, 50) -- Red for disconnect
+						snapVisual.Position = targetPos
+						snapVisual.Transparency = 0.2
 					else
 						-- Determine color based on type
 						local isWater = sourceSpec and (sourceSpec.WaterSource or sourceSpec.WaterConductor)
 						local color = if isWater then Color3.fromRGB(0, 150, 255) else Color3.fromRGB(0, 255, 0)
 
-						dragBeam.Color = ColorSequence.new(color)
-						if snapVisual then
-							snapVisual.Color = color
-							snapVisual.Position = targetPos
-							snapVisual.Transparency = 0.2
-						end
+						snapVisual.Color = color
+						snapVisual.Position = targetPos
+						snapVisual.Transparency = 0.2
 					end
 
 					-- Hover Sound
@@ -267,7 +316,6 @@ local function startDragging()
 						sound:Destroy()
 					end
 				else
-					dragBeam.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255)) -- White/Default
 					if snapVisual then
 						snapVisual.Transparency = 1
 					end
@@ -278,10 +326,55 @@ local function startDragging()
 	end
 end
 
+local function isAnyConflictingUIActive(): boolean
+	local PlayerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
+	if not PlayerGui then
+		return false
+	end
+
+	local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
+	if ActiveQueryFolder then
+		local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled")
+		if PlotBuilderEnabled and PlotBuilderEnabled:IsA("BoolValue") and PlotBuilderEnabled.Value then
+			return true
+		end
+
+		local ResidentUIEnabled = ActiveQueryFolder:FindFirstChild("ResidentUIEnabled")
+		if ResidentUIEnabled and ResidentUIEnabled:IsA("BoolValue") and ResidentUIEnabled.Value then
+			return true
+		end
+
+		local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
+		if PlotExpansionEnabled and PlotExpansionEnabled:IsA("BoolValue") and PlotExpansionEnabled.Value then
+			return true
+		end
+	end
+
+	local MainHUD = PlayerGui:FindFirstChild("MainHUD")
+	if MainHUD then
+		local BillFrame = MainHUD:FindFirstChild("BillFrame")
+		if BillFrame and BillFrame:IsA("Frame") and BillFrame.Visible then
+			return true
+		end
+	end
+
+	local ReviewsUI = PlayerGui:FindFirstChild("ReviewsUI")
+	if ReviewsUI and ReviewsUI:IsA("ScreenGui") and ReviewsUI.Enabled then
+		return true
+	end
+
+	return false
+end
+
 local function onInputBegan(input: InputObject, gameProcessed: boolean)
 	if gameProcessed then
 		return
 	end
+
+	if isAnyConflictingUIActive() then
+		return
+	end
+
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		local hitObj, _ = raycast()
 		if hitObj then
@@ -289,7 +382,17 @@ local function onInputBegan(input: InputObject, gameProcessed: boolean)
 			local entry = PlotStateStore.GetPlacementEntry(key)
 			if entry then
 				local spec = ItemFinder.FindItemById(entry.id)
-				if spec and (spec.PowerSource or spec.PowerConductor or spec.WaterSource or spec.WaterConductor) then
+				if
+					spec
+					and (
+						spec.PowerSource
+						or spec.PowerConductor
+						or spec.RequiresPower
+						or spec.WaterSource
+						or spec.WaterConductor
+						or spec.RequiresWater
+					)
+				then
 					potentialDrag = true
 					dragStartPos = Vector2.new(input.Position.X, input.Position.Y)
 					sourceKey = key
