@@ -22,7 +22,7 @@ local ResidentToTenantMap: { [number]: { [string]: string } } = {} -- [userId][r
 ResidentService.PlayerResidentsChanged = GoodSignal.new()
 
 local Config = {
-	MaxResidentsPerHousehold = 8,
+	MaxTenantsPerHousehold = 8,
 }
 
 local function ensureTenantMaps(userId: number)
@@ -145,9 +145,9 @@ local function ensureHouseholdState(player: Player, data: any?)
 		return nil
 	end
 
-	data.Residents = data.Residents or {}
-	data.ResidentsCount = data.ResidentsCount or #data.Residents
-	data.MaxResidents = data.MaxResidents or Config.MaxResidentsPerHousehold
+	data.Tenants = data.Tenants or {}
+	data.TenantsCount = data.TenantsCount or #data.Tenants
+	data.MaxTenants = data.MaxTenants or Config.MaxTenantsPerHousehold
 
 	return data
 end
@@ -189,14 +189,14 @@ function ResidentService.Load(player: Player)
 	end
 	local userId = player.UserId
 
-	data.Residents = data.Residents or {}
-	data.ResidentsCount = math.max(#data.Residents, 0)
+	data.Tenants = data.Tenants or {}
+	data.TenantsCount = math.max(#data.Tenants, 0)
 
 	-- Build a keyed map and index map for easier access
 	PlayersResidents[userId] = {}
 	NameToIndexMap[userId] = {}
 
-	local incomingResidents = data.Residents or {}
+	local incomingResidents = data.Tenants or {}
 	local filteredResidents = {}
 	local residentsMap = PlayersResidents[userId]
 	local indexMap = NameToIndexMap[userId]
@@ -253,8 +253,8 @@ function ResidentService.Load(player: Player)
 		end
 	end
 
-	data.Residents = filteredResidents
-	data.ResidentsCount = #filteredResidents
+	data.Tenants = filteredResidents
+	data.TenantsCount = #filteredResidents
 
 	local payload = {
 		UserId = userId,
@@ -274,10 +274,9 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 	PlayersResidents[player.UserId] = PlayersResidents[player.UserId] or {}
 	NameToIndexMap[player.UserId] = NameToIndexMap[player.UserId] or {}
 
-	local maxGlobalResidentsPerHousehold = Config.MaxResidentsPerHousehold
-	data.MaxResidents =
-		math.clamp(data.MaxResidents or maxGlobalResidentsPerHousehold, 1, maxGlobalResidentsPerHousehold)
-	if data.ResidentsCount + 1 > data.MaxResidents then
+	local maxGlobalTenantsPerHousehold = Config.MaxTenantsPerHousehold
+	data.MaxTenants = math.clamp(data.MaxTenants or maxGlobalTenantsPerHousehold, 1, maxGlobalTenantsPerHousehold)
+	if data.TenantsCount + 1 > data.MaxTenants then
 		return false, "Maximum number of residents reached."
 	end
 	-- Basic validation
@@ -289,8 +288,8 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 		return false, "Invalid name."
 	end
 
-	if data.Residents then
-		for _, resident in ipairs(data.Residents) do
+	if data.Tenants then
+		for _, resident in ipairs(data.Tenants) do
 			if resident.Name == residentData.Name then
 				return false, "Resident with this name already exists."
 			end
@@ -312,9 +311,9 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 		ResidentDelta = newResidentClone and { newResidentClone } or {},
 	}
 	-- Add the new resident
-	local newIndex = #data.Residents + 1
-	data.Residents[newIndex] = newResidentData
-	data.ResidentsCount = newIndex
+	local newIndex = #data.Tenants + 1
+	data.Tenants[newIndex] = newResidentData
+	data.TenantsCount = newIndex
 	local residentState = ResidentState.new(newResidentData)
 	local residentName = newResidentData.Name
 	PlayersResidents[player.UserId][residentName] = residentState
@@ -357,17 +356,17 @@ function ResidentService.DeleteResident(player: Player, residentName: string)
 	if not prepared then
 		return false, reason or "Resident is busy"
 	end
-	table.remove(data.Residents, index)
+	table.remove(data.Tenants, index)
 
 	residentMap[residentName] = nil
 
 	-- Rebuild the index map
 	NameToIndexMap[userId] = {}
-	for idx, res in ipairs(data.Residents) do
+	for idx, res in ipairs(data.Tenants) do
 		NameToIndexMap[userId][res.Name] = idx
 	end
 
-	data.ResidentsCount = math.max(0, #data.Residents)
+	data.TenantsCount = math.max(0, #data.Tenants)
 	local payload = {
 		UserId = userId,
 		ResidentName = residentName,
@@ -450,7 +449,7 @@ function ResidentService.SetResidentTenantData(player: Player, residentName: str
 		return false, "Resident not found."
 	end
 
-	local entry = data.Residents[index] :: { [string]: any }
+	local entry = data.Tenants[index] :: { [string]: any }
 	if entry then
 		entry.TenantId = tenantId
 	end

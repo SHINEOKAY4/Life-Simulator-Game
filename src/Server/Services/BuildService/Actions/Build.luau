@@ -368,6 +368,11 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		return false, "Invalid item ID"
 	end
 
+	local unlocked, lockReason = Helpers.ensurePlacementUnlocked(player, itemData, payload.ItemId)
+	if not unlocked then
+		return false, lockReason or "Level up to unlock this item"
+	end
+
 	local placementType = itemData.PlacementType or itemData.Type or "CellObject"
 
 	local allowedFacing = itemData.Facing :: { Facing }?
@@ -430,6 +435,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		)
 
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
+		Helpers.rewardPlacementProgress(player, itemData, totalCells)
 		UtilityService.Recalculate(player)
 
 		return true, "Floor placed"
@@ -521,6 +527,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 
 		Helpers.sendPlacementDelta(player, "Placed", payload.ItemId, wallCellX, wallCellZ, wallFacing, metadata, level)
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
+		Helpers.rewardPlacementProgress(player, itemData, 1)
 		UtilityService.Recalculate(player)
 		return true, "Wall attachment placed"
 	elseif placementType == "Ceiling" then
@@ -625,6 +632,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			ceilingLevel
 		)
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
+		Helpers.rewardPlacementProgress(player, itemData, 1)
 		UtilityService.Recalculate(player)
 		return true, "Ceiling decor placed"
 	elseif itemData.PlacementType == "CellObject" then
@@ -713,6 +721,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		)
 
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
+		Helpers.rewardPlacementProgress(player, itemData, widthCells * depthCells)
 		UtilityService.Recalculate(player)
 		return true, "Cell object placed"
 	elseif itemData.PlacementType == "Wall" then
@@ -974,6 +983,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			)
 
 			Helpers.deductPlacementCost(player, currencyState, totalCost)
+			Helpers.rewardPlacementProgress(player, itemData, 1)
 
 			if isWindowVariant then
 				UtilityService.Recalculate(player)
@@ -1018,6 +1028,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			level
 		)
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
+		Helpers.rewardPlacementProgress(player, itemData, 1)
 
 		UtilityService.Recalculate(player)
 		return true, "Wall placed"
@@ -1049,6 +1060,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 
 		Helpers.sendPlacementDelta(player, "Placed", payload.ItemId, payload.CellX, payload.CellZ, facing, nil, level)
 		Helpers.deductPlacementCost(player, currencyState, totalCost)
+		Helpers.rewardPlacementProgress(player, itemData, totalCells)
 
 		UtilityService.Recalculate(player)
 		return true, "Roof placed"

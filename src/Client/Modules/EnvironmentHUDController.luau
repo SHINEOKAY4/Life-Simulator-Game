@@ -58,7 +58,7 @@ local function createUI()
 	local mainFrame = Instance.new("Frame")
 	mainFrame.Name = "MainFrame"
 	mainFrame.Size = UDim2.fromOffset(180, 90)
-	mainFrame.Position = UDim2.fromScale(0.01, 0.08)
+	mainFrame.Position = UDim2.fromScale(0.04, 0.08)
 	mainFrame.AnchorPoint = Vector2.new(0, 0)
 	mainFrame.BackgroundTransparency = 1
 	mainFrame.Parent = screen

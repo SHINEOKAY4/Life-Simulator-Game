@@ -68,6 +68,11 @@ local function PlaceSurfaceMount(player: Player, payload: Payload): (boolean, st
 		return false, "Invalid item id"
 	end
 
+	local unlocked, lockReason = Helpers.ensurePlacementUnlocked(player, itemSpec, payload.ItemId)
+	if not unlocked then
+		return false, lockReason or "Level up to unlock this attachment"
+	end
+
 	local placementType = itemSpec.PlacementType or itemSpec.Type
 	if placementType ~= "SurfaceMounted" then
 		return false, "Item is not surface-mounted"
@@ -113,6 +118,7 @@ local function PlaceSurfaceMount(player: Player, payload: Payload): (boolean, st
 	WorldPlacer.SpawnSurfaceMount(player, parentKey, mountKey, payload.ItemId, savedEntry)
 	Helpers.sendSurfaceMountDelta(player, "Placed", mountKey, savedEntry)
 	Helpers.deductPlacementCost(player, currencyState, totalCost)
+	Helpers.rewardPlacementProgress(player, itemSpec, 1)
 
 	return true, "Surface mount placed"
 end

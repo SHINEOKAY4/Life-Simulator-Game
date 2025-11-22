@@ -570,15 +570,17 @@ end
 
 local function canAcceptTenant(player: Player): (boolean, string?)
 	local householdState = PlayerSession.TryGetData(player, "HouseholdState")
-	if householdState and householdState.MaxResidents and householdState.ResidentsCount then
-		if householdState.ResidentsCount >= householdState.MaxResidents then
+	local maxTenants = householdState and householdState.MaxTenants or nil
+	local tenantCount = householdState and householdState.TenantsCount or nil
+	if typeof(maxTenants) == "number" and typeof(tenantCount) == "number" then
+		if tenantCount >= maxTenants then
 			return false, "Household capacity reached."
 		end
 	end
 
 	local residentsCount = 0
-	if householdState and typeof(householdState.ResidentsCount) == "number" then
-		residentsCount = householdState.ResidentsCount
+	if typeof(tenantCount) == "number" then
+		residentsCount = tenantCount
 	else
 		local residentsMap = ResidentService.GetResidents(player)
 		if residentsMap then

@@ -92,6 +92,11 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 		return false, "Invalid item ID"
 	end
 
+	local unlocked, lockReason = Helpers.ensurePlacementUnlocked(player, spec, itemId)
+	if not unlocked then
+		return false, lockReason or "Level up to unlock this wall"
+	end
+
 	local placementType = spec.PlacementType or spec.Type or "CellObject"
 	if placementType ~= "Wall" then
 		return false, "Item is not a wall"
@@ -285,6 +290,7 @@ local function PlaceWallStrip(player: Player, payload: Payload): (boolean, strin
 	end
 
 	Helpers.deductPlacementCost(player, currencyState, totalCost)
+	Helpers.rewardPlacementProgress(player, spec, segmentCount)
 
 	return true, "Wall strip placed"
 end

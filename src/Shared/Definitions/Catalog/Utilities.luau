@@ -206,6 +206,7 @@ local Utilities = {
 			DepthCells = 1,
 			Facing = { "North", "East", "South", "West" },
 			Cost = 120,
+			RequiredLevel = 5,
 			Description = "A classic ceiling fan to circulate air.",
 			Rules = { RequiresFloorUnderAllCells = true },
 			Tags = { "Utility", "HVAC", "Cool" },

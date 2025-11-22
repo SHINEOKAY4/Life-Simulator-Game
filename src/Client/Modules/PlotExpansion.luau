@@ -17,7 +17,7 @@ local Formatter = require(ReplicatedStorage.Shared.Utilities.Formatter)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
-local PlayerModule = require(Player.PlayerScripts:WaitForChild("PlayerModule"))
+local PlayerModule = require(Player.PlayerScripts:WaitForChild("PlayerModule")) :: any
 local Controls = PlayerModule:GetControls()
 
 local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")

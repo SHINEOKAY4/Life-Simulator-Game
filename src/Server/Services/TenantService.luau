@@ -12,17 +12,15 @@ local TenantDefinitions = require(ReplicatedStorage.Shared.Definitions.TenantDef
 local TenantTraits = require(ReplicatedStorage.Shared.Definitions.TenantTraits)
 local MailboxPackets = require(ReplicatedStorage.Network.MailboxPackets)
 local TenantPackets = require(ReplicatedStorage.Network.TenantPackets)
-local ReviewPackets = require(ReplicatedStorage.Network.ReviewPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
-local ChoreService = require(ServerScriptService.Server.Services.ChoreService)
-local WeatherService = require(ServerScriptService.Server.Services.WeatherService)
+local ReviewService = require(ServerScriptService.Server.Services.ReviewService)
+local TenantHelpService = require(ServerScriptService.Server.Services.TenantHelpService)
 local TenantValuation = require(ServerScriptService.Server.Modules.TenantValuation)
 local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
-local HttpService = game:GetService("HttpService")
 
 type ValuationResult = TenantValuation.ValuationResult
 
@@ -35,7 +33,6 @@ local UPDATE_INTERVAL = 1
 local INFINITE_LEASE_END = math.huge
 local MIN_VALUATION_RETRY_SECONDS = 5
 local MAX_VALUATION_RETRY_SECONDS = 90
-
 local rng = Random.new()
 
 export type TenantOffer = {
@@ -373,6 +370,26 @@ local function getActiveLeases(runtime: RuntimeState): { [string]: TenantLease }
 	return leases :: { [string]: TenantLease }
 end
 
+local function getRuntimeForPlayer(player: Player): RuntimeState?
+	return RuntimeByUserId[player.UserId]
+end
+
+local function getLeasesForPlayer(player: Player): { [string]: TenantLease }?
+	local runtime = getRuntimeForPlayer(player)
+	if not runtime then
+		return nil
+	end
+	return getActiveLeases(runtime)
+end
+
+local function addMailboxIncomeForPlayer(player: Player, amount: number)
+	local runtime = getRuntimeForPlayer(player)
+	if not runtime then
+		return
+	end
+	addMailboxIncome(runtime, amount)
+end
+
 local function unlinkResidentForTenant(runtime: RuntimeState, tenantId: string)
 	local player = runtime.Player
 	local residentName = ResidentService.GetResidentNameByTenantId(player, tenantId)
@@ -511,121 +528,9 @@ local function hydrateRuntime(player: Player): RuntimeState?
 			broadcastPropertyValue(runtime)
 		end
 	end)
+
+	TenantHelpService.RegisterPlayer(player)
 	return runtime
-end
-
-local function generateReview(runtime: RuntimeState, lease: TenantLease, reason: string)
-	-- Simple rating logic
-	local rating = math.random(3, 5)
-	if lease.MissedPayments > 0 then
-		rating = math.max(1, rating - 1)
-	end
-
-	-- Cleanliness impact
-	local trashCount = ChoreService.GetTrashCount(runtime.Player)
-	if trashCount > 0 then
-		-- 1 star penalty for every 2 pieces of trash, minimum 1 star penalty if any trash exists
-		local penalty = math.max(1, math.floor(trashCount / 2))
-		rating = math.max(1, rating - penalty)
-	end
-
-	-- Temperature impact
-	local plotState = PlotService.GetState(runtime.Player)
-	local totalTemp, roomCount = 0, 0
-	if plotState then
-		for level = 0, plotState.MaxFloorLevel do
-			for _, room in ipairs(plotState:GetRoomsForLevel(level)) do
-				if room.CellCount > 0 and room.InsulationScore > 0.2 then
-					totalTemp += room.CurrentTemperature
-					roomCount += 1
-				end
-			end
-		end
-	end
-
-	local avgTemp = if roomCount > 0 then totalTemp / roomCount else WeatherService.GetCurrentTemperature()
-	local tempConfig = TenantConfig.Temperature
-	local tempPenalty = 0
-	local tempComment = nil
-
-	if avgTemp < tempConfig.IdealMin then
-		if avgTemp < tempConfig.FreezingThreshold then
-			tempPenalty = 2
-			tempComment = "It's absolutely freezing in here! Turn on the heat!"
-		else
-			tempPenalty = 1
-			tempComment = "A bit too cold for my taste."
-		end
-	elseif avgTemp > tempConfig.IdealMax then
-		if avgTemp > tempConfig.OverheatThreshold then
-			tempPenalty = 2
-			tempComment = "It's like a sauna in here! Unbearable heat."
-		else
-			tempPenalty = 1
-			tempComment = "It's too hot inside. Do you have AC?"
-		end
-	end
-	rating = math.clamp(rating - tempPenalty, 1, 5)
-
-	if reason == "Evicted" then
-		rating = 1
-	end
-
-	local comments = {
-		[5] = {
-			"Loved living here! Everything was perfect.",
-			"Amazing place, highly recommend!",
-			"Best landlord ever.",
-			"So cozy and nice.",
-		},
-		[4] = { "Great place, would recommend.", "Nice and cozy.", "Good value for money.", "Pretty solid stay." },
-		[3] = { "It was okay. Nothing special.", "Decent place to stay.", "Could be better.", "Average experience." },
-		[2] = { "Had some issues, but it was cheap.", "Not the best experience.", "Needs improvement.", "Meh." },
-		[1] = {
-			"Terrible experience. Do not rent here.",
-			"Avoid at all costs.",
-			"Worst place ever.",
-			"I was kicked out!",
-		},
-	}
-
-	local pool = comments[rating] or comments[3]
-
-	if tempComment and rating <= 3 then
-		pool = { tempComment }
-	elseif trashCount > 0 and rating <= 3 then
-		local trashComments = {
-			"The place was a dump! Trash everywhere.",
-			"Disgusting. Garbage all over the floor.",
-			"I can't believe I lived in such filth.",
-			"Smelled terrible. Clean up your property!",
-		}
-		pool = trashComments
-	end
-
-	local comment = pool[rng:NextInteger(1, #pool)]
-
-	local review = {
-		Id = HttpService:GenerateGUID(false),
-		TenantName = lease.TenantName or "Unknown Tenant",
-		Rating = rating,
-		Comment = comment,
-		Timestamp = serverNow(),
-		Traits = lease.Traits or {},
-	}
-
-	local reviewState = PlayerSession.GetData(runtime.Player, "ReviewState")
-	if reviewState and reviewState.Reviews then
-		table.insert(reviewState.Reviews, 1, review)
-		-- Keep last 50 reviews
-		if #reviewState.Reviews > 50 then
-			table.remove(reviewState.Reviews)
-		end
-
-		ReviewPackets.NewReview:FireClient(runtime.Player, {
-			Review = review,
-		})
-	end
 end
 
 local function concludeLease(runtime: RuntimeState, tenantId: string, reason: string)
@@ -635,10 +540,11 @@ local function concludeLease(runtime: RuntimeState, tenantId: string, reason: st
 		return
 	end
 
-	generateReview(runtime, lease, reason)
+	ReviewService.RecordTenantReview(runtime.Player, lease, reason)
 
 	leases[tenantId] = nil
 	lease.LeaseEndUnix = serverNow()
+	TenantHelpService.RemoveRequestsForTenant(runtime.Player, tenantId, "TenantLeft")
 
 	unlinkResidentForTenant(runtime, tenantId)
 
@@ -781,7 +687,7 @@ local function serviceLeaseEntry(runtime: RuntimeState, lease: TenantLease, now:
 
 	-- Periodic Review Check
 	if lease.NextReviewUnix and now >= lease.NextReviewUnix then
-		generateReview(runtime, lease, "Periodic")
+		ReviewService.RecordTenantReview(runtime.Player, lease, "Periodic")
 		lease.NextReviewUnix = now + (lease.RentIntervalSeconds or RentConfig.IntervalSeconds) * 3
 	end
 end
@@ -1090,10 +996,29 @@ local function onPlayerRemoving(player: Player)
 	end
 	RuntimeByUserId[player.UserId] = nil
 	player:SetAttribute(INCOME_RATE_ATTRIBUTE_NAME, 0)
+	TenantHelpService.UnregisterPlayer(player)
 	clearMailboxAttribute(player)
 end
 
 function TenantService.Init()
+	TenantHelpService.Init({
+		GetActiveLeases = function(player: Player)
+			local leases = getLeasesForPlayer(player)
+			if not leases then
+				return nil
+			end
+			local simplified: { [string]: TenantHelpService.TenantLease } = {}
+			for tenantId, lease in pairs(leases) do
+				simplified[tenantId] = {
+					TenantId = lease.TenantId,
+					TenantName = lease.TenantName,
+				}
+			end
+			return simplified
+		end,
+		AddMailboxIncome = addMailboxIncomeForPlayer,
+	})
+
 	MailboxPackets.CollectRequest.OnServerInvoke = function(player: Player)
 		local runtime: RuntimeState? = RuntimeByUserId[player.UserId]
 		if not runtime then
@@ -1199,14 +1124,6 @@ function TenantService.Init()
 			Traits = lease.Traits or {},
 			Rating = 0,
 		}
-	end
-
-	ReviewPackets.GetReviewsRequest.OnServerInvoke = function(player: Player)
-		local reviewState = PlayerSession.GetData(player, "ReviewState")
-		if not reviewState or not reviewState.Reviews then
-			return {}
-		end
-		return reviewState.Reviews
 	end
 
 	Players.PlayerAdded:Connect(onPlayerAdded)

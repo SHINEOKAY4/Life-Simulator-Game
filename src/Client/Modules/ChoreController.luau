@@ -2,15 +2,74 @@
 -- Client/Modules/ChoreController.luau
 -- Handles visual representation and interaction for chores (messes).
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local ChorePackets = require(ReplicatedStorage.Network.ChorePackets)
 local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
+local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 
 local ChoreController = {}
 
 local ActiveChores: { [string]: Model | Part } = {}
+local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
+local rng = Random.new()
+local MAX_RESIDENT_RESOLVE_ATTEMPTS = 5
+
+local function getResidentsFolder(): Folder?
+	if not LocalPlayer then
+		return nil
+	end
+	local plotIndex = LocalPlayer:GetAttribute("OwnedPlotIndex")
+	if typeof(plotIndex) ~= "number" then
+		return nil
+	end
+	local plotModel = PlotFinder.FindPlot(plotIndex)
+	if not plotModel then
+		return nil
+	end
+	local residentsFolder = plotModel:FindFirstChild("Residents")
+	if residentsFolder and residentsFolder:IsA("Folder") then
+		return residentsFolder
+	end
+	return nil
+end
+
+local function findTenantModel(tenantName: string): Model?
+	local folder = getResidentsFolder()
+	if not folder then
+		return nil
+	end
+	local instance = folder:FindFirstChild(tenantName)
+	if instance and instance:IsA("Model") then
+		return instance
+	end
+	return nil
+end
+
+local function resolveTenantPosition(tenantName: string): Vector3?
+	local model = findTenantModel(tenantName)
+	if not model then
+		return nil
+	end
+	local primary = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")
+	local baseCFrame: CFrame? = nil
+	if primary and primary:IsA("BasePart") then
+		baseCFrame = primary.CFrame
+	else
+		local pivot = model:GetPivot()
+		if typeof(pivot) == "CFrame" then
+			baseCFrame = pivot
+		end
+	end
+	if not baseCFrame then
+		return nil
+	end
+	local backOffset = baseCFrame.LookVector * -2
+	local jitter = Vector3.new(rng:NextNumber(-1, 1), 0, rng:NextNumber(-1, 1))
+	return baseCFrame.Position + backOffset + jitter
+end
 
 local function createTrashVisual(position: Vector3): Model | BasePart
 	-- Try to find the TrashBag model
@@ -67,24 +126,36 @@ local function createTrashVisual(position: Vector3): Model | BasePart
 	return part
 end
 
-local function onChoreSpawned(payload: {
-	ChoreId: string,
-	Type: string,
-	Position: Vector3,
-	PlotIndex: number,
-	TargetId: string,
-})
+local function spawnTrashForPayload(
+	payload: {
+		ChoreId: string,
+		Type: string,
+		TenantName: string,
+		PlotIndex: number,
+	},
+	attempt: number
+)
 	if ActiveChores[payload.ChoreId] then
 		return
 	end
 
-	local visual: Model | BasePart
+	local position = resolveTenantPosition(payload.TenantName)
+	if not position then
+		if attempt < MAX_RESIDENT_RESOLVE_ATTEMPTS then
+			task.delay(0.75, function()
+				spawnTrashForPayload(payload, attempt + 1)
+			end)
+		else
+			warn("[ChoreController] Unable to resolve tenant position for", payload.TenantName)
+		end
+		return
+	end
 
+	local visual: Model | BasePart
 	if payload.Type == "Trash" then
-		visual = createTrashVisual(payload.Position)
+		visual = createTrashVisual(position)
 	else
-		-- Fallback
-		visual = createTrashVisual(payload.Position)
+		visual = createTrashVisual(position)
 		if visual:IsA("BasePart") then
 			visual.Color = Color3.fromRGB(255, 0, 0)
 		else
@@ -149,6 +220,16 @@ local function onChoreSpawned(payload: {
 	end)
 
 	ActiveChores[payload.ChoreId] = visual
+	return visual
+end
+
+local function onChoreSpawned(payload: {
+	ChoreId: string,
+	Type: string,
+	TenantName: string,
+	PlotIndex: number,
+})
+	spawnTrashForPayload(payload, 1)
 end
 
 local function onChoreRemoved(payload: { ChoreId: string, Reason: string })

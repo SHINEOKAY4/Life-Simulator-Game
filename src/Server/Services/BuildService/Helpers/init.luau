@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
+local ProgressionService = require(ServerScriptService.Server.Services.ProgressionService)
 local PlotStateModule = require(ServerScriptService.Server.Classes.PlotState)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
@@ -290,6 +291,18 @@ function Helpers.deductPlacementCost(player: Player, currencyState: CurrencyStat
 		return
 	end
 	CurrencyService.Remove(player, PRIMARY_CURRENCY_NAME, totalCost, currencyState)
+end
+
+function Helpers.ensurePlacementUnlocked(
+	player: Player,
+	itemSpec: { [string]: any }?,
+	itemId: string?
+): (boolean, string?)
+	return ProgressionService.CanPlaceItem(player, itemSpec, itemId)
+end
+
+function Helpers.rewardPlacementProgress(player: Player, itemSpec: { [string]: any }?, quantity: number?)
+	ProgressionService.RecordBuildPlacement(player, itemSpec, quantity)
 end
 
 return Helpers

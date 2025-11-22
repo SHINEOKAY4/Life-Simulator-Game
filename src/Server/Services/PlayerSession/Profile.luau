@@ -5,14 +5,19 @@
 local Profile = {
 	PlotState = {},
 	HouseholdState = {
-		ResidentsCount = 0,
-		MaxResidents = 4, -- Default max residents per player; can be increased via in-game purchases later
-		Residents = {}, -- {name, traits, needs}
+		TenantsCount = 0,
+		MaxTenants = 4, -- Default max tenants per player; can be increased via in-game purchases later
+		Tenants = {}, -- {name, traits, needs}
 	},
 	CurrencyState = {
 		-- CurrencyName: Balance
 		Cash = 0,
 		OutstandingBalance = 0,
+	},
+	ProgressionState = {
+		Level = 1,
+		Experience = 0,
+		UnlockedItems = {},
 	},
 	TenantState = {
 		Version = 1,

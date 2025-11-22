@@ -35,6 +35,11 @@ local function PlaceRoofArea(player: Player, payload: Payload): (boolean, string
 		return false, "Invalid item ID"
 	end
 
+	local unlocked, lockReason = Helpers.ensurePlacementUnlocked(player, itemData, itemId)
+	if not unlocked then
+		return false, lockReason or "Level up to unlock this roof"
+	end
+
 	if itemData.PlacementType ~= "Roof" then
 		return false, "Area placement only supports roof items"
 	end
@@ -106,6 +111,7 @@ local function PlaceRoofArea(player: Player, payload: Payload): (boolean, string
 
 	Helpers.sendPlacementDelta(player, "Placed", itemId, minCellX, minCellZ, facing, metadata, level)
 	Helpers.deductPlacementCost(player, currencyState, totalCost)
+	Helpers.rewardPlacementProgress(player, itemData, totalCells)
 
 	return true, "Roof placed"
 end

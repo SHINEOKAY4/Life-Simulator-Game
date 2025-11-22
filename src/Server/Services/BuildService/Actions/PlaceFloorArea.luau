@@ -36,6 +36,11 @@ local function PlaceFloorArea(player: Player, payload: Payload): (boolean, strin
 		return false, "Invalid item ID"
 	end
 
+	local unlocked, lockReason = Helpers.ensurePlacementUnlocked(player, itemData, itemId)
+	if not unlocked then
+		return false, lockReason or "Level up to unlock this floor type"
+	end
+
 	if itemData.PlacementType ~= "Floor" then
 		return false, "Box placement only supports floor items"
 	end
@@ -113,6 +118,7 @@ local function PlaceFloorArea(player: Player, payload: Payload): (boolean, strin
 
 	Helpers.sendPlacementDelta(player, "Placed", itemId, minCellX, minCellZ, facing, metadata, level)
 	Helpers.deductPlacementCost(player, currencyState, totalCost)
+	Helpers.rewardPlacementProgress(player, itemData, totalCells)
 
 	return true, "Floors placed"
 end

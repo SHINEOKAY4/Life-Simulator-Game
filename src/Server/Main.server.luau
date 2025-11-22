@@ -5,13 +5,16 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local ServerFolder = ServerScriptService.Server
 local ServicesFolder = ServerFolder.Services
+local ModulesFolder = ServerFolder.Modules
 
 local PlayerSession = require(ServicesFolder.PlayerSession)
+local ProgressionService = require(ServicesFolder.ProgressionService)
 local PlotService = require(ServicesFolder.PlotService)
 local BuildService = require(ServicesFolder.BuildService)
 local ResidentService = require(ServicesFolder.ResidentService)
 local WorldEventService = require(ServicesFolder.WorldEventService)
 local BillingService = require(ServicesFolder.BillingService)
+local ReviewService = require(ServicesFolder.ReviewService)
 local TenantService = require(ServicesFolder.TenantService)
 local TenantProspectService = require(ServicesFolder.TenantProspectService)
 local TutorialService = require(ServicesFolder.TutorialService)
@@ -20,12 +23,15 @@ local TipsService = require(ServicesFolder.TipsService)
 local UtilityService = require(ServicesFolder.UtilityService)
 local TemperatureService = require(ServicesFolder.TemperatureService)
 local WeatherService = require(ServicesFolder.WeatherService)
+local TrashManager = require(ModulesFolder.Chores.TrashManager)
 
+ProgressionService.Init()
 ResidentService.Init()
 BillingService.Init()
 WorldEventService.Init()
 PlotService.Init()
 BuildService.Init()
+ReviewService.Init()
 TenantService.Init()
 TenantProspectService.Init()
 TutorialService.Init()
@@ -34,6 +40,7 @@ TipsService.Init()
 UtilityService.Init()
 TemperatureService.Init()
 WeatherService.Start()
+TrashManager.Start()
 
 -- Ensure power state is recalculated whenever a plot finishes loading
 PlotService.PlotClaimed:Connect(function(player)

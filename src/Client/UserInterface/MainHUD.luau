@@ -85,6 +85,11 @@ local ReviewsButton = BottomRight:WaitForChild("ReviewsButton") :: TextButton
 local BillImageFrame = BillsButton:WaitForChild("Image") :: Frame
 local TimeTextFrame = BillImageFrame:WaitForChild("TimeTextFrame") :: Frame
 local TimeTextLabel = TimeTextFrame:WaitForChild("TimeTextLabel") :: TextLabel
+local ProgressionBar = MainHUDGui:WaitForChild("ProgressionBar") :: Frame
+local ProgressionForeground = ProgressionBar:WaitForChild("Foreground") :: Frame
+local ProgressionBarFill = ProgressionForeground:WaitForChild("Bar") :: Frame
+local XPLabel = ProgressionBar:WaitForChild("XPLabel") :: TextLabel
+local LevelLabel = ProgressionBar:WaitForChild("LevelLabel") :: TextLabel
 
 local INCOME_RATE_ATTRIBUTE_NAME = "TenantIncomePerSecond"
 
@@ -154,6 +159,12 @@ local CASH_DEDUCTION_STYLE: PopupStyle = {
 }
 
 local MIN_INCOME_DISPLAY = 0.01
+local XP_TWEEN_INFO = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local XP_NUMBER_FORMAT = {
+	decimalPlaces = 0,
+	useCommas = true,
+}
+local xpTween: Tween? = nil
 
 local function formatIncomePerSecond(amount: number): string
 	if typeof(amount) ~= "number" or amount ~= amount then
@@ -171,6 +182,43 @@ local function formatIncomePerSecond(amount: number): string
 		decimalPlaces = 2,
 	})
 	return string.format("+%s/sec", formatted)
+end
+
+local function formatXpValue(value: number): string
+	return Formatter.formatNumber(value, XP_NUMBER_FORMAT)
+end
+
+local function updateProgressionDisplay()
+	local levelAttr = Player:GetAttribute("PlayerLevel")
+	local xpIntoAttr = Player:GetAttribute("PlayerXPIntoLevel")
+	local xpForNextAttr = Player:GetAttribute("PlayerXPForNext")
+
+	local level = if typeof(levelAttr) == "number" then math.max(1, math.floor(levelAttr + 0.5)) else 1
+	local xpIntoLevel = if typeof(xpIntoAttr) == "number" then math.max(0, xpIntoAttr) else 0
+	local xpForNext = if typeof(xpForNextAttr) == "number" then math.max(0, xpForNextAttr) else 0
+	local isMaxLevel = xpForNext <= 0
+
+	LevelLabel.Text = string.format("Lvl %d", level)
+	if isMaxLevel then
+		XPLabel.Text = formatXpValue(xpIntoLevel) .. " XP"
+	else
+		XPLabel.Text = string.format("%s/%s", formatXpValue(xpIntoLevel), formatXpValue(xpForNext))
+	end
+
+	local targetRatio = if isMaxLevel then 1 else math.clamp(xpIntoLevel / math.max(xpForNext, 1), 0, 1)
+	local targetSize = UDim2.fromScale(targetRatio, 1)
+	if xpTween then
+		xpTween:Cancel()
+		xpTween = nil
+	end
+	if ProgressionBarFill.Size == targetSize then
+		return
+	end
+	local tween = TweenService:Create(ProgressionBarFill, XP_TWEEN_INFO, {
+		Size = targetSize,
+	})
+	xpTween = tween
+	tween:Play()
 end
 
 local function updateIncomePerSecondLabel()
@@ -823,6 +871,16 @@ function MainHUD.Init()
 		end
 		lastCash = newValue
 	end)
+
+	updateProgressionDisplay()
+	local progressionAttributes = {
+		"PlayerXPIntoLevel",
+		"PlayerXPForNext",
+		"PlayerLevel",
+	}
+	for _, attributeName in ipairs(progressionAttributes) do
+		Player:GetAttributeChangedSignal(attributeName):Connect(updateProgressionDisplay)
+	end
 
 	for _, button in ipairs({ BuildButton, BillsButton, ExpandButton, ReviewsButton }) do
 		configureButtonVisuals(button)
