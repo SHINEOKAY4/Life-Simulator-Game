@@ -21,10 +21,6 @@ local ResidentToTenantMap: { [number]: { [string]: string } } = {} -- [userId][r
 
 ResidentService.PlayerResidentsChanged = GoodSignal.new()
 
-local Config = {
-	MaxTenantsPerHousehold = 8,
-}
-
 local function ensureTenantMaps(userId: number)
 	if not TenantToResidentMap[userId] then
 		TenantToResidentMap[userId] = {}
@@ -147,7 +143,6 @@ local function ensureHouseholdState(player: Player, data: any?)
 
 	data.Tenants = data.Tenants or {}
 	data.TenantsCount = data.TenantsCount or #data.Tenants
-	data.MaxTenants = data.MaxTenants or Config.MaxTenantsPerHousehold
 
 	return data
 end
@@ -274,11 +269,6 @@ function ResidentService.CreateResident(player: Player, residentData: ResidentDa
 	PlayersResidents[player.UserId] = PlayersResidents[player.UserId] or {}
 	NameToIndexMap[player.UserId] = NameToIndexMap[player.UserId] or {}
 
-	local maxGlobalTenantsPerHousehold = Config.MaxTenantsPerHousehold
-	data.MaxTenants = math.clamp(data.MaxTenants or maxGlobalTenantsPerHousehold, 1, maxGlobalTenantsPerHousehold)
-	if data.TenantsCount + 1 > data.MaxTenants then
-		return false, "Maximum number of residents reached."
-	end
 	-- Basic validation
 	if typeof(residentData) ~= "table" then
 		return false, "Invalid data format."

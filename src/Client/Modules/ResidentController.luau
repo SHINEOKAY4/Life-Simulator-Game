@@ -10,6 +10,7 @@ local ClientResidentPlacer = require(script.Parent.ClientResidentPlacer)
 local ClientResidentMovement = require(script.Parent.ClientResidentMovement)
 local ResidentReactions = require(script.Parent.ResidentReactions)
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
+local TenantRoomTracker = require(script.Parent.TenantRoomTracker)
 
 local ResidentController = {}
 
@@ -144,6 +145,16 @@ local function restrictTargetToUnlocked(userId: number?, desiredWorld: Vector3):
 end
 
 local function computeWanderTarget(state: ResidentState, origin: Vector3): Vector3
+	if state.OwnerUserId == LOCAL_USER_ID then
+		local tenantId = state.Data and state.Data.TenantId
+		if type(tenantId) == "string" and tenantId ~= "" then
+			local roomTarget = TenantRoomTracker.GetRandomTargetForTenant(tenantId)
+			if roomTarget then
+				return roomTarget
+			end
+		end
+	end
+
 	local randomOffset = Vector3.new(math.random(-15, 15), 0, math.random(-15, 15))
 	local desired = origin + randomOffset
 	local restricted = restrictTargetToUnlocked(state.OwnerUserId, desired)
@@ -307,6 +318,8 @@ local function onResidentsSync(payload: any)
 end
 
 function ResidentController.Init()
+	TenantRoomTracker.Init()
+
 	ResidentsPackets.PlayerResidentDelta.OnClientEvent:Connect(function(payload)
 		onResidentDelta(payload.UserId, payload.ResidentName, payload.ResidentDelta)
 	end)

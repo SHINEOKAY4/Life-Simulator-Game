@@ -46,6 +46,9 @@ PlacementPackets.PlotStateSync = Packet("PlotStateSync", {
 	},
 })
 
+PlacementPackets.RenamePlotRequest =
+	Packet("RenamePlotRequest", Packet.StringLong):Response(Packet.Boolean8, Packet.StringLong, Packet.StringLong)
+
 -- [[ Build Packets ]]
 
 PlacementPackets.PlaceRequest = Packet("PlaceRequest", {

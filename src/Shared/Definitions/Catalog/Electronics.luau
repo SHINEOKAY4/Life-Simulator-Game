@@ -32,11 +32,6 @@ local Electronics = {
 			Tags = { "Entertainment", "WallMounted", "Electronics" },
 			ModelPath = { "Electronics", "FlatScreenTV" },
 			AssetId = 0,
-			StationEffects = {
-				Effects = {
-					Facing = { "North", "East", "South", "West", "NorthEast", "NorthWest", "SouthEast", "SouthWest" },
-				},
-			},
 		},
 	},
 }

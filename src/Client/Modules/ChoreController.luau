@@ -5,14 +5,25 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
 
 local ChorePackets = require(ReplicatedStorage.Network.ChorePackets)
 local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local RepairVFX = require(script.Parent.RepairVFX)
+local RepairConfig = require(ReplicatedStorage.Shared.Configurations.RepairConfig)
 
 local ChoreController = {}
 
-local ActiveChores: { [string]: Model | Part } = {}
+type ChoreVisual = {
+	Type: string,
+	Instance: Instance?,
+	Prompt: ProximityPrompt?,
+	Cleanup: (() -> ())?,
+	Metadata: { [string]: any }?,
+}
+
+local ActiveChores: { [string]: ChoreVisual } = {}
 local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
 local rng = Random.new()
 local MAX_RESIDENT_RESOLVE_ATTEMPTS = 5
@@ -42,6 +53,36 @@ local function findTenantModel(tenantName: string): Model?
 		return nil
 	end
 	local instance = folder:FindFirstChild(tenantName)
+	if instance and instance:IsA("Model") then
+		return instance
+	end
+	return nil
+end
+
+local function getPlotContainer(): Instance?
+	if not LocalPlayer then
+		return nil
+	end
+	local plotIndex = LocalPlayer:GetAttribute("OwnedPlotIndex")
+	if typeof(plotIndex) ~= "number" then
+		return nil
+	end
+	local plotModel = PlotFinder.FindPlot(plotIndex)
+	if not plotModel then
+		return nil
+	end
+	return plotModel:FindFirstChild("Container")
+end
+
+local function getPlacementModel(placementKey: string?): Model?
+	if typeof(placementKey) ~= "string" or placementKey == "" then
+		return nil
+	end
+	local container = getPlotContainer()
+	if not container then
+		return nil
+	end
+	local instance = container:FindFirstChild(placementKey)
 	if instance and instance:IsA("Model") then
 		return instance
 	end
@@ -132,6 +173,7 @@ local function spawnTrashForPayload(
 		Type: string,
 		TenantName: string,
 		PlotIndex: number,
+		Metadata: { [string]: any }?,
 	},
 	attempt: number
 )
@@ -139,7 +181,8 @@ local function spawnTrashForPayload(
 		return
 	end
 
-	local position = resolveTenantPosition(payload.TenantName)
+	local metadata = payload.Metadata
+	local position = metadata and metadata.WorldPosition or resolveTenantPosition(payload.TenantName)
 	if not position then
 		if attempt < MAX_RESIDENT_RESOLVE_ATTEMPTS then
 			task.delay(0.75, function()
@@ -167,7 +210,7 @@ local function spawnTrashForPayload(
 		end
 	end
 
-	visual.Parent = workspace
+	visual.Parent = Workspace
 
 	-- Add Prompt
 	local prompt = Instance.new("ProximityPrompt")
@@ -219,8 +262,102 @@ local function spawnTrashForPayload(
 		end
 	end)
 
-	ActiveChores[payload.ChoreId] = visual
+	ActiveChores[payload.ChoreId] = {
+		Type = payload.Type,
+		Instance = visual,
+		Prompt = prompt,
+		Metadata = metadata,
+	}
 	return visual
+end
+
+local function spawnRepairChore(
+	payload: {
+		ChoreId: string,
+		Type: string,
+		Metadata: { [string]: any }?,
+	},
+	attempt: number
+)
+	if ActiveChores[payload.ChoreId] then
+		return
+	end
+
+	local metadata = payload.Metadata or {}
+	local model = getPlacementModel(metadata.PlacementKey)
+	if not model then
+		if attempt < MAX_RESIDENT_RESOLVE_ATTEMPTS then
+			task.delay(0.75, function()
+				spawnRepairChore(payload, attempt + 1)
+			end)
+		else
+			warn("[ChoreController] Unable to resolve broken object for", metadata.PlacementKey)
+		end
+		return
+	end
+
+	local severity = math.clamp((metadata.Severity or 0.5), 0.1, 1)
+	local cleanupEffects = RepairVFX.Attach(model, {
+		Severity = severity,
+		WorldPosition = metadata.WorldPosition,
+		VisualSeed = metadata.VisualSeed,
+	})
+
+	local promptParent: BasePart? = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+	local anchor: Part? = nil
+	if not promptParent and metadata.WorldPosition then
+		anchor = Instance.new("Part")
+		anchor.Anchored = true
+		anchor.CanCollide = false
+		anchor.CanQuery = false
+		anchor.Transparency = 1
+		anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+		anchor.Position = metadata.WorldPosition
+		anchor.Parent = Workspace
+		promptParent = anchor
+	end
+
+	if not promptParent then
+		cleanupEffects()
+		return
+	end
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Repair"
+	prompt.ObjectText = metadata.ItemName or "Broken Item"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
+	prompt.HoldDuration = metadata.PromptHoldSeconds or RepairConfig.DefaultProfile.PromptHoldSeconds
+	prompt.MaxActivationDistance = 8 + severity * 2
+	prompt.RequiresLineOfSight = false
+	prompt.Style = Enum.ProximityPromptStyle.Custom
+	prompt.Parent = promptParent
+
+	MinimalPromptUI.Attach(prompt)
+
+	prompt.Triggered:Connect(function()
+		prompt.Enabled = false
+		local success, msg = ChorePackets.CompleteChore:Fire(payload.ChoreId)
+		if success then
+			RepairVFX.PlayRepairComplete(model, metadata.WorldPosition)
+		else
+			prompt.Enabled = true
+			warn("Failed to repair:", msg)
+		end
+	end)
+
+	ActiveChores[payload.ChoreId] = {
+		Type = payload.Type,
+		Instance = model,
+		Prompt = prompt,
+		Cleanup = function()
+			cleanupEffects()
+			if anchor then
+				anchor:Destroy()
+			end
+		end,
+		Metadata = metadata,
+	}
 end
 
 local function onChoreSpawned(payload: {
@@ -228,19 +365,40 @@ local function onChoreSpawned(payload: {
 	Type: string,
 	TenantName: string,
 	PlotIndex: number,
+	Metadata: { [string]: any }?,
 })
-	spawnTrashForPayload(payload, 1)
+	if payload.Type == "Repair" then
+		spawnRepairChore(payload, 1)
+	else
+		spawnTrashForPayload(payload, 1)
+	end
 end
 
 local function onChoreRemoved(payload: { ChoreId: string, Reason: string })
-	local visual = ActiveChores[payload.ChoreId]
-	if visual then
+	local record = ActiveChores[payload.ChoreId]
+	if not record then
+		return
+	end
+
+	ActiveChores[payload.ChoreId] = nil
+
+	if record.Cleanup then
+		record.Cleanup()
+	end
+
+	if record.Prompt then
+		record.Prompt:Destroy()
+	end
+
+	local visual = record.Instance
+	if visual and record.Type ~= "Repair" then
 		if visual:IsA("BasePart") then
-			-- Fade out effect
 			local tween = TweenService:Create(visual, TweenInfo.new(0.3), { Transparency = 1 })
 			tween:Play()
 			task.delay(0.3, function()
-				visual:Destroy()
+				if visual.Parent then
+					visual:Destroy()
+				end
 			end)
 		elseif visual:IsA("Model") then
 			for _, child in ipairs(visual:GetDescendants()) do
@@ -250,30 +408,46 @@ local function onChoreRemoved(payload: { ChoreId: string, Reason: string })
 				end
 			end
 			task.delay(0.3, function()
-				visual:Destroy()
+				if visual.Parent then
+					visual:Destroy()
+				end
 			end)
 		else
 			visual:Destroy()
 		end
-		ActiveChores[payload.ChoreId] = nil
 	end
 end
 
 function ChoreController.GetNearbyChores(position: Vector3, radius: number): { { Type: string, Position: Vector3 } }
 	local found = {}
-	for _, visual in pairs(ActiveChores) do
-		if visual:IsA("Model") or visual:IsA("BasePart") then
-			local chorePos = if visual:IsA("Model")
-				then (visual.PrimaryPart and visual.PrimaryPart.Position or visual:GetPivot().Position)
-				else visual.Position
-			if (chorePos - position).Magnitude <= radius then
-				-- Determine type based on name or other props (simplified for now)
-				local choreType = "Trash" -- Default
-				if visual.Name:find("Trash") then
-					choreType = "Trash"
+	for _, entry in pairs(ActiveChores) do
+		local visual = entry.Instance
+		local chorePos: Vector3? = nil
+		if visual then
+			if visual:IsA("Model") then
+				local primary = visual.PrimaryPart
+				if primary then
+					chorePos = primary.Position
+				else
+					local ok, pivot = pcall(function()
+						return visual:GetPivot()
+					end)
+					if ok and typeof(pivot) == "CFrame" then
+						chorePos = pivot.Position
+					end
 				end
-				table.insert(found, { Type = choreType, Position = chorePos })
+			elseif visual:IsA("BasePart") then
+				chorePos = visual.Position
 			end
+		end
+		if not chorePos and entry.Metadata then
+			local worldPosition = entry.Metadata.WorldPosition
+			if typeof(worldPosition) == "Vector3" then
+				chorePos = worldPosition
+			end
+		end
+		if chorePos and (chorePos - position).Magnitude <= radius then
+			table.insert(found, { Type = entry.Type or "Trash", Position = chorePos })
 		end
 	end
 	return found

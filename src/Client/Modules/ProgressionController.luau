@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ProgressionPackets = require(ReplicatedStorage.Network.ProgressionPackets)
+local ExperienceVFX = require(script.Parent.ExperienceVFX)
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -50,6 +51,8 @@ local function onProgressionUpdate(payload: any)
 		return
 	end
 
+	local previousExperience = state.ExperienceTotal
+
 	state.Level = payload.Level or state.Level
 	state.ExperienceTotal = payload.ExperienceTotal or state.ExperienceTotal
 	state.ExperienceIntoLevel = payload.ExperienceIntoLevel or state.ExperienceIntoLevel
@@ -57,6 +60,13 @@ local function onProgressionUpdate(payload: any)
 	setAttributes(state)
 
 	cacheUnlockIds(payload.UnlockedItemIds)
+
+	local xpDelta = if typeof(payload.Delta) == "number"
+		then payload.Delta
+		else state.ExperienceTotal - previousExperience
+	if xpDelta and xpDelta > 0 then
+		ExperienceVFX.PlayExperienceGain(xpDelta, payload.Reason)
+	end
 end
 
 function ProgressionController.GetLevel(): number

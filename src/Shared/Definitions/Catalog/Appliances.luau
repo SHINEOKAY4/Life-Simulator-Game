@@ -22,12 +22,6 @@ local Appliances = {
 			RequiresPower = true,
 			MaxConnections = 1,
 			EnergyConsumptionPerHour = 15,
-			StationEffects = {
-				DurationSeconds = 120,
-				Effects = {
-					{ Need = "Fun", RatePerHour = 15 },
-				},
-			},
 			EffectSummary = {
 				"Lets residents game, browse, or chat for fun.",
 				"Seats one player and hums softly while it runs.",
@@ -63,12 +57,6 @@ local Appliances = {
 			RequiresPower = true,
 			MaxConnections = 1,
 			EnergyConsumptionPerHour = 20,
-			StationEffects = {
-				DurationSeconds = 90,
-				Effects = {
-					{ Need = "Fun", RatePerHour = 20 },
-				},
-			},
 			EffectSummary = {
 				"Provides hours of entertainment with shows and movies.",
 				"Seats two players for shared viewing experiences.",
@@ -122,9 +110,6 @@ local Appliances = {
 			Tags = { "Comfort", "Appliance" },
 			ModelPath = { "Furnitures", "Stove" },
 			AssetId = 84035900564492,
-			StationEffects = {
-				DurationSeconds = 22,
-			},
 			EffectSummary = {
 				"Fires up fast for quick weekday meals.",
 				"Fills the kitchen with the smell of fresh cooking.",

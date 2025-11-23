@@ -8,6 +8,125 @@ local WeatherService = require(ServerScriptService.Server.Services.WeatherServic
 
 local Rooms = {}
 
+local REQUIRED_ROOM_DIM = 5
+local REQUIRED_ROOM_CELLS = REQUIRED_ROOM_DIM * REQUIRED_ROOM_DIM
+local DEFAULT_TENANT_CAPACITY_PER_ROOM = 1 -- Base occupants per tenant-ready room (gamepasses can override per player)
+
+local function hasTag(spec: { [string]: any }?, targetTag: string): boolean
+	if not spec then
+		return false
+	end
+	local tags = spec.Tags
+	if typeof(tags) ~= "table" then
+		return false
+	end
+	for _, tagName in ipairs(tags) do
+		if tagName == targetTag then
+			return true
+		end
+	end
+	return false
+end
+
+local function computeRoomKey(level: number, minX: number, minZ: number): string
+	return ("%d:%d:%d"):format(level, minX, minZ)
+end
+
+local function meetsMinimumRoomSize(room: any): boolean
+	local width = room.MaxX - room.MinX + 1
+	local depth = room.MaxZ - room.MinZ + 1
+	return width >= REQUIRED_ROOM_DIM and depth >= REQUIRED_ROOM_DIM and room.CellCount >= REQUIRED_ROOM_CELLS
+end
+
+type BedPlacement = {
+	PrimaryIndex: number?,
+	Indices: { number },
+}
+
+local function collectBedPlacements(self: any, level: number): { BedPlacement }
+	local placements: { BedPlacement } = {}
+	for _, objectData in pairs(self.Save.PlacedObjects) do
+		if self:NormalizeLevel(objectData.yLevel) ~= level then
+			continue
+		end
+		local spec = ItemFinder.FindItemById(objectData.id)
+		if not hasTag(spec, "Bed") then
+			continue
+		end
+		local metadata = objectData.Metadata
+		local width = if metadata
+				and typeof(metadata.WidthCells) == "number"
+				and metadata.WidthCells > 0
+			then metadata.WidthCells
+			else (spec and (spec.WidthCells or spec.Width)) or 1
+		local depth = if metadata
+				and typeof(metadata.DepthCells) == "number"
+				and metadata.DepthCells > 0
+			then metadata.DepthCells
+			else (spec and (spec.DepthCells or spec.Depth)) or 1
+		width = math.max(1, math.floor(width + 0.5))
+		depth = math.max(1, math.floor(depth + 0.5))
+		local facing = objectData.facing or "North"
+		local indices = self.Grid:FootprintCells(objectData.cellX, objectData.cellZ, width, depth, facing)
+		if #indices > 0 then
+			placements[#placements + 1] = {
+				PrimaryIndex = indices[1],
+				Indices = indices,
+			}
+		end
+	end
+	return placements
+end
+
+local function buildBedCountsForRooms(
+	bedPlacements: { BedPlacement },
+	cellMap: { [number]: Room }
+): { [number]: number }
+	local counts: { [number]: number } = {}
+	for _, placement in ipairs(bedPlacements) do
+		local room = nil
+		if placement.PrimaryIndex then
+			room = cellMap[placement.PrimaryIndex]
+		end
+		if not room then
+			for _, cellIndex in ipairs(placement.Indices) do
+				room = cellMap[cellIndex]
+				if room then
+					break
+				end
+			end
+		end
+		if room then
+			local roomId = room.Id
+			counts[roomId] = (counts[roomId] or 0) + 1
+		end
+	end
+	return counts
+end
+
+local function isPerimeterEnclosed(
+	self: any,
+	room: any,
+	horizontalEdges: { [number]: boolean },
+	verticalEdges: { [number]: boolean }
+): boolean
+	for x = room.MinX, room.MaxX do
+		local northIdx = self:HorizontalEdgeIndex(x, room.MinZ)
+		local southIdx = self:HorizontalEdgeIndex(x, room.MaxZ + 1)
+		if horizontalEdges[northIdx] ~= false or horizontalEdges[southIdx] ~= false then
+			return false
+		end
+	end
+	for z = room.MinZ, room.MaxZ do
+		local westIdx = self:VerticalEdgeIndex(room.MinX, z)
+		local eastIdx = self:VerticalEdgeIndex(room.MaxX + 1, z)
+		if verticalEdges[westIdx] ~= false or verticalEdges[eastIdx] ~= false then
+			return false
+		end
+	end
+	return true
+end
+
 export type Room = {
 	Id: number,
 	Level: number,
@@ -17,6 +136,9 @@ export type Room = {
 	MinZ: number,
 	MaxX: number,
 	MaxZ: number,
+	WidthCells: number,
+	DepthCells: number,
+	RoomKey: string,
 	InsulationScore: number,
 	HeatingPower: number,
 	CoolingPower: number,
@@ -25,7 +147,25 @@ export type Room = {
 	ThermostatTarget: number?,
 	CurrentTemperature: number,
 	LightingScore: number,
+	HasBed: boolean,
+	BedCount: number,
+	IsEnclosed: boolean,
+	IsTenantRoom: boolean,
+	TenantCapacity: number,
 }
+
+local function calculateRoomCapacity(room: Room): number
+	local limitingDim = math.min(room.WidthCells, room.DepthCells)
+	if limitingDim < REQUIRED_ROOM_DIM then
+		return 0
+	end
+	local segments = math.floor(limitingDim / REQUIRED_ROOM_DIM)
+	if segments <= 0 then
+		return 0
+	end
+	-- Each 5-cell band on the limiting axis allows two tenants (two beds).
+	return segments * 2
+end
 
 type RoomCacheEntry = {
 	Rooms: { Room },
@@ -225,6 +365,7 @@ function Rooms.attach(PlotState: any)
 		local floorFilled = self:GetFloorFilledForLevel(level)
 		local horizontalEdges = self:GetEdgeFreeHorizontalForLevel(level)
 		local verticalEdges = self:GetEdgeFreeVerticalForLevel(level)
+		local bedPlacements = collectBedPlacements(self, level)
 
 		local visited = table.create(columns * rows, false)
 		local rooms = {}
@@ -290,6 +431,9 @@ function Rooms.attach(PlotState: any)
 					MaxX = x,
 					MinZ = z,
 					MaxZ = z,
+					WidthCells = 0,
+					DepthCells = 0,
+					RoomKey = "",
 					InsulationScore = 0,
 					HeatingPower = 0,
 					CoolingPower = 0,
@@ -298,6 +442,11 @@ function Rooms.attach(PlotState: any)
 					HeaterTarget = nil,
 					CoolerTarget = nil,
 					ThermostatTarget = nil,
+					HasBed = false,
+					BedCount = 0,
+					IsEnclosed = false,
+					IsTenantRoom = false,
+					TenantCapacity = 0,
 				}
 
 				local totalHeatLoss = 0
@@ -482,7 +631,32 @@ function Rooms.attach(PlotState: any)
 				end
 
 				currentRoom.InsulationScore = totalHeatLoss
+				local widthCells = currentRoom.MaxX - currentRoom.MinX + 1
+				local depthCells = currentRoom.MaxZ - currentRoom.MinZ + 1
+				currentRoom.WidthCells = widthCells
+				currentRoom.DepthCells = depthCells
+				currentRoom.RoomKey = computeRoomKey(level, currentRoom.MinX, currentRoom.MinZ)
+				currentRoom.IsEnclosed = isPerimeterEnclosed(self, currentRoom, horizontalEdges, verticalEdges)
 				table.insert(rooms, currentRoom)
+			end
+		end
+
+		local bedCountsByRoom = buildBedCountsForRooms(bedPlacements, cellMap)
+		for _, room in ipairs(rooms) do
+			room.BedCount = bedCountsByRoom[room.Id] or 0
+			room.HasBed = room.BedCount > 0
+			local meetsMinimum = meetsMinimumRoomSize(room)
+			room.IsTenantRoom = meetsMinimum and room.HasBed and room.IsEnclosed
+			if room.IsTenantRoom then
+				local sizeCapacity = calculateRoomCapacity(room)
+				if sizeCapacity > 0 and room.BedCount > 0 then
+					local bedLimitedCapacity = math.min(sizeCapacity, room.BedCount)
+					room.TenantCapacity = math.min(bedLimitedCapacity, DEFAULT_TENANT_CAPACITY_PER_ROOM)
+				else
+					room.TenantCapacity = 0
+				end
+			else
+				room.TenantCapacity = 0
 			end
 		end
 

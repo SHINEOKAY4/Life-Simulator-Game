@@ -250,23 +250,26 @@ function PlotExpansion.Show()
 
 	if plotModel then
 		local cf, size = plotModel:GetBoundingBox()
-		local height = math.max(size.X, size.Z) * 0.4 -- Reduced height multiplier
-		local targetPos = cf.Position + Vector3.new(-8, height, 0)
+		local height = math.max(size.X, size.Z) * 0.48
+		local targetPos = cf.Position + Vector3.new(-4, height, 0)
 
 		-- Determine orientation based on Spawn part
 		local spawnPart = plotModel:FindFirstChild("Spawn")
 		local upVector = Vector3.new(0, 0, -1) -- Default North
 
 		if spawnPart and spawnPart:IsA("BasePart") then
-			-- Calculate direction from Spawn to Center
-			local dir = (cf.Position - spawnPart.Position) * Vector3.new(1, 0, 1) -- Flatten Y
+			local dir = (cf.Position - spawnPart.Position) * Vector3.new(1, 0, 1)
 			if dir.Magnitude > 0.1 then
-				-- Use this direction as the "Up" vector for the camera so Spawn is at the bottom
 				upVector = dir.Unit
 			end
 		end
 
-		targetCFrame = CFrame.lookAt(targetPos, cf.Position, upVector)
+		-- Build base camera CFrame
+		local baseCFrame = CFrame.lookAt(targetPos, cf.Position, upVector)
+
+		-- Shift camera position upward in screen space (local Y-axis)
+		local screenOffsetY = 8 -- Adjust this value to move camera up/down in 2D view
+		targetCFrame = baseCFrame * CFrame.new(0, screenOffsetY, 0)
 
 		if targetCFrame then
 			local tween = TweenService:Create(

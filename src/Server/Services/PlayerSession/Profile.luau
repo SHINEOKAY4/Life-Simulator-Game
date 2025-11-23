@@ -6,7 +6,6 @@ local Profile = {
 	PlotState = {},
 	HouseholdState = {
 		TenantsCount = 0,
-		MaxTenants = 4, -- Default max tenants per player; can be increased via in-game purchases later
 		Tenants = {}, -- {name, traits, needs}
 	},
 	CurrencyState = {

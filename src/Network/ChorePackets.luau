@@ -11,6 +11,7 @@ ChorePackets.ChoreSpawned = Packet("ChoreSpawned", {
 	Type = Packet.String, -- "Trash", "Puddle", "BrokenItem"
 	TenantName = Packet.String,
 	PlotIndex = Packet.NumberU8,
+	Metadata = Packet.Any,
 })
 
 ChorePackets.ChoreRemoved = Packet("ChoreRemoved", {

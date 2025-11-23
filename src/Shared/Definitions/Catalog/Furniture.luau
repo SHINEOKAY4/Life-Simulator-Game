@@ -18,9 +18,6 @@ local Furnitures = {
 			Tags = { "Comfort", "Seating" },
 			ModelPath = { "Furnitures", "Sofa" },
 			AssetId = 125161977165072,
-			StationEffects = {
-				RestMode = "Relax",
-			},
 			EffectSummary = {
 				"Invites residents to kick back and unwind together.",
 				"Seats two comfortably for long chats or quick breaks.",
@@ -64,12 +61,6 @@ local Furnitures = {
 			Tags = { "Comfort", "Bath" },
 			ModelPath = { "Furnitures", "Bathtub" },
 			AssetId = 129381137044391,
-			StationEffects = {
-				DurationSeconds = 30,
-				Effects = {
-					{ Need = "Hygiene", RatePerHour = 100 },
-				},
-			},
 			EffectSummary = {
 				"Leaves residents sparkling clean in one soak.",
 				"Warm water and bubbles melt away the day.",
@@ -91,12 +82,6 @@ local Furnitures = {
 			Tags = { "Basic", "Toilet" },
 			ModelPath = { "Furnitures", "Toilet" },
 			AssetId = 99308990486102,
-			StationEffects = {
-				DurationSeconds = 15,
-				Effects = {
-					{ Need = "Hygiene", RatePerHour = 80 },
-				},
-			},
 			EffectSummary = {
 				"Offers quick relief during bathroom emergencies.",
 				"Stays tidy after every flush.",
@@ -119,9 +104,6 @@ local Furnitures = {
 			Tags = { "Basic", "Bed" },
 			ModelPath = { "Furnitures", "OldMattress" },
 			AssetId = 115333432845118,
-			StationEffects = {
-				RestMode = "Sleep",
-			},
 			EffectSummary = {
 				"Lets a resident doze off when they're desperate for rest.",
 			},
@@ -143,9 +125,6 @@ local Furnitures = {
 			Tags = { "Comfort", "Bed" },
 			ModelPath = { "Furnitures", "StandardBed" },
 			AssetId = 136367494509090,
-			StationEffects = {
-				RestMode = "Sleep",
-			},
 			EffectSummary = {
 				"Helps residents wake up refreshed and ready.",
 				"A sturdy single bed that feels like home.",
@@ -169,12 +148,6 @@ local Furnitures = {
 			Tags = { "Comfort", "Appliance" },
 			ModelPath = { "Furnitures", "KitchenCounter" },
 			AssetId = 106176633135700,
-			StationEffects = {
-				DurationSeconds = 45,
-				Effects = {
-					{ Need = "Hygiene", RatePerHour = 100 },
-				},
-			},
 			EffectSummary = {
 				"Leaves hands and dishes squeaky clean.",
 				"Running water keeps the kitchen ready for the next meal.",
@@ -196,9 +169,6 @@ local Furnitures = {
 			Tags = { "Basic", "Seating" },
 			ModelPath = { "Furnitures", "CafeChair" },
 			AssetId = 126918512427703,
-			StationEffects = {
-				RestMode = "Nap",
-			},
 			EffectSummary = {
 				"Great for a brief sit-down while enjoying a snack.",
 				"Seats one resident comfortably.",
@@ -219,9 +189,6 @@ local Furnitures = {
 			Tags = { "Basic", "Seating" },
 			ModelPath = { "Furnitures", "WoodenChair" },
 			AssetId = 97857212871579,
-			StationEffects = {
-				RestMode = "Nap",
-			},
 			EffectSummary = {
 				"Perfect for a quick sit-down with a mug of tea.",
 				"Seats one resident when every tile counts.",
@@ -243,15 +210,6 @@ local Furnitures = {
 			Tags = { "Comfort", "Table" },
 			ModelPath = { "Furnitures", "BigWoodenTable" },
 			AssetId = 76848440269937,
-			StationEffects = {
-				DurationSeconds = 180,
-				Effects = {
-					{ Need = "Social", RatePerHour = 18 },
-				},
-				Moodlets = {
-					{ Name = "SharedMeal", DurationSeconds = 180, NeedBias = { Social = -0.2, Hunger = -0.1 } },
-				},
-			},
 			EffectSummary = {
 				"Pulls the household together for shared meals and gossip.",
 				"Seats up to eight residents with elbow room to spare.",
@@ -273,15 +231,6 @@ local Furnitures = {
 			Tags = { "Basic", "Table" },
 			ModelPath = { "Furnitures", "CafeTableRound" },
 			AssetId = 102662772823457,
-			StationEffects = {
-				DurationSeconds = 60,
-				Effects = {
-					{ Need = "Social", RatePerHour = 10 },
-				},
-				Moodlets = {
-					{ Name = "SoloMeal", DurationSeconds = 60, NeedBias = { Social = -0.1, Hunger = -0.1 } },
-				},
-			},
 		},
 	},
 	Office = {
@@ -300,9 +249,6 @@ local Furnitures = {
 			Tags = { "Comfort", "Seating" },
 			ModelPath = { "Furnitures", "DesktopChair" },
 			AssetId = 89977144304157,
-			StationEffects = {
-				RestMode = "Nap",
-			},
 			EffectSummary = {
 				"Keeps residents comfortable during focused work sessions.",
 				"Boosts productivity with ergonomic support.",

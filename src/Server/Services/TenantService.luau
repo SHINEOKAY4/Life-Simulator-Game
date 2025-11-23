@@ -10,6 +10,7 @@ local Workspace = game:GetService("Workspace")
 local TenantConfig = require(ReplicatedStorage.Shared.Configurations.TenantConfig)
 local TenantDefinitions = require(ReplicatedStorage.Shared.Definitions.TenantDefinitions)
 local TenantTraits = require(ReplicatedStorage.Shared.Definitions.TenantTraits)
+local RoomKeyUtils = require(ReplicatedStorage.Shared.Utilities.RoomKeyUtils)
 local MailboxPackets = require(ReplicatedStorage.Network.MailboxPackets)
 local TenantPackets = require(ReplicatedStorage.Network.TenantPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
@@ -21,6 +22,7 @@ local TenantHelpService = require(ServerScriptService.Server.Services.TenantHelp
 local TenantValuation = require(ServerScriptService.Server.Modules.TenantValuation)
 local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
+local RepairManager = require(ServerScriptService.Server.Modules.Chores.RepairManager)
 
 type ValuationResult = TenantValuation.ValuationResult
 
@@ -65,6 +67,7 @@ export type TenantLease = {
 	Traits: { string }?,
 	TenantName: string?,
 	NextReviewUnix: number?,
+	RoomKey: string?,
 }
 
 type TenantStateSave = {
@@ -77,7 +80,10 @@ type TenantStateSave = {
 	OutstandingRent: number?,
 	LastKnownScore: number?,
 	MailboxBalance: number?,
+	RoomAssignments: { [string]: number }?,
 }
+
+type RoomAssignmentMap = { [string]: number }
 
 type RuntimeState = {
 	Player: Player,
@@ -89,6 +95,7 @@ type RuntimeState = {
 	NextValuationUnix: number,
 	NextOfferUnix: number,
 	MailboxOwnedPlotConn: RBXScriptConnection?,
+	TenantRooms: { [string]: any }?,
 }
 
 local TenantService = {}
@@ -115,6 +122,53 @@ local function clampMailboxAmount(amount: number): number
 		clamped = MAX_MAILBOX_BALANCE
 	end
 	return clamped
+end
+
+local function ensureRoomAssignments(save: TenantStateSave): RoomAssignmentMap
+	local assignments = save.RoomAssignments
+	if typeof(assignments) ~= "table" then
+		assignments = {}
+		save.RoomAssignments = assignments
+	else
+		for key, count in pairs(assignments) do
+			if typeof(key) ~= "string" or key == "" then
+				assignments[key] = nil :: any
+				continue
+			end
+			if typeof(count) ~= "number" or count <= 0 then
+				assignments[key] = nil :: any
+			else
+				assignments[key] = math.floor(count + 0.5)
+			end
+		end
+	end
+	return assignments :: RoomAssignmentMap
+end
+
+RepairManager.SetOccupancyResolver(function(player: Player)
+	local runtime = RuntimeByUserId[player.UserId]
+	if not runtime then
+		return nil
+	end
+	return ensureRoomAssignments(runtime.Save)
+end)
+
+local function releaseRoomAssignment(runtime: RuntimeState, lease: TenantLease?)
+	if not lease or not lease.RoomKey then
+		return
+	end
+	local assignments = ensureRoomAssignments(runtime.Save)
+	local roomKey = lease.RoomKey
+	local current = assignments[roomKey]
+	if typeof(current) == "number" then
+		local nextValue = current - 1
+		if nextValue > 0 then
+			assignments[roomKey] = nextValue
+		else
+			assignments[roomKey] = nil
+		end
+	end
+	lease.RoomKey = nil
 end
 
 local function findResidentsFolder(player: Player): Folder?
@@ -424,6 +478,7 @@ local function buildActiveTenantPayload(runtime: RuntimeState): { any }
 			Rent = lease.RentPerInterval,
 			RentInterval = lease.RentIntervalSeconds,
 			Boost = lease.RentBoostPercent or 0,
+			RoomKey = lease.RoomKey or "",
 		}
 	end
 	return payload
@@ -447,6 +502,7 @@ local function broadcastTenantDelta(runtime: RuntimeState, tenantId: string, lea
 			Rent = lease.RentPerInterval,
 			RentInterval = lease.RentIntervalSeconds,
 			Boost = lease.RentBoostPercent or 0,
+			RoomKey = lease.RoomKey or "",
 		}
 	end
 	TenantPackets.TenantDelta:FireClient(runtime.Player, {
@@ -471,6 +527,7 @@ local function hydrateRuntime(player: Player): RuntimeState?
 	local now = serverNow()
 	sanitizeOffer(tenantSave, now)
 	ensureActiveLeases(tenantSave, now)
+	ensureRoomAssignments(tenantSave)
 	if typeof(tenantSave.LastOfferUnix) ~= "number" then
 		tenantSave.LastOfferUnix = 0
 	end
@@ -505,6 +562,7 @@ local function hydrateRuntime(player: Player): RuntimeState?
 		NextValuationUnix = 0,
 		NextOfferUnix = now + OffersConfig.MinIntervalSeconds,
 		MailboxOwnedPlotConn = nil,
+		TenantRooms = nil,
 	}
 
 	RuntimeByUserId[player.UserId] = runtime
@@ -540,6 +598,8 @@ local function concludeLease(runtime: RuntimeState, tenantId: string, reason: st
 		return
 	end
 
+	releaseRoomAssignment(runtime, lease)
+
 	ReviewService.RecordTenantReview(runtime.Player, lease, reason)
 
 	leases[tenantId] = nil
@@ -559,6 +619,177 @@ local function concludeLease(runtime: RuntimeState, tenantId: string, reason: st
 	updateIncomeRateAttribute(runtime)
 	scheduleNextOffer(runtime)
 	broadcastTenantDelta(runtime, tenantId, nil)
+end
+
+local function collectTenantRooms(plotState: any): { [string]: any }
+	if typeof(plotState) ~= "table" or typeof(plotState.GetRoomsForLevel) ~= "function" then
+		return {}
+	end
+	local roomsByKey: { [string]: any } = {}
+	local startLevel = plotState.DefaultLevel or 0
+	local endLevel = plotState.MaxFloorLevel or startLevel
+	for level = startLevel, endLevel do
+		local success, levelRooms = pcall(function()
+			return plotState:GetRoomsForLevel(level)
+		end)
+		if success and typeof(levelRooms) == "table" then
+			for _, room in ipairs(levelRooms) do
+				local r = room :: any
+				local capacity = r.TenantCapacity or 0
+				if r.IsTenantRoom and capacity > 0 then
+					local roomKey = r.RoomKey or RoomKeyUtils.Format(level, r.MinX, r.MinZ)
+					roomsByKey[roomKey] = room
+				end
+			end
+		end
+	end
+	return roomsByKey
+end
+
+local function reconcileRoomAssignments(runtime: RuntimeState, roomMap: { [string]: any }?)
+	local assignments = ensureRoomAssignments(runtime.Save)
+	local leases = getActiveLeases(runtime)
+	if not roomMap or not next(roomMap) then
+		local pending: { string } = {}
+		for tenantId in pairs(leases) do
+			pending[#pending + 1] = tenantId
+		end
+		for _, tenantId in ipairs(pending) do
+			concludeLease(runtime, tenantId, "NoRoom")
+		end
+		for key in pairs(assignments) do
+			assignments[key] = nil :: any
+		end
+		return
+	end
+
+	local occupancy: RoomAssignmentMap = {}
+	for roomKey, room in pairs(roomMap) do
+		local capacity = room.TenantCapacity or 0
+		if capacity > 0 then
+			occupancy[roomKey] = 0
+		end
+	end
+
+	local reassignQueue: { string } = {}
+	for tenantId, lease in pairs(leases) do
+		local roomKey = lease.RoomKey
+		if roomKey and occupancy[roomKey] ~= nil then
+			local capacity = roomMap[roomKey].TenantCapacity or 0
+			local used = occupancy[roomKey] or 0
+			if used < capacity then
+				occupancy[roomKey] = used + 1
+			else
+				lease.RoomKey = nil
+				reassignQueue[#reassignQueue + 1] = tenantId
+			end
+		else
+			lease.RoomKey = nil
+			reassignQueue[#reassignQueue + 1] = tenantId
+		end
+	end
+
+	local function assignLeaseToRoom(lease: TenantLease): boolean
+		for roomKey, room in pairs(roomMap) do
+			local capacity = room.TenantCapacity or 0
+			local used = occupancy[roomKey] or 0
+			if capacity > 0 and used < capacity then
+				lease.RoomKey = roomKey
+				occupancy[roomKey] = used + 1
+				return true
+			end
+		end
+		return false
+	end
+
+	local evictions: { string } = {}
+	for _, tenantId in ipairs(reassignQueue) do
+		local lease = leases[tenantId]
+		if lease then
+			local assigned = assignLeaseToRoom(lease)
+			if not assigned then
+				evictions[#evictions + 1] = tenantId
+			end
+		end
+	end
+
+	for key in pairs(assignments) do
+		assignments[key] = nil :: any
+	end
+	for roomKey, used in pairs(occupancy) do
+		if used > 0 then
+			assignments[roomKey] = used
+		end
+	end
+
+	for _, tenantId in ipairs(evictions) do
+		concludeLease(runtime, tenantId, "NoRoom")
+	end
+end
+
+local function ensureTenantRooms(runtime: RuntimeState): { [string]: any }?
+	local plotState = PlotService.GetState(runtime.Player)
+	if not plotState then
+		runtime.TenantRooms = nil
+		return nil
+	end
+	local rooms = collectTenantRooms(plotState)
+	runtime.TenantRooms = rooms
+	reconcileRoomAssignments(runtime, rooms)
+	return rooms
+end
+
+local function countRoomAvailability(runtime: RuntimeState): (number, number)
+	local rooms = ensureTenantRooms(runtime)
+	if not rooms then
+		return 0, 0
+	end
+	local total = 0
+	local available = 0
+	local assignments = ensureRoomAssignments(runtime.Save)
+	for roomKey, room in pairs(rooms) do
+		local capacity = math.max(room.TenantCapacity or 0, 0)
+		if capacity > 0 then
+			total += capacity
+			local used = assignments[roomKey] or 0
+			if used < 0 then
+				used = 0
+			elseif used > capacity then
+				used = capacity
+			end
+			available += capacity - used
+		end
+	end
+	return total, math.max(available, 0)
+end
+
+function TenantService.GetRoomAvailability(player: Player): (number, number)
+	local runtime: RuntimeState? = RuntimeByUserId[player.UserId]
+	if not runtime then
+		runtime = hydrateRuntime(player)
+	end
+	if not runtime then
+		return 0, 0
+	end
+	return countRoomAvailability(runtime)
+end
+
+local function getAvailableRoomKey(runtime: RuntimeState): string?
+	local rooms = ensureTenantRooms(runtime)
+	if not rooms or not next(rooms) then
+		return nil
+	end
+	local assignments = ensureRoomAssignments(runtime.Save)
+	for roomKey, room in pairs(rooms) do
+		local capacity = math.max(room.TenantCapacity or 0, 0)
+		if capacity > 0 then
+			local used = assignments[roomKey] or 0
+			if used < capacity then
+				return roomKey
+			end
+		end
+	end
+	return nil
 end
 
 local function getAverageRating(player: Player): number?
@@ -615,7 +846,11 @@ local function composeOffer(runtime: RuntimeState, valuation: ValuationResult, n
 	}
 end
 
-local function startLease(runtime: RuntimeState, offer: TenantOffer, now: number): string
+local function startLease(runtime: RuntimeState, offer: TenantOffer, now: number): (string?, string?)
+	local roomKey = getAvailableRoomKey(runtime)
+	if not roomKey then
+		return nil, "No tenant-ready rooms available."
+	end
 	local leases = getActiveLeases(runtime)
 	local uniqueId = offer.OfferId
 	local suffix = 1
@@ -639,13 +874,17 @@ local function startLease(runtime: RuntimeState, offer: TenantOffer, now: number
 		Traits = offer.Traits,
 		TenantName = offer.TenantName,
 		NextReviewUnix = now + offer.RentIntervalSeconds * 3,
+		RoomKey = roomKey,
 	}
 
 	leases[uniqueId] = lease
+	local assignments = ensureRoomAssignments(runtime.Save)
+	local current = assignments[roomKey] or 0
+	assignments[roomKey] = current + 1
 	scheduleNextOffer(runtime, now + OffersConfig.CooldownSeconds)
 	updateIncomeRateAttribute(runtime)
 	broadcastTenantDelta(runtime, uniqueId, lease)
-	return uniqueId
+	return uniqueId, nil
 end
 
 local function settleOutstanding(runtime: RuntimeState)
@@ -803,6 +1042,12 @@ local function tryGenerateOffer(runtime: RuntimeState, now: number)
 		return
 	end
 
+	local _, availableRooms = countRoomAvailability(runtime)
+	if availableRooms <= 0 then
+		runtime.NextOfferUnix = now + OffersConfig.CooldownSeconds
+		return
+	end
+
 	local valuation = runtime.CachedValuation
 	if not valuation then
 		return
@@ -878,20 +1123,20 @@ function TenantService.GetActiveLease(player: Player): TenantLease?
 	return nil
 end
 
-function TenantService.AcceptOffer(player: Player): boolean
+function TenantService.AcceptOffer(player: Player): (boolean, string?)
 	local runtime = RuntimeByUserId[player.UserId]
 	if not runtime then
-		return false
+		return false, "Tenant data unavailable."
 	end
 
 	local pending = runtime.Save.PendingOffer
 	if typeof(pending) ~= "table" then
-		return false
+		return false, "No pending offer."
 	end
 
 	runtime.Save.PendingOffer = nil
-	local success = TenantService.BeginLeaseFromOffer(player, pending)
-	return success
+	local success, message = TenantService.BeginLeaseFromOffer(player, pending)
+	return success, message
 end
 
 function TenantService.DeclineOffer(player: Player): boolean
@@ -927,6 +1172,7 @@ function TenantService.GenerateProspectOffer(player: Player): TenantOffer?
 		return nil
 	end
 	local resolvedRuntime: RuntimeState = runtime
+	-- Prospect spawns should not depend on room availability; capacity is enforced when players accept.
 	refreshValuation(resolvedRuntime, serverNow())
 	local valuation = resolvedRuntime.CachedValuation
 	if not valuation then
@@ -951,7 +1197,10 @@ function TenantService.BeginLeaseFromOffer(player: Player, offer: TenantOffer): 
 		return false, "Tenant data unavailable.", nil
 	end
 	local resolvedRuntime: RuntimeState = runtime
-	local tenantId = startLease(resolvedRuntime, offer, serverNow())
+	local tenantId, leaseErr = startLease(resolvedRuntime, offer, serverNow())
+	if not tenantId then
+		return false, leaseErr or "Unable to allocate room for tenant.", nil
+	end
 	resolvedRuntime.Save.LastOfferUnix = serverNow()
 	return true, nil, tenantId
 end
@@ -1098,6 +1347,7 @@ function TenantService.Init()
 				Boost = 0,
 				Traits = {},
 				Rating = 0,
+				RoomKey = "",
 			}
 		end
 		local lease = leases[tenantId]
@@ -1111,6 +1361,7 @@ function TenantService.Init()
 				Boost = 0,
 				Traits = {},
 				Rating = 0,
+				RoomKey = "",
 			}
 		end
 
@@ -1123,6 +1374,7 @@ function TenantService.Init()
 			Boost = lease.RentBoostPercent or 0,
 			Traits = lease.Traits or {},
 			Rating = 0,
+			RoomKey = lease.RoomKey or "",
 		}
 	end
 

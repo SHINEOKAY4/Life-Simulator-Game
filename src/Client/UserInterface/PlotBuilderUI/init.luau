@@ -11,10 +11,11 @@ local ModulesFolder = ClientFolder.Modules
 local ClientStoresFolder = ClientFolder.ClientStores
 
 local PlotBuilder = require(ModulesFolder.PlotBuilder)
+local PlotExpansion = require(ModulesFolder.PlotExpansion)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 local SurfacePaintController = require(ModulesFolder.SurfacePaintController)
 local BuildPaletteUI = require(UserInterfaceFolder.BuildPaletteUI)
-local ObjectSelector = require(ModulesFolder.ObjectSelector)
+-- Removed ObjectSelector require (binding no longer triggered from menu; state value still observed)
 local CutawayViewController = require(ModulesFolder.CutawayViewController)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local PlotStateStore = require(ClientStoresFolder.PlotStateStore)
@@ -485,15 +486,15 @@ local function toggleStorageInventory()
 	warn("[PlotBuilderUI] Storage inventory UI is not implemented yet.")
 end
 
-local function toggleObjectSelectorMode()
-	if not ObjectSelectorEnabledValue then
-		warn("[PlotBuilderUI] Object selector state missing for menu binding.")
+local function togglePlotExpansionMode()
+	if not PlotExpansionEnabledValue then
+		warn("[PlotBuilderUI] PlotExpansionEnabled missing for menu binding.")
 		return
 	end
-	if boolValueTrue(ObjectSelectorEnabledValue) then
-		ObjectSelector.Hide()
+	if boolValueTrue(PlotExpansionEnabledValue) then
+		PlotExpansion.Hide()
 	else
-		ObjectSelector.Show()
+		PlotExpansion.Show()
 	end
 end
 
@@ -515,7 +516,7 @@ local function ensureMenuController()
 	local controller = MenuController.new(MenuButtons, {
 		onPaint = toggleBuildPalette,
 		onStorage = toggleStorageInventory,
-		onSelect = toggleObjectSelectorMode,
+		onSelect = togglePlotExpansionMode,
 		onUpgrade = toggleUpgradePanel,
 		onBack = exitBuilder,
 	})

@@ -10,6 +10,7 @@ local CurrencyService = require(ServerScriptService.Server.Services.CurrencyServ
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local ProgressionService = require(ServerScriptService.Server.Services.ProgressionService)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local RepairManager = require(ServerScriptService.Server.Modules.Chores.RepairManager)
 
 local ChoreService = {}
 
@@ -32,6 +33,17 @@ type ChoreRecord = {
 	SampledPosition: Vector3?,
 	Metadata: { [string]: any }?,
 }
+
+type BaseChorePayload = {
+	PlotIndex: number?,
+	RewardAmount: number?,
+	TenantName: string?,
+	Position: Vector3?,
+	Metadata: { [string]: any }?,
+}
+
+type CompletionHandler = (player: Player, record: ChoreRecord, root: BasePart?) -> (boolean, string?, number?)
+type RepairBridgePayload = RepairManager.RepairChorePayload
 
 local ActiveChores: { [string]: ChoreRecord } = {}
 
@@ -82,7 +94,30 @@ local function sampleTenantPosition(player: Player, tenantName: string?): Vector
 	return nil
 end
 
-local function sendTrashSpawn(record: ChoreRecord)
+local function completeTrashChore(player: Player, record: ChoreRecord, root: BasePart?): (boolean, string?, number?)
+	if not root then
+		return false, "No character.", nil
+	end
+
+	local comparisonPosition = record.SampledPosition
+	if not comparisonPosition then
+		comparisonPosition = sampleTenantPosition(player, record.TenantName)
+	end
+	if comparisonPosition and (root.Position - comparisonPosition).Magnitude > 18 then
+		return false, "Too far away.", nil
+	end
+
+	return true, "Cleaned up!", nil
+end
+
+local CompletionHandlers: { [string]: CompletionHandler } = {
+	Trash = completeTrashChore,
+	Repair = function(player: Player, record: ChoreRecord): (boolean, string?, number?)
+		return RepairManager.HandleRepairCompletion(player, record)
+	end,
+}
+
+local function sendChoreSpawn(record: ChoreRecord)
 	local player = record.OwnerPlayer
 	if not player then
 		return
@@ -92,10 +127,11 @@ local function sendTrashSpawn(record: ChoreRecord)
 		Type = record.Type,
 		TenantName = record.TenantName or "",
 		PlotIndex = record.PlotIndex,
+		Metadata = record.Metadata,
 	})
 end
 
-local function createChoreRecord(player: Player, payload: SpawnMessPayload): ChoreRecord?
+local function createChoreRecord(player: Player, choreType: string, payload: BaseChorePayload): ChoreRecord?
 	local plotIndex = payload.PlotIndex
 	if typeof(plotIndex) ~= "number" then
 		local attr = player:GetAttribute("OwnedPlotIndex")
@@ -105,22 +141,45 @@ local function createChoreRecord(player: Player, payload: SpawnMessPayload): Cho
 		plotIndex = attr
 	end
 
-	local id = HttpService:GenerateGUID(false)
-	local reward = payload.RewardAmount or MESS_REWARD
-
 	local record: ChoreRecord = {
-		Id = id,
-		Type = "Trash",
+		Id = HttpService:GenerateGUID(false),
+		Type = choreType,
 		PlotIndex = plotIndex,
 		OwnerPlayer = player,
 		CreatedAt = os.time(),
-		RewardAmount = reward,
+		RewardAmount = payload.RewardAmount or (choreType == "Trash" and MESS_REWARD or 0),
 		TenantName = payload.TenantName,
 		SampledPosition = payload.Position,
 		Metadata = payload.Metadata,
 	}
 
 	return record
+end
+
+local function registerChoreRecord(record: ChoreRecord, lifetimeSeconds: number?): string
+	ActiveChores[record.Id] = record
+	sendChoreSpawn(record)
+	if lifetimeSeconds and lifetimeSeconds > 0 then
+		task.delay(lifetimeSeconds, function()
+			if ActiveChores[record.Id] == record then
+				ChoreService.RemoveChore(record.Id, "Expired")
+			end
+		end)
+	end
+	return record.Id
+end
+
+local function spawnRepairChoreForBridge(player: Player, payload: RepairBridgePayload): string?
+	local record = createChoreRecord(player, "Repair", {
+		PlotIndex = payload.PlotIndex,
+		RewardAmount = payload.RewardAmount,
+		Position = payload.WorldPosition,
+		Metadata = payload.Metadata,
+	})
+	if not record then
+		return nil
+	end
+	return registerChoreRecord(record, nil)
 end
 
 function ChoreService.SpawnMess(player: Player, payload: SpawnMessPayload?)
@@ -149,19 +208,12 @@ function ChoreService.SpawnMess(player: Player, payload: SpawnMessPayload?)
 		Metadata = options.Metadata,
 	}
 
-	local record = createChoreRecord(player, resolvedPayload)
+	local record = createChoreRecord(player, "Trash", resolvedPayload)
 	if not record then
 		return
 	end
 
-	ActiveChores[record.Id] = record
-	sendTrashSpawn(record)
-
-	task.delay(MESS_LIFETIME, function()
-		if ActiveChores[record.Id] then
-			ChoreService.RemoveChore(record.Id, "Expired")
-		end
-	end)
+	registerChoreRecord(record, MESS_LIFETIME)
 end
 
 function ChoreService.RemoveChore(id: string, reason: string)
@@ -178,6 +230,8 @@ function ChoreService.RemoveChore(id: string, reason: string)
 			Reason = reason,
 		})
 	end
+
+	RepairManager.NotifyChoreRemoved(id, reason)
 end
 
 function ChoreService.GetTrashCount(player: Player): number
@@ -200,62 +254,49 @@ local function completeChore(player: Player, choreId: string): (boolean, string)
 		return false, "Not your chore."
 	end
 
-	-- Distance check
 	local character = player.Character
-	if not character then
-		return false, "No character."
-	end
-	local root = character.PrimaryPart
-	if not root then
-		return false, "No root part."
-	end
-
-	local comparisonPosition = record.SampledPosition
-	if not comparisonPosition then
-		comparisonPosition = sampleTenantPosition(player, record.TenantName)
-	end
-	if comparisonPosition and (root.Position - comparisonPosition).Magnitude > 18 then
-		return false, "Too far away."
+	local root = character and character.PrimaryPart
+	local handler = CompletionHandlers[record.Type] or completeTrashChore
+	local success, message, rewardOverride = handler(player, record, root)
+	if not success then
+		return false, message or "Unable to complete"
 	end
 
-	-- Reward
-	local profile = PlayerSession.GetData(player)
-	if profile then
-		CurrencyService.Add(
-			player,
-			"Cash",
-			record.RewardAmount,
-			profile.CurrencyState,
-			{ Source = "Chore:" .. record.Type }
-		)
+	local rewardAmount = rewardOverride
+	if rewardAmount == nil then
+		rewardAmount = record.RewardAmount
 	end
+
+	if rewardAmount > 0 then
+		local profile = PlayerSession.GetData(player)
+		if profile then
+			CurrencyService.Add(
+				player,
+				"Cash",
+				rewardAmount,
+				profile.CurrencyState,
+				{ Source = "Chore:" .. record.Type }
+			)
+		end
+	end
+
 	ProgressionService.RecordChoreCompletion(player)
-
 	ChoreService.RemoveChore(choreId, "Completed")
 
-	return true, "Cleaned up!"
-end
-
--- // Item Breakdown System (Stubbed) //
-
-function ChoreService.RegisterBreakableItem(_itemInstance: Instance)
-	-- TODO: Track item usage and health
-end
-
-function ChoreService.TriggerBreakdown(_itemInstance: Instance)
-	-- TODO: Set item state to broken, spawn repair chore
-	-- local id = HttpService:GenerateGUID(false)
-	-- Create ChoreRecord with Type="Repair"
-	-- Fire packet
-end
-
-function ChoreService.RepairItem(_player: Player, _choreId: string)
-	-- TODO: Validate repair skill/parts?
-	-- Restore item function
+	return true, message or "Nice work!"
 end
 
 function ChoreService.Init()
 	ChorePackets.CompleteChore.OnServerInvoke = completeChore
+
+	RepairManager.Configure({
+		SpawnRepairChore = function(player, payload)
+			return spawnRepairChoreForBridge(player, payload)
+		end,
+		RemoveChore = function(choreId: string, reason: string)
+			ChoreService.RemoveChore(choreId, reason)
+		end,
+	})
 end
 
 return ChoreService

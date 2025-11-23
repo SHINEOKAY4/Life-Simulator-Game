@@ -14,16 +14,42 @@ local CurrencyPackets = require(ReplicatedStorage.Network.CurrencyPackets)
 local BillingPackets = require(ReplicatedStorage.Network.BillingPackets)
 local SoundtrackManager = require(script.Parent.Parent.Modules.SoundtrackManager)
 local ReviewsUI = require(script.Parent.ReviewsUI)
+local PlotExpansion = require(script.Parent.Parent.Modules.PlotExpansion)
+local ProfilePanel = require(script.Parent.ProfilePanel)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
+
+local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
+local InterfacesTemplatesFolder = AssetsFolder:WaitForChild("InterfacesTemplates")
+local CancelButtonTemplate = InterfacesTemplatesFolder:WaitForChild("CancelButton") :: TextButton
 
 local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
 local BillContext = InputContextsFolder:WaitForChild("BillContext")
 
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
+if not ActiveQueryFolder then
+	ActiveQueryFolder = Instance.new("Folder")
+	ActiveQueryFolder.Name = "ActiveQuery"
+	ActiveQueryFolder.Parent = PlayerGui
+end
+
+local function ensureQueryBool(name: string, defaultValue: boolean): BoolValue
+	local existing = ActiveQueryFolder:FindFirstChild(name)
+	if existing and existing:IsA("BoolValue") then
+		return existing
+	end
+	local value = Instance.new("BoolValue")
+	value.Name = name
+	value.Value = defaultValue
+	value.Parent = ActiveQueryFolder
+	return value
+end
+
 local HUDBottomRightEnabled = ActiveQueryFolder:FindFirstChild("HUDBottomRightEnabled") :: BoolValue
 local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled") :: BoolValue
+local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled") :: BoolValue?
+local LevelUpOverlayActive = ensureQueryBool("LevelUpOverlayActive", false)
 
 local MainHUDGui = PlayerGui:WaitForChild("MainHUD") :: ScreenGui
 local BillFrame = MainHUDGui:WaitForChild("BillFrame") :: Frame
@@ -80,7 +106,8 @@ local CashLabel = TextFrame:WaitForChild("CashLabel") :: TextLabel
 local IncomePerSecondLabel = TopRight:WaitForChild("IncomePerSecondLabel") :: TextLabel
 local BuildButton = BottomRight:WaitForChild("BuildButton") :: TextButton
 local BillsButton = BottomRight:WaitForChild("BillsButton") :: TextButton
-local ExpandButton = BottomRight:WaitForChild("ExpandButton") :: TextButton
+-- ExpandButton moved into PlotBuilder menu; this slot now hosts ProfileButton
+local ProfileButton = BottomRight:WaitForChild("ProfileButton") :: TextButton
 local ReviewsButton = BottomRight:WaitForChild("ReviewsButton") :: TextButton
 local BillImageFrame = BillsButton:WaitForChild("Image") :: Frame
 local TimeTextFrame = BillImageFrame:WaitForChild("TimeTextFrame") :: Frame
@@ -90,6 +117,114 @@ local ProgressionForeground = ProgressionBar:WaitForChild("Foreground") :: Frame
 local ProgressionBarFill = ProgressionForeground:WaitForChild("Bar") :: Frame
 local XPLabel = ProgressionBar:WaitForChild("XPLabel") :: TextLabel
 local LevelLabel = ProgressionBar:WaitForChild("LevelLabel") :: TextLabel
+
+local function ensureProfilePanelFrame(): Frame
+	local existing = MainHUDGui:FindFirstChild("ProfilePanelFrame")
+	if existing and existing:IsA("Frame") then
+		existing.BackgroundTransparency = 0
+		existing.BackgroundColor3 = Color3.fromRGB(20, 26, 46)
+		existing.BorderSizePixel = 0
+		existing.Visible = false
+		existing.Active = false
+		existing.Size = UDim2.fromScale(1, 1)
+		existing.ZIndex = math.max(existing.ZIndex, 10)
+		return existing
+	end
+
+	local frame = Instance.new("Frame")
+	frame.Name = "ProfilePanelFrame"
+	frame.BackgroundTransparency = 0
+	frame.BackgroundColor3 = Color3.fromRGB(20, 26, 46)
+	frame.BorderSizePixel = 0
+	frame.Visible = false
+	frame.Active = false
+	frame.Size = UDim2.fromScale(1, 1)
+	frame.ZIndex = 10
+	frame.Parent = MainHUDGui
+	return frame
+end
+
+local ProfilePanelFrame = ensureProfilePanelFrame()
+
+local function isPlotExpansionActive(): boolean
+	return PlotExpansionEnabled ~= nil and PlotExpansionEnabled.Value == true
+end
+
+local function shouldMainHudBeEnabled(): boolean
+	if LevelUpOverlayActive.Value then
+		return false
+	end
+	if isPlotExpansionActive() then
+		return false
+	end
+	return true
+end
+
+local function syncMainHudEnabledState()
+	MainHUDGui.Enabled = shouldMainHudBeEnabled()
+end
+
+local function syncLevelUpSuppression()
+	syncMainHudEnabledState()
+end
+
+local PlotExpansionCancelGui: ScreenGui? = nil
+local PlotExpansionCancelButton: TextButton? = nil
+
+local function ensurePlotExpansionCancelGui(): ScreenGui
+	if PlotExpansionCancelGui and PlotExpansionCancelGui.Parent then
+		return PlotExpansionCancelGui
+	end
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "PlotExpansionControls"
+	gui.IgnoreGuiInset = true
+	gui.ResetOnSpawn = false
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.DisplayOrder = MainHUDGui.DisplayOrder + 1
+	gui.Enabled = false
+	gui.Parent = PlayerGui
+
+	local container = Instance.new("Frame")
+	container.Name = "CancelContainer"
+	container.AnchorPoint = Vector2.new(1, 1)
+	container.Position = UDim2.new(1, -40, 1, -20)
+	container.Size = UDim2.fromOffset(260, 64)
+	container.BackgroundTransparency = 1
+	container.BorderSizePixel = 0
+	container.Visible = true
+	container.Parent = gui
+
+	local button = CancelButtonTemplate:Clone()
+	button.Name = "PlotExpansionCancelButton"
+	button.Parent = container
+	button.Position = UDim2.fromScale(0.5, 0)
+	button.Activated:Connect(function()
+		if isPlotExpansionActive() then
+			PlotExpansion.Hide()
+		end
+	end)
+
+	local keyHint = button:FindFirstChild("KeyHint")
+	if keyHint and keyHint:IsA("TextLabel") then
+		keyHint.Visible = true
+	end
+
+	PlotExpansionCancelGui = gui
+	PlotExpansionCancelButton = button
+	return gui
+end
+
+local function syncPlotExpansionCancelState()
+	local gui = ensurePlotExpansionCancelGui()
+	local isActive = isPlotExpansionActive()
+	gui.Enabled = isActive
+	if PlotExpansionCancelButton then
+		PlotExpansionCancelButton.Active = isActive
+		PlotExpansionCancelButton.AutoButtonColor = isActive
+		PlotExpansionCancelButton.Visible = isActive
+	end
+end
 
 local INCOME_RATE_ATTRIBUTE_NAME = "TenantIncomePerSecond"
 
@@ -473,6 +608,19 @@ end
 local MainHUD = {}
 
 function MainHUD.Init()
+	syncLevelUpSuppression()
+	LevelUpOverlayActive.Changed:Connect(syncLevelUpSuppression)
+
+	syncPlotExpansionCancelState()
+	if PlotExpansionEnabled then
+		PlotExpansionEnabled.Changed:Connect(function()
+			syncMainHudEnabledState()
+			syncPlotExpansionCancelState()
+		end)
+	else
+		warn("[MainHUD] PlotExpansionEnabled BoolValue missing; HUD suppression may be incorrect.")
+	end
+
 	local currentCash = Player:GetAttribute(CASH_ATTRIBUTE_NAME)
 	if typeof(currentCash) ~= "number" then
 		currentCash = 0
@@ -779,6 +927,7 @@ function MainHUD.Init()
 			SoundtrackManager.PlayBillToggle()
 			BillFrame.Visible = not BillFrame.Visible
 			if BillFrame.Visible then
+				ProfilePanel.Hide()
 				ReviewsUI.SetVisible(false)
 				requestAndUpdateBillingInfo()
 			end
@@ -799,6 +948,7 @@ function MainHUD.Init()
 
 	ReviewsButton.Activated:Connect(function()
 		BillFrame.Visible = false
+		ProfilePanel.Hide()
 		ReviewsUI.Toggle()
 	end)
 
@@ -882,9 +1032,30 @@ function MainHUD.Init()
 		Player:GetAttributeChangedSignal(attributeName):Connect(updateProgressionDisplay)
 	end
 
-	for _, button in ipairs({ BuildButton, BillsButton, ExpandButton, ReviewsButton }) do
+	for _, button in ipairs({ BuildButton, BillsButton, ReviewsButton, ProfileButton }) do
 		configureButtonVisuals(button)
 	end
+
+	local function handleProfileButtonActivated()
+		if BillFrame.Visible then
+			BillFrame.Visible = false
+		end
+		ReviewsUI.SetVisible(false)
+		ProfilePanel.Toggle()
+	end
+
+	ProfileButton.Activated:Connect(handleProfileButtonActivated)
+	ProfilePanel.Init(ProfilePanelFrame)
+
+	ProfilePanel.VisibilityChanged:Connect(function(isVisible: boolean)
+		if not isVisible then
+			return
+		end
+		if BillFrame.Visible then
+			BillFrame.Visible = false
+		end
+		ReviewsUI.SetVisible(false)
+	end)
 
 	TimeTextLabel.Text = resolveNextBillingLabel(
 		nil,
@@ -904,6 +1075,7 @@ function MainHUD.Hide()
 	-- Code to hide the MainHUD goes here
 	BottomRight.Visible = false
 	HUDBottomRightEnabled.Value = false
+	ProfilePanel.Hide()
 end
 
 return MainHUD

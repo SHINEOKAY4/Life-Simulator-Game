@@ -8,13 +8,11 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
-local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local TenantService = require(ServerScriptService.Server.Services.TenantService) :: any
 local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 local TenantPackets = require(ReplicatedStorage.Network.TenantPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
-local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 
 local MAX_PROSPECTS = 4
 local TARGET_ATTRIBUTE_NAMES = {
@@ -31,9 +29,6 @@ local PROSPECT_LIFETIME = 210
 local EXIT_WALK_SECONDS = 3
 local UPDATE_TASK_NAME = "TenantProspects"
 local TARGET_ATTRIBUTE_EPSILON = 0.25
-
-local REST_STATION_TYPE = "RestStation"
-local BED_TAG = "Bed"
 
 local rng = Random.new()
 
@@ -149,56 +144,6 @@ local function computeHorizontalUnit(vector: Vector3, fallback: Vector3): Vector
 		return fallbackHorizontal.Unit
 	end
 	return horizontal.Unit
-end
-
-local function hasBedTag(spec: { [string]: any }): boolean
-	local tags = spec and spec.Tags
-	if typeof(tags) ~= "table" then
-		return false
-	end
-	for _, tagName in pairs(tags) do
-		if tagName == BED_TAG then
-			return true
-		end
-	end
-	return false
-end
-
-local function normalizeOccupancy(value: any): number
-	if typeof(value) ~= "number" then
-		return 1
-	end
-	local rounded = math.floor(value + 0.5)
-	if rounded < 1 then
-		rounded = 1
-	elseif rounded > 16 then
-		rounded = 16
-	end
-	return rounded
-end
-
-local function computeBedCapacity(player: Player): number
-	local stationCache = PlotService.GetStationsForPlayer(player)
-	local restStations = stationCache[REST_STATION_TYPE]
-	if not restStations then
-		return 0
-	end
-
-	local capacity = 0
-	for _, record in pairs(restStations) do
-		if type(record.Id) ~= "string" then
-			continue
-		end
-
-		local spec = ItemFinder.FindItemById(record.Id)
-		if not spec or not hasBedTag(spec) then
-			continue
-		end
-
-		capacity += normalizeOccupancy(spec.maxOccupancy or spec.MaxOccupancy)
-	end
-
-	return capacity
 end
 
 local function resolveSpawnPoints(plotModel: Model?): ({ CFrame }, Vector3?, Vector3?, Vector3?, number, number)
@@ -569,32 +514,13 @@ local function onStep(_dt: number)
 end
 
 local function canAcceptTenant(player: Player): (boolean, string?)
-	local householdState = PlayerSession.TryGetData(player, "HouseholdState")
-	local maxTenants = householdState and householdState.MaxTenants or nil
-	local tenantCount = householdState and householdState.TenantsCount or nil
-	if typeof(maxTenants) == "number" and typeof(tenantCount) == "number" then
-		if tenantCount >= maxTenants then
-			return false, "Household capacity reached."
-		end
+	local totalRooms, availableRooms = TenantService.GetRoomAvailability(player)
+	if totalRooms <= 0 then
+		return false, "Build an enclosed bedroom with a bed before inviting tenants."
 	end
-
-	local residentsCount = 0
-	if typeof(tenantCount) == "number" then
-		residentsCount = tenantCount
-	else
-		local residentsMap = ResidentService.GetResidents(player)
-		if residentsMap then
-			for _ in pairs(residentsMap) do
-				residentsCount += 1
-			end
-		end
+	if availableRooms <= 0 then
+		return false, "All tenant rooms are occupied. Add another tenant-ready room or free one up."
 	end
-
-	local bedCapacity = computeBedCapacity(player)
-	if bedCapacity < residentsCount + 1 then
-		return false, "You need more beds before inviting another tenant."
-	end
-
 	return true
 end
 

@@ -34,9 +34,6 @@ local Outdoor = {
 			Tags = { "Basic", "Fire" },
 			ModelPath = { "Furnitures", "Campfire" },
 			AssetId = 116024324956421,
-			StationEffects = {
-				DurationSeconds = 60,
-			},
 			EffectSummary = {
 				"Lets two residents roast dinner under the stars.",
 				"Throws off warm light for late-night hangouts.",
@@ -81,9 +78,6 @@ local Outdoor = {
 			Tags = { "Basic", "Seating" },
 			ModelPath = { "Furnitures", "ParkBench" },
 			AssetId = 78161112143828,
-			StationEffects = {
-				RestMode = "Sit",
-			},
 			EffectSummary = {
 				"Provides a comfortable spot to sit and enjoy the outdoors.",
 				"Enhances the look of any patio or garden area.",

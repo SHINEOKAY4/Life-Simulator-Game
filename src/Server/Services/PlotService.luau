@@ -12,6 +12,7 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local GridClass = require(ReplicatedStorage.Shared.Utilities.Grid)
 local PlotState = require(ServerScriptService.Server.Classes.PlotState)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
+local RepairManager = require(ServerScriptService.Server.Modules.Chores.RepairManager)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
@@ -57,6 +58,14 @@ local PlotGrids: { [number]: any } = {} -- [plotIndex] = Grid
 local PlayerRuntime: { [number]: PlotRuntimeState } = {}
 local PlayerStations: { [number]: PlayerStationCache } = {} -- [playerId] = { stationName = {uid}, ... }
 local StationScopeVersions: { [number]: { [string]: number } } = {}
+
+RepairManager.SetRoomResolver(function(player: Player, cellX: number, cellZ: number, level: number?)
+	local runtime = PlotService.GetState(player)
+	if not runtime then
+		return nil
+	end
+	return runtime:GetRoomAt(cellX, cellZ, level)
+end)
 
 local function bumpStationVersion(userId: number, stationType: string)
 	local versionMap = StationScopeVersions[userId]

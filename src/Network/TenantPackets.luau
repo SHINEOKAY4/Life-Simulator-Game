@@ -15,6 +15,7 @@ local function tenantRecordShape()
 		Rent = Packet.NumberU32,
 		RentInterval = Packet.NumberU32,
 		Boost = Packet.NumberF32,
+		RoomKey = Packet.String,
 	}
 end
 
@@ -65,6 +66,7 @@ TenantPackets.GetTenantDetails = Packet("GetTenantDetails", Packet.String):Respo
 	Boost = Packet.NumberF32,
 	Traits = { Packet.String },
 	Rating = Packet.NumberF32,
+	RoomKey = Packet.String,
 })
 
 TenantPackets.ActiveTenantsSync = Packet("ActiveTenantsSync", {

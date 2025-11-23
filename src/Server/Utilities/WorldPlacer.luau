@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
 
 local PlotState = require(ServerScriptService.Server.Classes.PlotState)
+local RepairManager = require(ServerScriptService.Server.Modules.Chores.RepairManager)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementHelpers = require(ReplicatedStorage.Shared.Utilities.PlacementHelpers)
@@ -824,6 +825,7 @@ function WorldPlacer.Spawn(
 	model:SetAttribute("PlacementKey", fromKey)
 	model:SetAttribute("PlacementKeyType", placementKeyType)
 	model.Parent = container
+	RepairManager.RegisterModel(player, spec, model)
 end
 
 function WorldPlacer.Despawn(
@@ -854,6 +856,10 @@ function WorldPlacer.Despawn(
 				if instLevel ~= desiredLevel then
 					continue
 				end
+			end
+			local placementKeyAttr = inst:GetAttribute("PlacementKey")
+			if typeof(placementKeyAttr) == "string" then
+				RepairManager.HandlePlacementRemoved(player, placementKeyAttr)
 			end
 			inst:Destroy()
 			break
