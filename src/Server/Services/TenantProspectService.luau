@@ -29,6 +29,8 @@ local PROSPECT_LIFETIME = 210
 local EXIT_WALK_SECONDS = 3
 local UPDATE_TASK_NAME = "TenantProspects"
 local TARGET_ATTRIBUTE_EPSILON = 0.25
+local ESCORT_TIMEOUT_SECONDS = 80
+local ESCORT_TARGET_REFRESH = 0.35
 
 local rng = Random.new()
 
@@ -59,6 +61,8 @@ export type ProspectRecord = {
 	Leaving: boolean,
 	ExitDeadline: number,
 	ExitReason: string?,
+	EscortPlayer: Player?,
+	EscortDeadline: number,
 }
 
 export type PlayerProspectState = {
@@ -310,6 +314,7 @@ local function destroyProspect(state: PlayerProspectState, slot: number, reason:
 	if not record then
 		return
 	end
+	record.EscortPlayer = nil
 	if skipExit then
 		finalizeProspectRemoval(state, slot, record, reason)
 		return
@@ -393,6 +398,8 @@ local function spawnProspect(state: PlayerProspectState, slot: number)
 		Leaving = false,
 		ExitDeadline = 0,
 		ExitReason = nil,
+		EscortPlayer = nil,
+		EscortDeadline = 0,
 	}
 
 	state.Prospects[slot] = record
@@ -468,6 +475,9 @@ local function cleanupPlayer(userId: number)
 end
 
 local function moveProspect(state: PlayerProspectState, record: ProspectRecord, now: number)
+	if record.EscortPlayer then
+		return
+	end
 	if record.Leaving then
 		return
 	end
@@ -479,6 +489,30 @@ local function moveProspect(state: PlayerProspectState, record: ProspectRecord, 
 	record.Part:PivotTo(CFrame.new(target + Vector3.new(0, record.Part.Size.Y * 0.5, 0)))
 	record.NextMoveUnix = now + randomBetween(ROAM_MIN_SECONDS, ROAM_MAX_SECONDS)
 	setTargetAttribute(state, record.Slot, target)
+end
+
+local function steerEscortProspect(state: PlayerProspectState, record: ProspectRecord, now: number)
+	local escortPlayer = record.EscortPlayer
+	if not escortPlayer then
+		return
+	end
+	if not escortPlayer.Parent then
+		destroyProspect(state, record.Slot, "EscortCancelled")
+		return
+	end
+	if now >= record.EscortDeadline then
+		destroyProspect(state, record.Slot, "EscortTimeout")
+		return
+	end
+	local character = escortPlayer.Character
+	local rootPart = character and character.PrimaryPart
+	if not rootPart then
+		return
+	end
+	record.TargetPosition = rootPart.Position
+	setTargetAttribute(state, record.Slot, record.TargetPosition)
+	record.NextMoveUnix = now + ESCORT_TARGET_REFRESH
+	record.EscortDeadline = now + ESCORT_TIMEOUT_SECONDS
 end
 
 local function onStep(_dt: number)
@@ -499,6 +533,8 @@ local function onStep(_dt: number)
 					if now >= record.ExitDeadline then
 						destroyProspect(state, slot, record.ExitReason or "Removed", true)
 					end
+				elseif record.EscortPlayer then
+					steerEscortProspect(state, record, now)
 				elseif now >= record.ExpireUnix then
 					destroyProspect(state, slot, "Expired")
 				elseif now >= record.NextMoveUnix then
@@ -514,9 +550,9 @@ local function onStep(_dt: number)
 end
 
 local function canAcceptTenant(player: Player): (boolean, string?)
-	local totalRooms, availableRooms = TenantService.GetRoomAvailability(player)
+	local totalRooms, availableRooms, reason = TenantService.GetRoomAvailabilityReport(player)
 	if totalRooms <= 0 then
-		return false, "Build an enclosed bedroom with a bed before inviting tenants."
+		return false, reason or "Build an enclosed bedroom with a bed before inviting tenants."
 	end
 	if availableRooms <= 0 then
 		return false, "All tenant rooms are occupied. Add another tenant-ready room or free one up."
@@ -524,7 +560,7 @@ local function canAcceptTenant(player: Player): (boolean, string?)
 	return true
 end
 
-local function acceptProspect(player: Player, record: ProspectRecord): (boolean, string)
+local function acceptProspect(player: Player, record: ProspectRecord, requestedRoomKey: string?): (boolean, string)
 	local prospectSpawnCFrame = record.Part.CFrame
 	local desiredName = record.Offer.TenantName or "Tenant"
 
@@ -554,9 +590,14 @@ local function acceptProspect(player: Player, record: ProspectRecord): (boolean,
 		return false, createMessage or "Unable to add tenant as resident."
 	end
 
-	local leaseStarted, leaseMessage, tenantId = TenantService.BeginLeaseFromOffer(player, record.Offer)
+	local leaseStarted, leaseMessage, tenantId =
+		TenantService.BeginLeaseFromOffer(player, record.Offer, requestedRoomKey)
 	if not leaseStarted then
 		ResidentService.DeleteResident(player, residentData.Name)
+		-- Check if it's a "room full" error - return special message to keep escort active
+		if leaseMessage and string.find(string.lower(leaseMessage), "full") then
+			return false, "RoomFull:" .. (leaseMessage or "")
+		end
 		return false, leaseMessage or "Unable to start lease."
 	end
 
@@ -567,7 +608,7 @@ local function acceptProspect(player: Player, record: ProspectRecord): (boolean,
 	return true, "Tenant joined your household!"
 end
 
-local function onDecision(player: Player, prospectId: string, decision: string): (boolean, string)
+local function onDecision(player: Player, prospectId: string, decision: string, roomKey: string?): (boolean, string)
 	local state = ensureStateForPlayer(player)
 	local targetSlot = nil
 	local record: ProspectRecord? = nil
@@ -585,16 +626,59 @@ local function onDecision(player: Player, prospectId: string, decision: string):
 
 	local lowerDecision = string.lower(decision)
 	if lowerDecision == "accept" then
+		if record.EscortPlayer then
+			print(
+				string.format(
+					"[TenantProspect] Escort room submission: Player=%s, RoomKey=%s",
+					player.Name,
+					tostring(roomKey)
+				)
+			)
+			if record.EscortPlayer ~= player then
+				return false, "This tenant is already following someone."
+			end
+			local resolvedRoomKey = if typeof(roomKey) == "string" and roomKey ~= "" then roomKey else nil
+			if not resolvedRoomKey then
+				return false, "Walk them into a finished room to finalize."
+			end
+			print(string.format("[TenantProspect] Calling acceptProspect for room: %s", resolvedRoomKey))
+			local success, msg = acceptProspect(player, record, resolvedRoomKey)
+			print(
+				string.format(
+					"[TenantProspect] acceptProspect result: success=%s, msg=%s",
+					tostring(success),
+					tostring(msg)
+				)
+			)
+			if success then
+				destroyProspect(state, targetSlot, "Accepted", true)
+				return true, msg
+			end
+			-- Check if it's a "room full" error - keep escort active
+			if msg and string.find(msg, "RoomFull:") then
+				print("[TenantProspect] Detected RoomFull error, keeping escort active")
+				local cleanMessage = string.gsub(msg, "RoomFull:", "")
+				return false, cleanMessage ~= "" and cleanMessage or "That room is full. Try a different room."
+			end
+			-- Other errors - cancel escort
+			print("[TenantProspect] Non-RoomFull error, canceling escort")
+			return false, msg or "Failed to assign room."
+		end
+
 		local canAccept, reason = canAcceptTenant(player)
 		if not canAccept then
 			return false, reason or "Cannot accept tenant."
 		end
 
-		local success, msg = acceptProspect(player, record)
-		if success then
-			destroyProspect(state, targetSlot, "Accepted", true)
-		end
-		return success, msg
+		record.EscortPlayer = player
+		record.EscortDeadline = serverNow() + ESCORT_TIMEOUT_SECONDS
+		record.NextMoveUnix = 0
+		record.TargetPosition = player.Character
+				and player.Character.PrimaryPart
+				and player.Character.PrimaryPart.Position
+			or record.TargetPosition
+		setTargetAttribute(state, record.Slot, record.TargetPosition)
+		return true, "EscortStart"
 	elseif lowerDecision == "decline" then
 		destroyProspect(state, targetSlot, "Declined")
 		return true, "You declined the tenant."
@@ -619,8 +703,13 @@ function TenantProspectService.Init()
 		cleanupPlayer(player.UserId)
 	end)
 
-	TenantPackets.ProspectDecision.OnServerInvoke = function(player: Player, prospectId: string, decision: string)
-		return onDecision(player, prospectId, decision)
+	TenantPackets.ProspectDecision.OnServerInvoke = function(
+		player: Player,
+		prospectId: string,
+		decision: string,
+		roomKey: string
+	)
+		return onDecision(player, prospectId, decision, roomKey)
 	end
 
 	WorldUpdate.Subscribe(UPDATE_TASK_NAME, 1, onStep)

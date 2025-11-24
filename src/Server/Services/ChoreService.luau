@@ -9,7 +9,7 @@ local ChorePackets = require(ReplicatedStorage.Network.ChorePackets)
 local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local ProgressionService = require(ServerScriptService.Server.Services.ProgressionService)
-local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local ResidentsFolderFinder = require(ReplicatedStorage.Shared.Utilities.ResidentsFolderFinder)
 local RepairManager = require(ServerScriptService.Server.Modules.Chores.RepairManager)
 
 local ChoreService = {}
@@ -51,32 +51,12 @@ local MESS_REWARD = 15
 local MESS_LIFETIME = 300 -- 5 minutes
 local MAX_MESSES_PER_PLOT = 5
 
-local function findTenantFolder(player: Player): Folder?
-	local plotIndex = player:GetAttribute("OwnedPlotIndex")
-	if typeof(plotIndex) ~= "number" then
-		return nil
-	end
-	local plotModel = PlotFinder.FindPlot(plotIndex)
-	if not plotModel then
-		return nil
-	end
-	local residents = plotModel:FindFirstChild("Residents")
-	if residents and residents:IsA("Folder") then
-		return residents
-	end
-	return nil
-end
-
 local function sampleTenantPosition(player: Player, tenantName: string?): Vector3?
 	if typeof(tenantName) ~= "string" or tenantName == "" then
 		return nil
 	end
-	local folder = findTenantFolder(player)
-	if not folder then
-		return nil
-	end
-	local instance = folder:FindFirstChild(tenantName)
-	if not instance or not instance:IsA("Model") then
+	local instance = ResidentsFolderFinder.FindResident(player, tenantName)
+	if not instance then
 		return nil
 	end
 	local primary = instance.PrimaryPart or instance:FindFirstChild("HumanoidRootPart")

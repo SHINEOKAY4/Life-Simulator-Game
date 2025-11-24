@@ -19,6 +19,20 @@ local function tenantRecordShape()
 	}
 end
 
+local function roomRosterShape()
+	return {
+		RoomKey = Packet.String,
+		Label = Packet.String,
+		Level = Packet.NumberS16,
+		Capacity = Packet.NumberU16,
+		Occupied = Packet.NumberU16,
+		MinCellX = Packet.NumberS16,
+		MinCellZ = Packet.NumberS16,
+		SizeX = Packet.NumberU16,
+		SizeZ = Packet.NumberU16,
+	}
+end
+
 TenantPackets.ProspectSpawn = Packet("TenantProspectSpawn", {
 	ProspectId = Packet.String,
 	Slot = Packet.NumberU8,
@@ -51,8 +65,10 @@ TenantPackets.ProspectPrompt = Packet("TenantProspectPrompt", {
 	Traits = { Packet.String },
 })
 
-TenantPackets.ProspectDecision =
-	Packet("TenantProspectDecision", Packet.String, Packet.String):Response(Packet.Boolean8, Packet.StringLong)
+TenantPackets.ProspectDecision = Packet("TenantProspectDecision", Packet.String, Packet.String, Packet.String):Response(
+	Packet.Boolean8,
+	Packet.StringLong
+)
 
 TenantPackets.EvictTenantRequest =
 	Packet("TenantEvictRequest", Packet.String):Response(Packet.Boolean8, Packet.StringLong)
@@ -88,6 +104,37 @@ TenantPackets.TenantDelta = Packet("TenantDelta", {
 	TenantId = Packet.String, -- For deletions
 	TenantData = { -- Optional, if present it's an update/add
 		tenantRecordShape(),
+	},
+})
+
+TenantPackets.RequestTenantRooms = Packet("TenantRoomRosterRequest", {}):Response({
+	UserId = Packet.NumberF64,
+	TotalCapacity = Packet.NumberU16,
+	Available = Packet.NumberU16,
+	Rooms = {
+		roomRosterShape(),
+	},
+})
+
+TenantPackets.RequestRoomDiagnostics = Packet("TenantRoomDiagnosticsRequest", {}):Response({
+	UserId = Packet.NumberF64,
+	Rooms = {
+		{
+			RoomKey = Packet.String,
+			Level = Packet.NumberS16,
+			MinCellX = Packet.NumberS16,
+			MinCellZ = Packet.NumberS16,
+			SizeX = Packet.NumberU16,
+			SizeZ = Packet.NumberU16,
+			CellCount = Packet.NumberU16,
+			CellIndices = { Packet.NumberU32 },
+			Ready = Packet.Boolean8,
+			Reason = Packet.String,
+			HasBed = Packet.Boolean8,
+			IsEnclosed = Packet.Boolean8,
+			Capacity = Packet.NumberU16,
+			Occupied = Packet.NumberU16,
+		},
 	},
 })
 

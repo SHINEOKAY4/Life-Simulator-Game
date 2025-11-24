@@ -114,17 +114,28 @@ local ActiveLevelChangedConnection: RBXScriptConnection? = nil
 local EXIT_BUTTON_BOUND_ATTRIBUTE = "PlotBuilderExitBound"
 local paletteHiddenDuringPreview = false
 
-local function findMenuButton(name: string): GuiButton?
-	local container = MenuFrame:FindFirstChild(name)
+local function resolveGuiButton(container: Instance?): GuiButton?
 	if not container then
 		return nil
 	end
 	if container:IsA("GuiButton") then
 		return container
 	end
-	local button = container:FindFirstChildWhichIsA("GuiButton")
-	if button then
-		return button
+	return container:FindFirstChildWhichIsA("GuiButton")
+end
+
+local function findMenuButton(name: string, aliases: { string }?): GuiButton?
+	local candidates = { name }
+	if aliases then
+		for _, alias in ipairs(aliases) do
+			candidates[#candidates + 1] = alias
+		end
+	end
+	for _, candidate in ipairs(candidates) do
+		local button = resolveGuiButton(MenuFrame:FindFirstChild(candidate))
+		if button then
+			return button
+		end
 	end
 	return nil
 end
@@ -132,7 +143,7 @@ end
 local MenuButtons = {
 	Paint = findMenuButton("Paint"),
 	Storage = findMenuButton("Storage"),
-	Select = findMenuButton("Select"),
+	Select = findMenuButton("Select", { "Expand", "ExpandButton" }),
 	Upgrade = findMenuButton("Upgrade"),
 	Back = findMenuButton("Back"),
 }

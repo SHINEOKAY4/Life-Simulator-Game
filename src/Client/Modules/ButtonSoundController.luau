@@ -4,7 +4,7 @@
 local Players = game:GetService("Players")
 local SoundService = game:GetService("SoundService")
 
-local BUTTON_SOUND_ID = "rbxassetid://103307955424380"
+local BUTTON_SOUND_ID = "rbxassetid://5852470908"
 local CLICK_VOLUME = 0.6
 
 local ButtonSoundController = {}

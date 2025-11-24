@@ -3,7 +3,9 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local InsulationConstants = require(ReplicatedStorage.Shared.Configurations.InsulationConstants)
+local FloodFillCore = require(ReplicatedStorage.Shared.Utilities.FloodFillCore)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local HVACCore = require(ReplicatedStorage.Shared.Utilities.HVACCore)
 local WeatherService = require(ServerScriptService.Server.Services.WeatherService)
 
 local Rooms = {}
@@ -229,84 +231,32 @@ function Rooms.attach(PlotState: any)
 			if self:NormalizeLevel(objectData.yLevel) == level then
 				local spec = ItemFinder.FindItemById(objectData.id)
 				if spec then
-					local heating = 0
-					local cooling = 0
-					local lighting = 0
-					local heaterTarget = nil
-					local coolerTarget = nil
-
-					if spec.TemperatureConfig then
-						local cfg = spec.TemperatureConfig
-						local power = cfg.Power or 0
-						if cfg.Type == "Heater" then
-							heating = power
-							heaterTarget = cfg.TargetTemp
-						elseif cfg.Type == "Cooler" then
-							cooling = power
-							coolerTarget = cfg.TargetTemp
-						end
-					else
-						-- Legacy/Fallback
-						heating = spec.HeatingPower or (spec.Stats and spec.Stats.HeatingPower) or 0
-						cooling = spec.CoolingPower or (spec.Stats and spec.Stats.CoolingPower) or 0
-					end
-
-					if spec.LightingConfig then
-						lighting = spec.LightingConfig.Brightness or 1
-					end
-
-					if heating > 0 or cooling > 0 or lighting > 0 then
-						-- Check Power
-						local requiresPower = spec.RequiresPower
-						local isPowered = objectData.Metadata and objectData.Metadata.IsPowered
-						local hasPower = not requiresPower or isPowered
-
-						-- Check Manual Switch
-						local isOn = true
-						if objectData.Metadata and objectData.Metadata.IsOn ~= nil then
-							isOn = objectData.Metadata.IsOn
-						end
-
-						if hasPower and isOn then
-							local cellIndex = self.Grid:CellToIndex(objectData.cellX, objectData.cellZ)
-							local room = cellMap[cellIndex]
-
-							-- Fix: WallMounted objects (like AC) are on the wall cell, which isn't "in" the room.
-							-- Check the adjacent cell they are facing.
+					local stats = HVACCore.ExtractHVACStats(spec)
+					if stats.Heating > 0 or stats.Cooling > 0 or stats.Lighting > 0 then
+						if HVACCore.IsObjectActive(spec, objectData) then
+							local cellX, cellZ = objectData.cellX, objectData.cellZ
 							local pType = objectData.placementType or spec.PlacementType
-							if not room and (pType == "WallMounted" or pType == "Wall") then
-								local f = objectData.facing
-								local dx, dz = 0, 0
-								if f == "North" then
-									dz = -1
-								elseif f == "South" then
-									dz = 1
-								elseif f == "East" then
-									dx = 1
-								elseif f == "West" then
-									dx = -1
-								end
-
-								if dx ~= 0 or dz ~= 0 then
-									local adjIndex = self.Grid:CellToIndex(objectData.cellX + dx, objectData.cellZ + dz)
-									room = cellMap[adjIndex]
-								end
+							if HVACCore.IsWallMounted(pType) then
+								cellX, cellZ = HVACCore.GetAdjacentCell(cellX, cellZ, objectData.facing)
 							end
 
-							if room then
-								room.HeatingPower += heating
-								room.CoolingPower += cooling
-								room.LightingScore += lighting
+							local cellIndex = self.Grid:CellToIndex(cellX, cellZ)
+							local room = cellMap[cellIndex]
 
-								if heaterTarget then
-									if not room.HeaterTarget or heaterTarget > room.HeaterTarget then
-										room.HeaterTarget = heaterTarget
+							if room then
+								room.HeatingPower += stats.Heating
+								room.CoolingPower += stats.Cooling
+								room.LightingScore += stats.Lighting
+
+								if stats.HeaterTarget then
+									if not room.HeaterTarget or stats.HeaterTarget > room.HeaterTarget then
+										room.HeaterTarget = stats.HeaterTarget
 									end
 								end
 
-								if coolerTarget then
-									if not room.CoolerTarget or coolerTarget < room.CoolerTarget then
-										room.CoolerTarget = coolerTarget
+								if stats.CoolerTarget then
+									if not room.CoolerTarget or stats.CoolerTarget < room.CoolerTarget then
+										room.CoolerTarget = stats.CoolerTarget
 									end
 								end
 							end
@@ -314,29 +264,15 @@ function Rooms.attach(PlotState: any)
 					end
 
 					-- Thermostat Logic
-					if spec.Name == "Thermostat" or (spec.Tags and table.find(spec.Tags, "Control")) then
-						local cellIndex = self.Grid:CellToIndex(objectData.cellX, objectData.cellZ)
-						local room = cellMap[cellIndex]
-
-						-- Handle WallMounted logic
+					if HVACCore.IsThermostat(spec) then
+						local cellX, cellZ = objectData.cellX, objectData.cellZ
 						local pType = objectData.placementType or spec.PlacementType
-						if not room and (pType == "WallMounted" or pType == "Wall") then
-							local f = objectData.facing
-							local dx, dz = 0, 0
-							if f == "North" then
-								dz = -1
-							elseif f == "South" then
-								dz = 1
-							elseif f == "East" then
-								dx = 1
-							elseif f == "West" then
-								dx = -1
-							end
-							if dx ~= 0 or dz ~= 0 then
-								local adjIndex = self.Grid:CellToIndex(objectData.cellX + dx, objectData.cellZ + dz)
-								room = cellMap[adjIndex]
-							end
+						if HVACCore.IsWallMounted(pType) then
+							cellX, cellZ = HVACCore.GetAdjacentCell(cellX, cellZ, objectData.facing)
 						end
+
+						local cellIndex = self.Grid:CellToIndex(cellX, cellZ)
+						local room = cellMap[cellIndex]
 
 						if room and objectData.Metadata and objectData.Metadata.TargetTemp then
 							room.ThermostatTarget = objectData.Metadata.TargetTemp
@@ -367,15 +303,12 @@ function Rooms.attach(PlotState: any)
 		local verticalEdges = self:GetEdgeFreeVerticalForLevel(level)
 		local bedPlacements = collectBedPlacements(self, level)
 
-		local visited = table.create(columns * rows, false)
 		local rooms = {}
 		local cellMap = {}
+		local roomIdCounter = 0
 
-		local function getCellIndex(x: number, z: number)
-			return (z - 1) * columns + x
-		end
-
-		local function getWallInsulation(cellX, cellZ, facing)
+		-- Helper function for wall heat loss calculation
+		local function getWallInsulation(cellX: number, cellZ: number, facing: string): number
 			local key = self:PlacementKeyForType(cellX, cellZ, facing, "Wall", level)
 			local saved = self.Save.PlacedObjects[key]
 			if not saved then
@@ -388,257 +321,158 @@ function Rooms.attach(PlotState: any)
 				loss = InsulationConstants.GlassWallLoss
 			end
 
-			-- Check for windows/doors (WallMounted objects)
-			-- This is expensive if we iterate all objects.
-			-- Optimization: WallMounted objects should be indexed by parent wall?
-			-- Currently they are just PlacedObjects with "WallMounted" type.
-			-- But they don't link to the wall explicitly in Save data structure (except maybe visually).
-			-- Actually, WallMounted objects have a PlacementKey that matches the wall's location?
-			-- No, WallMounted usually have their own position.
-			-- Let's assume for V1 we just check the wall material.
-			-- If we want to check windows, we need to know if there is a window at this location.
-			-- Windows usually replace the wall or attach to it.
-			-- If they replace (Door), the wall ID changes.
-
 			if spec and spec.WallVariant == "Door" then
 				loss = InsulationConstants.DoorLoss
-			elseif spec and spec.WallVariant == "Window" then -- If windows are walls
+			elseif spec and spec.WallVariant == "Window" then
 				loss = InsulationConstants.WindowLoss
 			end
 
 			return loss
 		end
 
-		local roomIdCounter = 0
+		-- Edge checker function for FloodFillCore
+		local function isEdgeBlocked(cx: number, cz: number, direction: string): boolean
+			if direction == "North" then
+				local edgeIdx = self:HorizontalEdgeIndex(cx, cz)
+				return not horizontalEdges[edgeIdx] -- true if wall exists (edge not free)
+			elseif direction == "South" then
+				local edgeIdx = self:HorizontalEdgeIndex(cx, cz + 1)
+				return not horizontalEdges[edgeIdx]
+			elseif direction == "West" then
+				local edgeIdx = self:VerticalEdgeIndex(cx, cz)
+				return not verticalEdges[edgeIdx]
+			elseif direction == "East" then
+				local edgeIdx = self:VerticalEdgeIndex(cx + 1, cz)
+				return not verticalEdges[edgeIdx]
+			end
+			return true
+		end
 
-		for z = 1, rows do
-			for x = 1, columns do
-				local cellIndex = getCellIndex(x, z)
+		-- Use FloodFillCore to find all room areas
+		local areas = FloodFillCore.FindAllAreas(columns, rows, floorFilled, isEdgeBlocked, nil)
 
-				-- Skip if no floor or already visited
-				if not floorFilled[cellIndex] or visited[cellIndex] then
-					continue
-				end
+		-- Convert areas to Room objects with heat loss calculation
+		for _, area in ipairs(areas) do
+			roomIdCounter += 1
+			local currentRoom: Room = {
+				Id = roomIdCounter,
+				Level = level,
+				Cells = area.Cells,
+				CellCount = area.CellCount,
+				MinX = area.MinX,
+				MaxX = area.MaxX,
+				MinZ = area.MinZ,
+				MaxZ = area.MaxZ,
+				WidthCells = 0,
+				DepthCells = 0,
+				RoomKey = "",
+				InsulationScore = 0,
+				HeatingPower = 0,
+				CoolingPower = 0,
+				CurrentTemperature = WeatherService.GetCurrentTemperature(),
+				LightingScore = 0,
+				HeaterTarget = nil,
+				CoolerTarget = nil,
+				ThermostatTarget = nil,
+				HasBed = false,
+				BedCount = 0,
+				IsEnclosed = false,
+				IsTenantRoom = false,
+				TenantCapacity = 0,
+			}
 
-				-- Start new room
-				roomIdCounter += 1
-				local currentRoom: Room = {
-					Id = roomIdCounter,
-					Level = level,
-					Cells = {},
-					CellCount = 0,
-					MinX = x,
-					MaxX = x,
-					MinZ = z,
-					MaxZ = z,
-					WidthCells = 0,
-					DepthCells = 0,
-					RoomKey = "",
-					InsulationScore = 0,
-					HeatingPower = 0,
-					CoolingPower = 0,
-					CurrentTemperature = WeatherService.GetCurrentTemperature(),
-					LightingScore = 0,
-					HeaterTarget = nil,
-					CoolerTarget = nil,
-					ThermostatTarget = nil,
-					HasBed = false,
-					BedCount = 0,
-					IsEnclosed = false,
-					IsTenantRoom = false,
-					TenantCapacity = 0,
+			-- Map cells to room
+			for _, cellIndex in ipairs(area.Cells) do
+				cellMap[cellIndex] = currentRoom
+			end
+
+			-- Calculate heat loss for this room
+			local totalHeatLoss = 0
+			for _, cellIndex in ipairs(area.Cells) do
+				local cx = ((cellIndex - 1) % columns) + 1
+				local cz = math.floor((cellIndex - 1) / columns) + 1
+
+				-- Check all 4 walls
+				local directions = {
+					{
+						facing = "North",
+						nx = cx,
+						nz = cz - 1,
+						edgeCheck = function()
+							local edgeIdx = self:HorizontalEdgeIndex(cx, cz)
+							return horizontalEdges[edgeIdx]
+						end,
+					},
+					{
+						facing = "South",
+						nx = cx,
+						nz = cz + 1,
+						edgeCheck = function()
+							local edgeIdx = self:HorizontalEdgeIndex(cx, cz + 1)
+							return horizontalEdges[edgeIdx]
+						end,
+					},
+					{
+						facing = "West",
+						nx = cx - 1,
+						nz = cz,
+						edgeCheck = function()
+							local edgeIdx = self:VerticalEdgeIndex(cx, cz)
+							return verticalEdges[edgeIdx]
+						end,
+					},
+					{
+						facing = "East",
+						nx = cx + 1,
+						nz = cz,
+						edgeCheck = function()
+							local edgeIdx = self:VerticalEdgeIndex(cx + 1, cz)
+							return verticalEdges[edgeIdx]
+						end,
+					},
 				}
 
-				local totalHeatLoss = 0
-				local queue = { x, z } -- Interleaved x, z for performance (avoid table creation per node)
-				local head = 1
-				visited[cellIndex] = true
+				for _, dir in ipairs(directions) do
+					local neighborX = dir.nx
+					local neighborZ = dir.nz
+					local isEdgeFree = dir.edgeCheck()
 
-				while head <= #queue do
-					local cx = queue[head]
-					local cz = queue[head + 1]
-					head += 2
+					-- Check if neighbor is within bounds and has floor
+					local hasNeighborFloor = neighborX >= 1
+						and neighborX <= columns
+						and neighborZ >= 1
+						and neighborZ <= rows
+						and floorFilled[self.Grid:CellToIndex(neighborX, neighborZ)]
 
-					local cIndex = getCellIndex(cx, cz)
-
-					table.insert(currentRoom.Cells, cIndex)
-					currentRoom.CellCount += 1
-					cellMap[cIndex] = currentRoom
-
-					-- Update bounds
-					if cx < currentRoom.MinX then
-						currentRoom.MinX = cx
-					end
-					if cx > currentRoom.MaxX then
-						currentRoom.MaxX = cx
-					end
-					if cz < currentRoom.MinZ then
-						currentRoom.MinZ = cz
-					end
-					if cz > currentRoom.MaxZ then
-						currentRoom.MaxZ = cz
-					end
-
-					-- Check Neighbors
-
-					-- North (cz - 1)
-					if cz > 1 then
-						local nIndex = getCellIndex(cx, cz - 1)
-						local edgeIdx = self:HorizontalEdgeIndex(cx, cz)
-						local isEdgeFree = horizontalEdges[edgeIdx]
-
-						if floorFilled[nIndex] then
-							if isEdgeFree then
-								if not visited[nIndex] then
-									visited[nIndex] = true
-									table.insert(queue, cx)
-									table.insert(queue, cz - 1)
-								end
-							else
-								-- Wall between rooms
-								totalHeatLoss += getWallInsulation(cx, cz, "North")
-							end
-						else
-							-- Edge of floor
-							if not isEdgeFree then
-								totalHeatLoss += getWallInsulation(cx, cz, "North")
-							else
-								totalHeatLoss += InsulationConstants.OpenAirLoss
-							end
-						end
-					else
-						-- Edge of grid
-						local edgeIdx = self:HorizontalEdgeIndex(cx, cz)
-						if not horizontalEdges[edgeIdx] then
-							totalHeatLoss += getWallInsulation(cx, cz, "North")
-						else
-							totalHeatLoss += InsulationConstants.OpenAirLoss
-						end
-					end
-
-					-- South (cz + 1)
-					if cz < rows then
-						local sIndex = getCellIndex(cx, cz + 1)
-						local edgeIdx = self:HorizontalEdgeIndex(cx, cz + 1)
-						local isEdgeFree = horizontalEdges[edgeIdx]
-
-						if floorFilled[sIndex] then
-							if isEdgeFree then
-								if not visited[sIndex] then
-									visited[sIndex] = true
-									table.insert(queue, cx)
-									table.insert(queue, cz + 1)
-								end
-							else
-								totalHeatLoss += getWallInsulation(cx, cz, "South")
-							end
-						else
-							if not isEdgeFree then
-								totalHeatLoss += getWallInsulation(cx, cz, "South")
-							else
-								totalHeatLoss += InsulationConstants.OpenAirLoss
-							end
-						end
-					else
-						local edgeIdx = self:HorizontalEdgeIndex(cx, cz + 1)
-						if not horizontalEdges[edgeIdx] then
-							totalHeatLoss += getWallInsulation(cx, cz, "South")
-						else
-							totalHeatLoss += InsulationConstants.OpenAirLoss
-						end
-					end
-
-					-- West (cx - 1)
-					if cx > 1 then
-						local wIndex = getCellIndex(cx - 1, cz)
-						local edgeIdx = self:VerticalEdgeIndex(cx, cz)
-						local isEdgeFree = verticalEdges[edgeIdx]
-
-						if floorFilled[wIndex] then
-							if isEdgeFree then
-								if not visited[wIndex] then
-									visited[wIndex] = true
-									table.insert(queue, cx - 1)
-									table.insert(queue, cz)
-								end
-							else
-								totalHeatLoss += getWallInsulation(cx, cz, "West")
-							end
-						else
-							if not isEdgeFree then
-								totalHeatLoss += getWallInsulation(cx, cz, "West")
-							else
-								totalHeatLoss += InsulationConstants.OpenAirLoss
-							end
-						end
-					else
-						local edgeIdx = self:VerticalEdgeIndex(cx, cz)
-						if not verticalEdges[edgeIdx] then
-							totalHeatLoss += getWallInsulation(cx, cz, "West")
-						else
-							totalHeatLoss += InsulationConstants.OpenAirLoss
-						end
-					end
-
-					-- East (cx + 1)
-					if cx < columns then
-						local eIndex = getCellIndex(cx + 1, cz)
-						local edgeIdx = self:VerticalEdgeIndex(cx + 1, cz)
-						local isEdgeFree = verticalEdges[edgeIdx]
-
-						if floorFilled[eIndex] then
-							if isEdgeFree then
-								if not visited[eIndex] then
-									visited[eIndex] = true
-									table.insert(queue, cx + 1)
-									table.insert(queue, cz)
-								end
-							else
-								totalHeatLoss += getWallInsulation(cx, cz, "East")
-							end
-						else
-							if not isEdgeFree then
-								totalHeatLoss += getWallInsulation(cx, cz, "East")
-							else
-								totalHeatLoss += InsulationConstants.OpenAirLoss
-							end
-						end
-					else
-						local edgeIdx = self:VerticalEdgeIndex(cx + 1, cz)
-						if not verticalEdges[edgeIdx] then
-							totalHeatLoss += getWallInsulation(cx, cz, "East")
-						else
-							totalHeatLoss += InsulationConstants.OpenAirLoss
-						end
-					end
-
-					-- Vertical Heat Loss
-					-- Up
-					if self:HasFloorAtCell(level + 1, cx, cz) then
-						totalHeatLoss += InsulationConstants.FloorLoss
-					elseif self:HasRoofCoverage(level, cx, cz) then
-						totalHeatLoss += InsulationConstants.RoofLoss
-					else
+					if not isEdgeFree then
+						-- Wall exists
+						totalHeatLoss += getWallInsulation(cx, cz, dir.facing)
+					elseif not hasNeighborFloor then
+						-- Edge of floor, open air
 						totalHeatLoss += InsulationConstants.OpenAirLoss
 					end
-
-					-- Down
-					totalHeatLoss += InsulationConstants.FloorLoss
-
-					-- Check for HVAC objects in this cell
-					-- Note: We skip HVAC scanning inside this loop for efficiency.
-					-- We iterate PlacedObjects separately and assign them to rooms.
+					-- If neighbor has floor and edge is free, it's same room - no loss
 				end
 
-				currentRoom.InsulationScore = totalHeatLoss
-				local widthCells = currentRoom.MaxX - currentRoom.MinX + 1
-				local depthCells = currentRoom.MaxZ - currentRoom.MinZ + 1
-				currentRoom.WidthCells = widthCells
-				currentRoom.DepthCells = depthCells
-				currentRoom.RoomKey = computeRoomKey(level, currentRoom.MinX, currentRoom.MinZ)
-				currentRoom.IsEnclosed = isPerimeterEnclosed(self, currentRoom, horizontalEdges, verticalEdges)
-				table.insert(rooms, currentRoom)
+				-- Vertical heat loss (up/down)
+				if self:HasFloorAtCell(level + 1, cx, cz) then
+					totalHeatLoss += InsulationConstants.FloorLoss
+				elseif self:HasRoofCoverage(level, cx, cz) then
+					totalHeatLoss += InsulationConstants.RoofLoss
+				else
+					totalHeatLoss += InsulationConstants.OpenAirLoss
+				end
+				totalHeatLoss += InsulationConstants.FloorLoss -- Down
 			end
+
+			currentRoom.InsulationScore = totalHeatLoss
+			local widthCells = currentRoom.MaxX - currentRoom.MinX + 1
+			local depthCells = currentRoom.MaxZ - currentRoom.MinZ + 1
+			currentRoom.WidthCells = widthCells
+			currentRoom.DepthCells = depthCells
+			currentRoom.RoomKey = computeRoomKey(level, currentRoom.MinX, currentRoom.MinZ)
+			currentRoom.IsEnclosed = isPerimeterEnclosed(self, currentRoom, horizontalEdges, verticalEdges)
+			table.insert(rooms, currentRoom)
 		end
 
 		local bedCountsByRoom = buildBedCountsForRooms(bedPlacements, cellMap)
@@ -667,6 +501,27 @@ function Rooms.attach(PlotState: any)
 		}
 
 		self:UpdateRoomStats(level)
+
+		-- DEBUG: Print found rooms
+		print(string.format("[Rooms] Recalculated level %d. Found %d rooms.", level, #rooms))
+		for _, r in ipairs(rooms) do
+			print(
+				string.format(
+					"  Room %d (%s): %dx%d cells (X:%d-%d, Z:%d-%d) Cells=%d Enclosed=%s Bed=%s",
+					r.Id,
+					r.RoomKey,
+					r.WidthCells,
+					r.DepthCells,
+					r.MinX,
+					r.MaxX,
+					r.MinZ,
+					r.MaxZ,
+					r.CellCount,
+					tostring(r.IsEnclosed),
+					tostring(r.HasBed)
+				)
+			)
+		end
 
 		return rooms
 	end

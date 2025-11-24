@@ -10,12 +10,15 @@ local LOCAL_PLAYER = Players.LocalPlayer or Players.PlayerAdded:Wait()
 
 local SOUND_IDS = {
 	Ambient = "rbxassetid://526738965",
+	Music1 = "rbxassetid://97135398416629",
+	Music2 = "rbxassetid://1842205471",
 	BillingDue = "rbxassetid://8060079174",
 	ButtonClick = "rbxassetid://88442833509532",
 	BillToggle = "rbxassetid://135041843438612",
 	BillPaid = "rbxassetid://5613553529",
 	PlacementSuccess = "rbxassetid://9119999441",
 	Notification = "rbxassetid://9119999441",
+	ChoreCompleted = "rbxassetid://8486683243",
 }
 
 local BILLING_SFX_OPTIONS = {
@@ -207,6 +210,10 @@ end
 
 function SoundtrackManager.PlayPlacementSuccess()
 	playSfx(SOUND_IDS.BillPaid, BILL_PAID_SFX_OPTIONS)
+end
+
+function SoundtrackManager.PlayChoreCompleted()
+	playSfx(SOUND_IDS.ChoreCompleted, { Volume = 0.7 })
 end
 
 SoundtrackManager.NotificationSoundId = SOUND_IDS.Notification

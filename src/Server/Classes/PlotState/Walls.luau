@@ -173,8 +173,10 @@ function Walls.attach(PlotState)
 		local occupancy = self:GetCellFreeForLevel(level)
 		if alignment == "Horizontal" then
 			horizontalEdges[self:HorizontalEdgeIndex(edgeX, edgeZ)] = false
+			-- print(string.format("[Walls] Blocked Horizontal Edge (%d, %d)", edgeX, edgeZ))
 		elseif alignment == "Vertical" then
 			verticalEdges[self:VerticalEdgeIndex(edgeX, edgeZ)] = false
+			-- print(string.format("[Walls] Blocked Vertical Edge (%d, %d)", edgeX, edgeZ))
 		elseif alignment == "DiagonalForward" then
 			diagForwardEdges[self:DiagonalForwardEdgeIndex(edgeX, edgeZ)] = false
 		elseif alignment == "DiagonalBackward" then
@@ -300,6 +302,9 @@ function Walls.attach(PlotState)
 		saved.Metadata.RequiresFloorOnBothSides = requiresFloorOnBothSides == true
 		saved.yLevel = level
 		self.Save.PlacedObjects[key] = saved
+		if self.InvalidateRooms then
+			self:InvalidateRooms(level)
+		end
 		return previousId, nil
 	end
 
@@ -319,18 +324,24 @@ function Walls.attach(PlotState)
 		local resolvedFacing = PlacementKey.NormalizeFacing(facing)
 		local removedId = saved.id
 		local metadata = saved.Metadata
+
+		-- Restore wall if this is a door removal (PreviousId = original wall)
 		if metadata and metadata.PreviousId then
 			saved.id = metadata.PreviousId
 			local savedMutable: any = saved
 			savedMutable.Metadata = nil
 			savedMutable.yLevel = level
 			self.Save.PlacedObjects[key] = saved
+			if self.InvalidateRooms then
+				self:InvalidateRooms(level)
+			end
 			return {
 				removedId = removedId,
 				restoredId = saved.id,
 			}
 		end
 
+		-- Full wall removal: free the edge and delete from PlacedObjects
 		local alignment, edgeX, edgeZ = edgeOfCell(resolvedFacing, cellX, cellZ)
 		local horizontalEdges = self:GetEdgeFreeHorizontalForLevel(level)
 		local verticalEdges = self:GetEdgeFreeVerticalForLevel(level)

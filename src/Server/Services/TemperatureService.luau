@@ -9,6 +9,8 @@ local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 local Packets = require(ReplicatedStorage.Network.TemperaturePackets)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local HVACCore = require(ReplicatedStorage.Shared.Utilities.HVACCore)
+local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local WeatherService = require(ServerScriptService.Server.Services.WeatherService)
 local _InsulationConstants = require(ReplicatedStorage.Shared.Configurations.InsulationConstants)
@@ -16,6 +18,7 @@ local _InsulationConstants = require(ReplicatedStorage.Shared.Configurations.Ins
 local TemperatureService = {}
 
 function TemperatureService.Init()
+	print("[TemperatureService] Initializing temperature service")
 	-- Update temperature every 1 second
 	WorldUpdate.Subscribe("TemperatureUpdate", 1.0, function(dt)
 		TemperatureService:Update(dt)
@@ -36,9 +39,8 @@ function TemperatureService.Init()
 		local foundObj = nil
 		for key, obj in pairs(plotState.Save.PlacedObjects) do
 			if obj.cellX == x and obj.cellZ == z and plotState:NormalizeLevel(obj.yLevel) == level then
-				-- Check if it's a thermostat
 				local spec = ItemFinder.FindItemById(obj.id)
-				if spec and spec.Name == "Thermostat" then
+				if spec and HVACCore.IsThermostat(spec) then
 					foundKey = key
 					foundObj = obj
 					break
@@ -65,20 +67,8 @@ function TemperatureService.Init()
 
 			-- If not found directly, try adjacent based on facing (WallMounted logic)
 			if not room and foundObj then
-				local f = foundObj.facing
-				local dx, dz = 0, 0
-				if f == "North" then
-					dz = -1
-				elseif f == "South" then
-					dz = 1
-				elseif f == "East" then
-					dx = 1
-				elseif f == "West" then
-					dx = -1
-				end
-				if dx ~= 0 or dz ~= 0 then
-					room = plotState:GetRoomAt(x + dx, z + dz, level)
-				end
+				local adjX, adjZ = HVACCore.GetAdjacentCell(x, z, foundObj.facing)
+				room = plotState:GetRoomAt(adjX, adjZ, level)
 			end
 
 			if room then
@@ -104,7 +94,7 @@ function TemperatureService.Init()
 		for _, obj in pairs(plotState.Save.PlacedObjects) do
 			if obj.cellX == x and obj.cellZ == z and plotState:NormalizeLevel(obj.yLevel) == level then
 				local spec = ItemFinder.FindItemById(obj.id)
-				if spec and spec.Name == "Thermostat" then
+				if spec and HVACCore.IsThermostat(spec) then
 					foundObj = obj
 					break
 				end
@@ -115,20 +105,8 @@ function TemperatureService.Init()
 
 		-- If not found directly, try adjacent based on facing (WallMounted logic)
 		if not room and foundObj then
-			local f = foundObj.facing
-			local dx, dz = 0, 0
-			if f == "North" then
-				dz = -1
-			elseif f == "South" then
-				dz = 1
-			elseif f == "East" then
-				dx = 1
-			elseif f == "West" then
-				dx = -1
-			end
-			if dx ~= 0 or dz ~= 0 then
-				room = plotState:GetRoomAt(x + dx, z + dz, level)
-			end
+			local adjX, adjZ = HVACCore.GetAdjacentCell(x, z, foundObj.facing)
+			room = plotState:GetRoomAt(adjX, adjZ, level)
 		end
 
 		if room then
@@ -153,33 +131,40 @@ function TemperatureService:Update(dt: number)
 	for _, player in ipairs(Players:GetPlayers()) do
 		local plotState = PlotService.GetState(player)
 		if plotState then
-			local updates = {}
 			local minLevel = plotState.DefaultLevel or 0
 			local maxLevel = plotState.MaxFloorLevel or 3
-			local columns = plotState.Grid.Columns
+
+			-- Get the plot model once per player using PlotFinder
+			local plotIndex = player:GetAttribute("OwnedPlotIndex")
+			if typeof(plotIndex) ~= "number" then
+				print("[TemperatureService] WARNING: No plot index for player", player.Name)
+				continue
+			end
+
+			local plotModel = PlotFinder.FindPlot(plotIndex)
+			if not plotModel then
+				print("[TemperatureService] WARNING: Plot model not found for player", player.Name)
+				continue
+			end
 
 			for level = minLevel, maxLevel do
 				local rooms = plotState:GetRoomsForLevel(level)
 				for _, room in ipairs(rooms) do
 					self:UpdateRoomTemperature(room, dt)
 
-					-- Pack for network
-					if room.CellCount > 0 then
-						local firstCellIndex = room.Cells[1]
-						local x = (firstCellIndex - 1) % columns + 1
-						local z = math.floor((firstCellIndex - 1) / columns) + 1
-						table.insert(updates, {
-							X = x,
-							Z = z,
-							Level = level,
-							Temp = room.CurrentTemperature,
-						})
-					end
+					-- Replicate temperature via Plot Model Attribute (efficient, stable)
+					-- Use structured key: "RoomTemp_Level_RoomId"
+					local attrKey = string.format("RoomTemp_%d_%d", level, room.Id)
+					plotModel:SetAttribute(attrKey, room.CurrentTemperature)
+					print(
+						string.format(
+							"[TemperatureService] Set %s = %.1f°C (ambient: %.1f°C)",
+							attrKey,
+							room.CurrentTemperature,
+							WeatherService.GetCurrentTemperature()
+						)
+					)
 				end
-			end
-
-			if #updates > 0 then
-				Packets.Update:FireClient(player, updates)
 			end
 		end
 	end
@@ -191,6 +176,18 @@ function TemperatureService:UpdateRoomTemperature(room: any, dt: number)
 	local heatingCap = room.HeatingPower
 	local coolingCap = room.CoolingPower
 	local current = room.CurrentTemperature
+
+	print(
+		string.format(
+			"[TemperatureService] UpdateRoom: RoomId=%d, Current=%.1f°C, Ambient=%.1f°C, Insulation=%.2f, Heating=%.1f, Cooling=%.1f",
+			room.Id or 0,
+			current,
+			ambient,
+			insulation,
+			heatingCap,
+			coolingCap
+		)
+	)
 
 	-- Physics Constants
 	local THERMAL_MASS_PER_CELL = 50 -- Joules/Degree (Arbitrary unit to tune speed)

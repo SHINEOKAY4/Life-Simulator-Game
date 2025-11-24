@@ -1,10 +1,8 @@
 --!strict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
-local Players = game:GetService("Players")
 
 local WeatherConfig = require(ReplicatedStorage.Shared.Configurations.WeatherConfig)
-local WeatherPackets = require(ReplicatedStorage.Network.WeatherPackets)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 
@@ -25,6 +23,31 @@ local _currentState: WeatherState = {
 	NextWeatherType = "Sunny",
 	LastDayIndex = -1,
 }
+
+-- Create ReplicatedStorage folder for weather state (auto-replicates to clients)
+local weatherFolder = ReplicatedStorage:FindFirstChild("WeatherState")
+if not weatherFolder then
+	weatherFolder = Instance.new("Folder")
+	weatherFolder.Name = "WeatherState"
+	weatherFolder.Parent = ReplicatedStorage
+end
+
+local function getOrCreateValue(name: string, valueType: string, default: any): StringValue | NumberValue
+	local existing = weatherFolder:FindFirstChild(name)
+	if existing then
+		return existing :: any
+	end
+	local value = Instance.new(valueType :: any)
+	value.Name = name
+	value.Value = default
+	value.Parent = weatherFolder
+	return value :: any
+end
+
+local seasonValue = getOrCreateValue("Season", "StringValue", "Spring") :: StringValue
+local dayValue = getOrCreateValue("DayInSeason", "NumberValue", 1) :: NumberValue
+local weatherValue = getOrCreateValue("WeatherType", "StringValue", "Sunny") :: StringValue
+local nextWeatherValue = getOrCreateValue("NextWeatherType", "StringValue", "Sunny") :: StringValue
 
 local function pickWeatherForSeason(season: WeatherConfig.Season): WeatherConfig.WeatherType
 	local weights = WeatherConfig.WeatherWeights[season]
@@ -71,13 +94,11 @@ local function updateWeatherState()
 	_currentState.NextWeatherType = nextWeather
 	_currentState.LastDayIndex = dayIndex
 
-	-- Replicate
-	WeatherPackets.WeatherUpdate:Fire({
-		Season = _currentState.Season,
-		DayInSeason = _currentState.DayInSeason,
-		WeatherType = _currentState.WeatherType,
-		NextWeatherType = _currentState.NextWeatherType,
-	})
+	-- Replicate via Value objects (automatic, zero packets)
+	seasonValue.Value = season
+	dayValue.Value = dayInSeason
+	weatherValue.Value = newWeather
+	nextWeatherValue.Value = nextWeather
 
 	print(
 		string.format(
@@ -101,15 +122,7 @@ function WeatherService.Start()
 		updateWeatherState()
 	end)
 
-	-- Sync new players
-	Players.PlayerAdded:Connect(function(player)
-		WeatherPackets.WeatherUpdate:FireClient(player, {
-			Season = _currentState.Season,
-			DayInSeason = _currentState.DayInSeason,
-			WeatherType = _currentState.WeatherType,
-			NextWeatherType = _currentState.NextWeatherType,
-		})
-	end)
+	-- No PlayerAdded sync needed - Value objects replicate automatically!
 end
 
 function WeatherService.GetCurrentTemperature(): number

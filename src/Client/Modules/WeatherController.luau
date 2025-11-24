@@ -1,7 +1,6 @@
 --!strict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local WeatherConfig = require(ReplicatedStorage.Shared.Configurations.WeatherConfig)
-local WeatherPackets = require(ReplicatedStorage.Network.WeatherPackets)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 
 local WeatherController = {}
@@ -14,14 +13,46 @@ local _currentState = {
 }
 
 function WeatherController.Start()
-	WeatherPackets.WeatherUpdate.OnClientEvent:Connect(function(data)
-		_currentState.Season = data.Season :: WeatherConfig.Season
-		_currentState.DayInSeason = data.DayInSeason
-		_currentState.WeatherType = data.WeatherType :: WeatherConfig.WeatherType
-		_currentState.NextWeatherType = data.NextWeatherType :: WeatherConfig.WeatherType
+	-- Read weather state from ReplicatedStorage Value objects (auto-replicated, zero packets)
+	local weatherFolder = ReplicatedStorage:WaitForChild("WeatherState", 10)
+	if not weatherFolder then
+		warn("[WeatherController] WeatherState folder not found in ReplicatedStorage")
+		return
+	end
 
-		-- TODO: Update visuals (skybox, particles)
-		print(string.format("[WeatherController] Updated: %s, %s", _currentState.Season, _currentState.WeatherType))
+	local seasonValue = weatherFolder:WaitForChild("Season", 5) :: StringValue
+	local dayValue = weatherFolder:WaitForChild("DayInSeason", 5) :: NumberValue
+	local weatherValue = weatherFolder:WaitForChild("WeatherType", 5) :: StringValue
+	local nextWeatherValue = weatherFolder:WaitForChild("NextWeatherType", 5) :: StringValue
+
+	if not (seasonValue and dayValue and weatherValue and nextWeatherValue) then
+		warn("[WeatherController] Missing weather Value objects")
+		return
+	end
+
+	-- Initialize from current values
+	_currentState.Season = seasonValue.Value :: WeatherConfig.Season
+	_currentState.DayInSeason = dayValue.Value
+	_currentState.WeatherType = weatherValue.Value :: WeatherConfig.WeatherType
+	_currentState.NextWeatherType = nextWeatherValue.Value :: WeatherConfig.WeatherType
+
+	-- Listen for changes
+	seasonValue.Changed:Connect(function(value)
+		_currentState.Season = value :: WeatherConfig.Season
+		print(string.format("[WeatherController] Season changed: %s", value))
+	end)
+
+	dayValue.Changed:Connect(function(value)
+		_currentState.DayInSeason = value
+	end)
+
+	weatherValue.Changed:Connect(function(value)
+		_currentState.WeatherType = value :: WeatherConfig.WeatherType
+		print(string.format("[WeatherController] Weather changed: %s", value))
+	end)
+
+	nextWeatherValue.Changed:Connect(function(value)
+		_currentState.NextWeatherType = value :: WeatherConfig.WeatherType
 	end)
 end
 

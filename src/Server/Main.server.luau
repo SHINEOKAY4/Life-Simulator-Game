@@ -75,7 +75,7 @@ end
 Players.PlayerAdded:Connect(OnPlayerAdded)
 Players.PlayerRemoving:Connect(OnPlayerRemoving)
 
-local _ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
+--local _ResidentDebug = require(ServerScriptService.Server.Utilities.ResidentDebug)
 
 --_ResidentDebug.SetChannelEnabled("Movement", true)
 --_ResidentDebug.SetChannelEnabled("Action", true)

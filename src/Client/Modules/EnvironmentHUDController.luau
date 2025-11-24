@@ -4,15 +4,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
-local Packets = require(ReplicatedStorage.Network.TemperaturePackets)
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
-local InsulationConstants = require(ReplicatedStorage.Shared.Configurations.InsulationConstants)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local WeatherController = require(script.Parent.WeatherController)
+local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 
 local EnvironmentHUDController = {}
 
-local RoomTemperatures: { [number]: { [number]: number } } = {} -- [Level][RoomId] = Temp
 local CurrentRoomId: number? = nil
 local CurrentLevel: number? = nil
 
@@ -300,23 +298,7 @@ end
 function EnvironmentHUDController.Init()
 	createUI()
 
-	-- Network Listeners for Temperature
-	Packets.Update.OnClientEvent:Connect(function(updates)
-		for _, update in ipairs(updates) do
-			local level = update.Level
-			local x = update.X
-			local z = update.Z
-			local temp = update.Temp
-
-			local roomId = PlotStateStore.GetRoomIdAtCell(level, x, z)
-			if roomId then
-				if not RoomTemperatures[level] then
-					RoomTemperatures[level] = {}
-				end
-				RoomTemperatures[level][roomId] = temp
-			end
-		end
-	end)
+	-- Temperature now replicates via Instance Attributes (no packets needed)
 
 	-- Update Loop
 	local lastUpdate = 0
@@ -379,14 +361,45 @@ function EnvironmentHUDController.Init()
 		end
 
 		local roomId = PlotStateStore.GetRoomIdAtCell(level, cellX, cellZ)
+
+		-- Track room/cell changes
 		CurrentRoomId = roomId
 		CurrentLevel = level
 
 		if CurrentRoomId and CurrentLevel ~= nil then
-			local temps = RoomTemperatures[CurrentLevel]
-			local temp = temps and temps[CurrentRoomId]
+			-- Read temperature from plot model attribute (efficient, stable)
+			local localPlayer = Players.LocalPlayer
+			local plotIndexValue = localPlayer:GetAttribute("OwnedPlotIndex")
+			local temp: number? = nil
+
+			if typeof(plotIndexValue) == "number" then
+				local plotModel = PlotFinder.FindPlot(plotIndexValue)
+				if plotModel then
+					-- Use structured key: "RoomTemp_Level_RoomId"
+					local attrKey = string.format("RoomTemp_%d_%d", CurrentLevel, CurrentRoomId)
+					local attrValue = plotModel:GetAttribute(attrKey)
+					if typeof(attrValue) == "number" then
+						temp = attrValue
+					end
+					print(
+						string.format(
+							"[EnvironmentHUD] Read %s from plot model: %s",
+							attrKey,
+							if temp then string.format("%.1f°C", temp) else "nil"
+						)
+					)
+				else
+					print(string.format("[EnvironmentHUD] Plot model not found: %s", tostring(plotIndexValue)))
+				end
+			end
+
+			-- Default to current weather temperature if no data yet (not hardcoded 20°C)
 			if not temp then
-				temp = InsulationConstants.AmbientTemperature
+				local fallbackTemp = WeatherController.GetCurrentTemperature()
+				temp = fallbackTemp
+				print(
+					string.format("[EnvironmentHUD] No temp attribute, using weather fallback: %.1f°C", fallbackTemp)
+				)
 			end
 			updateTemperatureVisuals(temp, true)
 		else

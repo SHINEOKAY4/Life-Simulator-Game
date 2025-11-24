@@ -91,13 +91,8 @@ local function extractNumber(source: { [string]: any }?, key: string): number?
 	if typeof(source) ~= "table" then
 		return nil
 	end
-
 	local value = source[key]
-	if typeof(value) == "number" then
-		return value
-	end
-
-	return nil
+	return if typeof(value) == "number" then value else nil
 end
 
 export type SpawnOptions = {
@@ -122,17 +117,21 @@ local function coerceVector3(value: any, fallback: Vector3): Vector3
 	return Vector3.new(xValue, yValue, zValue)
 end
 
-local function resolveWallMountMetadata(metadata: { [string]: any }?): { [string]: any }?
+local function extractMountData(metadata: { [string]: any }?, key: string): { [string]: any }?
 	if typeof(metadata) ~= "table" then
 		return nil
 	end
+	local data = metadata[key]
+	return if typeof(data) == "table" then data else nil
+end
 
-	local wallData = metadata.WallMountData
-	if typeof(wallData) ~= "table" then
+local function resolveWallMountMetadata(metadata: { [string]: any }?): { [string]: any }?
+	local wallData = extractMountData(metadata, "WallMountData")
+	if not wallData then
 		return nil
 	end
 
-	local resolved = {
+	return {
 		ReferenceCellX = wallData.ReferenceCellX,
 		ReferenceCellZ = wallData.ReferenceCellZ,
 		AttachedFacing = wallData.AttachedFacing,
@@ -141,17 +140,11 @@ local function resolveWallMountMetadata(metadata: { [string]: any }?): { [string
 		WorldPosition = coerceVector3(wallData.WorldPosition, Vector3.new()),
 		WallNormal = coerceVector3(wallData.WallNormal, Vector3.new(0, 0, -1)),
 	}
-
-	return resolved
 end
 
 local function resolveCeilingMountMetadata(metadata: { [string]: any }?): { [string]: any }?
-	if typeof(metadata) ~= "table" then
-		return nil
-	end
-
-	local ceilingData = metadata.CeilingMountData
-	if typeof(ceilingData) ~= "table" then
+	local ceilingData = extractMountData(metadata, "CeilingMountData")
+	if not ceilingData then
 		return nil
 	end
 

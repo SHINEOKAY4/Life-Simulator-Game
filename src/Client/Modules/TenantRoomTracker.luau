@@ -8,7 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local TenantStore = require(script.Parent.Parent.ClientStores.TenantStore)
-local RoomKeyUtils = require(ReplicatedStorage.Shared.Utilities.RoomKeyUtils)
+local RoomCore = require(ReplicatedStorage.Shared.Utilities.RoomCore)
 
 local LOCAL_PLAYER = Players.LocalPlayer
 local LOCAL_USER_ID = LOCAL_PLAYER and LOCAL_PLAYER.UserId or 0
@@ -44,7 +44,7 @@ local function normalizeRoomKey(roomKey: string?): string?
 	if typeof(roomKey) ~= "string" or roomKey == "" then
 		return nil
 	end
-	return RoomKeyUtils.Normalize(roomKey)
+	return RoomCore.NormalizeRoomKey(roomKey)
 end
 
 local function rebuildRoomSamples()
@@ -62,7 +62,7 @@ local function rebuildRoomSamples()
 	for level = startLevel, endLevel do
 		PlotStateStore.IterateRooms(level, function(room)
 			if room.CellCount and room.CellCount > 0 then
-				local key = RoomKeyUtils.Format(room.Level, room.MinCellX, room.MinCellZ)
+				local key = RoomCore.MakeRoomKey(room.Level, room.MinCellX, room.MinCellZ)
 				roomSamplesByKey[key] = {
 					Level = room.Level,
 					CellIndices = copyNumberArray(room.CellIndices),

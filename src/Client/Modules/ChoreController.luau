@@ -10,6 +10,8 @@ local Workspace = game:GetService("Workspace")
 local ChorePackets = require(ReplicatedStorage.Network.ChorePackets)
 local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
+local SoundtrackManager = require(script.Parent.SoundtrackManager)
+local ResidentsFolderFinder = require(ReplicatedStorage.Shared.Utilities.ResidentsFolderFinder)
 local RepairVFX = require(script.Parent.RepairVFX)
 local RepairConfig = require(ReplicatedStorage.Shared.Configurations.RepairConfig)
 
@@ -28,35 +30,8 @@ local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
 local rng = Random.new()
 local MAX_RESIDENT_RESOLVE_ATTEMPTS = 5
 
-local function getResidentsFolder(): Folder?
-	if not LocalPlayer then
-		return nil
-	end
-	local plotIndex = LocalPlayer:GetAttribute("OwnedPlotIndex")
-	if typeof(plotIndex) ~= "number" then
-		return nil
-	end
-	local plotModel = PlotFinder.FindPlot(plotIndex)
-	if not plotModel then
-		return nil
-	end
-	local residentsFolder = plotModel:FindFirstChild("Residents")
-	if residentsFolder and residentsFolder:IsA("Folder") then
-		return residentsFolder
-	end
-	return nil
-end
-
 local function findTenantModel(tenantName: string): Model?
-	local folder = getResidentsFolder()
-	if not folder then
-		return nil
-	end
-	local instance = folder:FindFirstChild(tenantName)
-	if instance and instance:IsA("Model") then
-		return instance
-	end
-	return nil
+	return ResidentsFolderFinder.FindResident(LocalPlayer, tenantName)
 end
 
 local function getPlotContainer(): Instance?
@@ -245,6 +220,10 @@ local function spawnTrashForPayload(
 
 		local success, msg = ChorePackets.CompleteChore:Fire(payload.ChoreId)
 
+		if success then
+			SoundtrackManager.PlayChoreCompleted()
+		end
+
 		if not success then
 			-- Revert if failed
 			prompt.Enabled = true
@@ -339,6 +318,7 @@ local function spawnRepairChore(
 		prompt.Enabled = false
 		local success, msg = ChorePackets.CompleteChore:Fire(payload.ChoreId)
 		if success then
+			SoundtrackManager.PlayChoreCompleted()
 			RepairVFX.PlayRepairComplete(model, metadata.WorldPosition)
 		else
 			prompt.Enabled = true

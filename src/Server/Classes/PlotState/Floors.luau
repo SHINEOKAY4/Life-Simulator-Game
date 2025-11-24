@@ -12,7 +12,74 @@ local function defaultFacing(facing: Facing?): Facing
 	return facing or "North"
 end
 
+local function resolveDimension(value: any, fallback: number): number
+	if typeof(value) == "number" and value > 0 then
+		return math.max(1, math.floor(value + 0.5))
+	end
+	return fallback
+end
+
+local function resolveFootprint(objectData: any, spec: any)
+	local metadata = objectData.Metadata
+	local width = resolveDimension(
+		metadata and metadata.WidthCells,
+		resolveDimension(spec and (spec.WidthCells or spec.Width), 1)
+	)
+	local depth = resolveDimension(
+		metadata and metadata.DepthCells,
+		resolveDimension(spec and (spec.DepthCells or spec.Depth), 1)
+	)
+	local facing = defaultFacing(objectData.facing)
+	return width, depth, facing
+end
+
+local function buildFloorAnchorCache(self: any, level: number)
+	local cache: { [number]: string } = {}
+	for key, objectData in pairs(self.Save.PlacedObjects) do
+		if self:NormalizeLevel(objectData.yLevel) ~= level then
+			continue
+		end
+		local spec = ItemFinder.FindItemById(objectData.id)
+		if not spec then
+			continue
+		end
+		local placementType = spec.PlacementType or spec.Type or "CellObject"
+		if placementType ~= "Floor" then
+			continue
+		end
+		local width, depth, facing = resolveFootprint(objectData, spec)
+		local indices = self.Grid:FootprintCells(objectData.cellX, objectData.cellZ, width, depth, facing)
+		for _, index in ipairs(indices) do
+			cache[index] = key
+		end
+	end
+	self.FloorAnchorCacheByLevel[level] = cache
+	return cache
+end
+
 function Floors.attach(PlotState)
+	function PlotState:InvalidateFloorAnchors(yLevel: number?)
+		if not self.FloorAnchorCacheByLevel then
+			return
+		end
+		if yLevel == nil then
+			table.clear(self.FloorAnchorCacheByLevel)
+			return
+		end
+		self.FloorAnchorCacheByLevel[self:NormalizeLevel(yLevel)] = nil
+	end
+
+	function PlotState:GetFloorPlacementKey(cellX: number, cellZ: number, yLevel: number?): string?
+		local level = self:NormalizeLevel(yLevel)
+		self.FloorAnchorCacheByLevel = self.FloorAnchorCacheByLevel or {}
+		local cache = self.FloorAnchorCacheByLevel[level]
+		if not cache then
+			cache = buildFloorAnchorCache(self, level)
+		end
+		local index = self.Grid:CellToIndex(cellX, cellZ)
+		return cache[index]
+	end
+
 	function PlotState:HasFloorAtCell(yLevel: number?, cellX: number, cellZ: number): boolean
 		local level = self:NormalizeLevel(yLevel)
 		local index = self.Grid:CellToIndex(cellX, cellZ)
@@ -156,6 +223,7 @@ function Floors.attach(PlotState)
 			yLevel = level,
 			Metadata = metadata,
 		}
+		self:InvalidateFloorAnchors(level)
 		if self.InvalidateRooms then
 			self:InvalidateRooms(level)
 		end
@@ -202,6 +270,7 @@ function Floors.attach(PlotState)
 		if saved then
 			self.Save.PlacedObjects[placementKey] = nil
 		end
+		self:InvalidateFloorAnchors(level)
 		if self.InvalidateRooms then
 			self:InvalidateRooms(level)
 		end
@@ -320,6 +389,8 @@ function Floors.attach(PlotState)
 			}
 		end
 		self.Save.PlacedObjects[toKey] = saved
+		self:InvalidateFloorAnchors(resolvedFromLevel)
+		self:InvalidateFloorAnchors(resolvedToLevel)
 
 		if self.InvalidateRooms then
 			self:InvalidateRooms(resolvedFromLevel)

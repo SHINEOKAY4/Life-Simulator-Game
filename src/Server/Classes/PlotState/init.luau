@@ -155,6 +155,7 @@ export type PlotState = {
 	EdgeFreeVerticalByLevel: { [number]: { [number]: boolean } },
 	EdgeFreeDiagonalForwardByLevel: { [number]: { [number]: boolean } },
 	EdgeFreeDiagonalBackwardByLevel: { [number]: { [number]: boolean } },
+	FloorAnchorCacheByLevel: { [number]: { [number]: string } }?,
 	Save: SaveData,
 	SurfaceMountedObjects: SurfaceMountedMap,
 	SurfaceMountCounters: SurfaceMountCounterMap,
@@ -171,6 +172,8 @@ export type PlotState = {
 	GetFloorHeightStuds: (self: PlotState) -> number,
 	GetCellFreeForLevel: (self: PlotState, yLevel: number?) -> { [number]: boolean },
 	GetFloorFilledForLevel: (self: PlotState, yLevel: number?) -> { [number]: boolean },
+	InvalidateFloorAnchors: (self: PlotState, yLevel: number?) -> (),
+	GetFloorPlacementKey: (self: PlotState, cellX: number, cellZ: number, yLevel: number?) -> string?,
 	GetRoofFilledForLevel: (self: PlotState, yLevel: number?) -> { [number]: boolean },
 	ChunkIndex: (self: PlotState, chunkX: number, chunkZ: number) -> number,
 	IsChunkUnlocked: (self: PlotState, chunkX: number, chunkZ: number) -> boolean,
@@ -649,6 +652,7 @@ function PlotState.new(grid: any, chunkSizeInCells: number, save: SaveData): Plo
 	self.EdgeFreeVertical = self.EdgeFreeVerticalByLevel[self.DefaultLevel]
 	self.EdgeFreeDiagonalForward = self.EdgeFreeDiagonalForwardByLevel[self.DefaultLevel]
 	self.EdgeFreeDiagonalBackward = self.EdgeFreeDiagonalBackwardByLevel[self.DefaultLevel]
+	self.FloorAnchorCacheByLevel = {}
 	self.Save = save
 	self.Save.UnlockedChunks = self.Save.UnlockedChunks or {}
 	self.Save.PlacedObjects = self.Save.PlacedObjects or {}

@@ -40,7 +40,7 @@ local CollectSound: Sound = (function()
 	end
 	local sound = Instance.new("Sound")
 	sound.Name = "MailboxCollectSound"
-	sound.SoundId = "rbxassetid://99023919906775"
+	sound.SoundId = "rbxassetid://1210852193"
 	sound.Volume = 0.85
 	sound.PlayOnRemove = false
 	sound.Parent = SoundService

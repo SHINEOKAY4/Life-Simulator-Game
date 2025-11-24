@@ -4,7 +4,7 @@
 -- Calculate billing components from player state
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local PlacedObjectUtils = require(ReplicatedStorage.Shared.Utilities.PlacedObjectUtils)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
 
@@ -52,17 +52,7 @@ end
 
 function BillingCalculator.EstimateCycleElectricCost(plotStateData: PlotStateData): number
 	local placedObjects = plotStateData.PlacedObjects or {}
-	local totalEnergyConsumption = 0
-
-	for _, placedObject in pairs(placedObjects) do
-		local itemSpec = ItemFinder.FindItemById(placedObject.id)
-		if itemSpec then
-			local energyPerHour = itemSpec.EnergyConsumptionPerHour
-			if typeof(energyPerHour) == "number" and energyPerHour > 0 then
-				totalEnergyConsumption += energyPerHour
-			end
-		end
-	end
+	local totalEnergyConsumption = PlacedObjectUtils.SumProperty(placedObjects, "EnergyConsumptionPerHour")
 
 	local secondsPerGameHour = TimeScale.GetSecondsPerFullDay() / 24
 	if secondsPerGameHour <= 0 then
@@ -79,17 +69,7 @@ end
 
 function BillingCalculator.CalculateWaterCost(plotStateData: PlotStateData): number
 	local placedObjects = plotStateData.PlacedObjects or {}
-	local totalWaterConsumption = 0
-
-	for _, placedObject in pairs(placedObjects) do
-		local itemSpec = ItemFinder.FindItemById(placedObject.id)
-		if itemSpec then
-			local waterPerHour = itemSpec.WaterConsumptionPerHour
-			if typeof(waterPerHour) == "number" and waterPerHour > 0 then
-				totalWaterConsumption += waterPerHour
-			end
-		end
-	end
+	local totalWaterConsumption = PlacedObjectUtils.SumProperty(placedObjects, "WaterConsumptionPerHour")
 
 	local secondsPerGameHour = TimeScale.GetSecondsPerFullDay() / 24
 	if secondsPerGameHour <= 0 then
@@ -107,21 +87,9 @@ end
 
 function BillingCalculator.CalculateInternetCost(plotStateData: PlotStateData): number
 	local placedObjects = plotStateData.PlacedObjects or {}
-	local deviceCount = 0
-	local hasInternetAccess = false
+	local deviceCount = PlacedObjectUtils.CountObjects(placedObjects, { RequiresInternet = true })
 
-	for _, placedObject in pairs(placedObjects) do
-		local itemSpec = ItemFinder.FindItemById(placedObject.id)
-		if itemSpec then
-			if itemSpec.RequiresInternet then
-				deviceCount += 1
-				hasInternetAccess = true
-			end
-			-- Some items might provide internet (like a router), but for now we assume service is needed if devices exist
-		end
-	end
-
-	if not hasInternetAccess then
+	if deviceCount == 0 then
 		return 0
 	end
 

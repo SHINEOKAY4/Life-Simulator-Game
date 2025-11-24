@@ -5,11 +5,14 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 local TenantPackets = require(ReplicatedStorage.Network.TenantPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local TenantProspectPrompt = require(script.Parent.Parent.UserInterface.TenantProspectPrompt)
 local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
+local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
+local RoomQuery = require(script.Parent.RoomQuery)
 
 local LocalPlayer = Players.LocalPlayer
 local AssetsFolder = ReplicatedStorage:FindFirstChild("Assets")
@@ -21,6 +24,8 @@ local MAX_PROMPT_DISTANCE = 18
 local TARGET_ATTRIBUTE_PREFIX = "TenantProspectTarget"
 local DEFAULT_TEMPLATE_NAME = "Male"
 local DISABLE_RESIDENT_BILLBOARD_ATTR = "DisableResidentBillboard"
+local ESCORT_CHECK_INTERVAL = 0.2
+local ESCORT_SUBMIT_COOLDOWN = 1
 
 export type ProspectSpawnPayload = {
 	ProspectId: string,
@@ -45,6 +50,16 @@ local IsInitialized = false
 local ProspectVisualsById: { [string]: any } = {}
 local ProspectVisualsBySlot: { [number]: any } = {}
 local ModelPool: { Model } = {}
+local ActiveEscortState: {
+	ProspectId: string,
+	Payload: ProspectSpawnPayload,
+	LastRoomId: number?,
+	LastRoomKey: string?,
+	LastSubmitTime: number,
+	Submitting: boolean,
+}?
+local EscortHeartbeat: RBXScriptConnection?
+local LastEscortCheck = 0
 
 local DECISION_EMOJIS = {
 	Accept = {
@@ -103,6 +118,138 @@ local function emitDecisionEmoji(prospectId: string, decision: "Accept" | "Decli
 			end
 		end)
 	end)
+end
+
+local function stopEscortHeartbeat()
+	if EscortHeartbeat then
+		EscortHeartbeat:Disconnect()
+		EscortHeartbeat = nil
+	end
+end
+
+local function hideEscortBannerLater(delaySeconds: number)
+	if delaySeconds <= 0 then
+		TenantProspectPrompt.HideEscortBanner()
+		return
+	end
+	task.delay(delaySeconds, function()
+		TenantProspectPrompt.HideEscortBanner()
+	end)
+end
+
+local function submitEscortRoom(roomKey: string)
+	local state = ActiveEscortState
+	if not state or state.Submitting then
+		return
+	end
+	state.Submitting = true
+	TenantProspectPrompt.ShowEscortBanner("Reviewing that room...", false)
+	task.spawn(function()
+		local ok, success, message = pcall(function()
+			return TenantPackets.ProspectDecision:Fire(state.ProspectId, "Accept", roomKey)
+		end)
+		local current = ActiveEscortState
+		if not current or current.ProspectId ~= state.ProspectId then
+			return
+		end
+		state.Submitting = false
+		if not ok then
+			TenantProspectPrompt.ShowEscortBanner("Connection lost, step inside again.", true)
+			state.LastRoomKey = nil
+			return
+		end
+		if success then
+			TenantProspectPrompt.ShowEscortBanner(message or "Tenant moved in!", false)
+			emitDecisionEmoji(state.ProspectId, "Accept")
+			ActiveEscortState = nil
+			stopEscortHeartbeat()
+			hideEscortBannerLater(2.4)
+		else
+			local rejectionMessage = message or "That room isn't tenant-ready yet."
+			TenantProspectPrompt.ShowEscortBanner(rejectionMessage, true)
+			state.LastRoomKey = nil
+		end
+	end)
+end
+
+local function updateEscortTracking()
+	local state = ActiveEscortState
+	if not state then
+		stopEscortHeartbeat()
+		return
+	end
+	local now = os.clock()
+	if now - LastEscortCheck < ESCORT_CHECK_INTERVAL then
+		return
+	end
+	LastEscortCheck = now
+
+	local character = LocalPlayer.Character
+	local root = character and character.PrimaryPart
+	if not root then
+		return
+	end
+
+	local grid = PlotStateStore.GetGrid()
+	if not grid then
+		return
+	end
+
+	local pos = root.Position
+	local inBounds, cellX, cellZ = grid:WorldPointToCell(pos)
+	if not inBounds then
+		return
+	end
+
+	local floorHeight = PlotStateStore.GetFloorHeightStuds()
+	local originY = grid.OriginTopCFrame.Position.Y
+	local level = math.max(0, math.floor(((pos.Y - originY) / floorHeight) + 0.5))
+
+	-- Use simple room query - single source of truth from server
+	local currentRoom = RoomQuery.FindRoomAtPosition(level, cellX, cellZ, false)
+	if not currentRoom or not currentRoom.RoomKey then
+		return
+	end
+
+	local roomKey = currentRoom.RoomKey
+	if roomKey == state.LastRoomKey then
+		return
+	end
+	if now - state.LastSubmitTime < ESCORT_SUBMIT_COOLDOWN then
+		return
+	end
+
+	print(string.format("[Client] Escort: Room %s at (%d,%d)", roomKey, cellX, cellZ))
+	state.LastRoomKey = roomKey
+	state.LastSubmitTime = now
+	submitEscortRoom(roomKey)
+end
+
+local function ensureEscortHeartbeat()
+	if EscortHeartbeat then
+		return
+	end
+	LastEscortCheck = 0
+	EscortHeartbeat = RunService.Heartbeat:Connect(updateEscortTracking)
+end
+
+local function beginEscort(payload: ProspectSpawnPayload)
+	ActiveEscortState = nil
+	stopEscortHeartbeat()
+	ActiveEscortState = {
+		ProspectId = payload.ProspectId,
+		Payload = payload,
+		LastRoomId = nil,
+		LastRoomKey = nil,
+		LastSubmitTime = 0,
+		Submitting = false,
+	}
+	TenantProspectPrompt.Hide()
+	TenantProspectPrompt.ShowEscortBanner(
+		string.format("%s is following you. Step into any furnished room to assign it.", payload.Name),
+		false
+	)
+	ensureEscortHeartbeat()
 end
 
 local function getPooledRig(): Model?
@@ -242,7 +389,7 @@ local function showPrompt(payload: ProspectSpawnPayload)
 			TenantProspectPrompt.SetBusy(true, "Inviting tenant...")
 			task.spawn(function()
 				local ok, success, message = pcall(function()
-					return TenantPackets.ProspectDecision:Fire(payload.ProspectId, "Accept")
+					return TenantPackets.ProspectDecision:Fire(payload.ProspectId, "Accept", "")
 				end)
 				TenantProspectPrompt.SetBusy(false)
 				if not ok then
@@ -250,7 +397,13 @@ local function showPrompt(payload: ProspectSpawnPayload)
 					return
 				end
 				if not success then
-					TenantProspectPrompt.SetStatus(message or "Could not invite tenant.", true)
+					local statusMessage = message or "Could not invite tenant."
+					TenantProspectPrompt.SetStatus(statusMessage, true)
+					return
+				end
+				local lowerMessage = string.lower(message or "")
+				if lowerMessage == "escortstart" then
+					beginEscort(payload)
 					return
 				end
 				emitDecisionEmoji(payload.ProspectId, "Accept")
@@ -262,7 +415,7 @@ local function showPrompt(payload: ProspectSpawnPayload)
 			TenantProspectPrompt.SetBusy(true, "Letting them know...")
 			task.spawn(function()
 				local ok, success, message = pcall(function()
-					return TenantPackets.ProspectDecision:Fire(payload.ProspectId, "Decline")
+					return TenantPackets.ProspectDecision:Fire(payload.ProspectId, "Decline", "")
 				end)
 				TenantProspectPrompt.SetBusy(false)
 				if not ok then
@@ -446,7 +599,35 @@ local function spawnProspect(payload: ProspectSpawnPayload)
 	bindTargetUpdates(record)
 end
 
+local function describeRemovalReason(reason: string?): string
+	local lower = string.lower(reason or "")
+	if lower == "expired" then
+		return "They got impatient and wandered off."
+	elseif lower == "declined" then
+		return "You declined the offer."
+	elseif lower == "escorttimeout" then
+		return "They left because it took too long to pick a room."
+	elseif lower == "escortcancelled" then
+		return "Escort cancelled."
+	elseif lower == "cleanup" then
+		return "They left with the plot."
+	end
+	return "The tenant decided to leave."
+end
+
 local function onProspectRemoved(payload)
+	local reason = payload.Reason or ""
+	if ActiveEscortState and ActiveEscortState.ProspectId == payload.ProspectId then
+		if string.lower(reason) == "accepted" then
+			TenantProspectPrompt.ShowEscortBanner("Tenant settled in!", false)
+			hideEscortBannerLater(2.2)
+		else
+			TenantProspectPrompt.ShowEscortBanner(describeRemovalReason(reason), true)
+			hideEscortBannerLater(2.2)
+		end
+		ActiveEscortState = nil
+		stopEscortHeartbeat()
+	end
 	destroyProspect(payload.ProspectId)
 end
 
@@ -465,6 +646,11 @@ function TenantProspectController.Init()
 	getResidentsFolder()
 
 	LocalPlayer:GetAttributeChangedSignal("OwnedPlotIndex"):Connect(onOwnedPlotChanged)
+
+	-- Clear RoomQuery cache when rooms change to ensure accurate detection
+	PlotStateStore.OnRoomSnapshotChanged(function()
+		RoomQuery.ClearCache()
+	end)
 
 	TenantPackets.ProspectSpawn.OnClientEvent:Connect(function(payload)
 		spawnProspect(payload :: ProspectSpawnPayload)
