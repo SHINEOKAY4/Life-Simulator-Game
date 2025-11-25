@@ -9,8 +9,8 @@ local ResidentsPackets = require(ReplicatedStorage.Network.ResidentsPackets)
 local ClientResidentPlacer = require(script.Parent.ClientResidentPlacer)
 local ClientResidentMovement = require(script.Parent.ClientResidentMovement)
 local ResidentReactions = require(script.Parent.ResidentReactions)
-local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local TenantRoomTracker = require(script.Parent.TenantRoomTracker)
+local TenantProspectController = require(script.Parent.TenantProspectController)
 
 local ResidentController = {}
 
@@ -26,6 +26,21 @@ type ResidentState = {
 local ClientResidents: { [number]: { [string]: ResidentState } } = {} -- [userId][residentName] = State
 local LocalPlayer = Players.LocalPlayer
 local LOCAL_USER_ID = if LocalPlayer then LocalPlayer.UserId else 0
+
+-- Forward declaration
+local startWanderLoop
+
+local function resolveTenantId(data: any): string?
+	local tenantId = data and data.TenantId
+	if type(tenantId) == "string" and tenantId ~= "" then
+		return tenantId
+	end
+	return nil
+end
+
+local function updateResidentData(state: ResidentState, newData: any)
+	state.Data = newData
+end
 
 local function applyModelMetadata(model: Model?, data: any)
 	if not model or typeof(data) ~= "table" then
@@ -55,116 +70,62 @@ local function stopResidentAction(state: ResidentState)
 	state.ActionThread = nil
 end
 
-local function chunkIndexToCoord(chunkIndex: number, chunkColumns: number): (number, number)
-	local zeroBased = chunkIndex - 1
-	local chunkX = (zeroBased % chunkColumns) + 1
-	local chunkZ = math.floor(zeroBased / chunkColumns) + 1
-	return chunkX, chunkZ
-end
+-- Move a tenant within their assigned room
+local function startTenantRoomWander(state: ResidentState)
+	local tenantId = resolveTenantId(state.Data)
+	if not tenantId or state.OwnerUserId ~= LOCAL_USER_ID then
+		return
+	end
 
-local function findNearestUnlockedChunk(
-	targetChunkX: number,
-	targetChunkZ: number,
-	chunkColumns: number,
-	chunkUnlocked: { [number]: boolean }
-): (number?, number?)
-	local bestChunkX: number? = nil
-	local bestChunkZ: number? = nil
-	local bestDistSq = math.huge
-	for index = 1, #chunkUnlocked do
-		if chunkUnlocked[index] == true then
-			local unlockedChunkX, unlockedChunkZ = chunkIndexToCoord(index, chunkColumns)
-			local dx = unlockedChunkX - targetChunkX
-			local dz = unlockedChunkZ - targetChunkZ
-			local distSq = dx * dx + dz * dz
-			if distSq < bestDistSq then
-				bestDistSq = distSq
-				bestChunkX = unlockedChunkX
-				bestChunkZ = unlockedChunkZ
+	stopResidentAction(state)
+
+	local cancelToken = { Cancelled = false }
+	state.CancelToken = cancelToken
+	state.CurrentAction = "RoomWander"
+
+	state.ActionThread = task.spawn(function()
+		-- Wait for room data (max 5s)
+		local maxAttempts = 10
+		for attempt = 1, maxAttempts do
+			if cancelToken.Cancelled then
+				return
 			end
-		end
-	end
-	return bestChunkX, bestChunkZ
-end
 
-local function restrictTargetToUnlocked(userId: number?, desiredWorld: Vector3): Vector3?
-	if userId ~= LOCAL_USER_ID then
-		return nil
-	end
-	if not PlotStateStore.IsReady() then
-		return nil
-	end
-	local grid = PlotStateStore.GetGrid()
-	if not grid then
-		return nil
-	end
-	local snapshot = PlotStateStore.GetStateSnapshot()
-	local chunkInfo = snapshot.ChunkInfo
-	local chunkUnlocked = snapshot.ChunkUnlocked
-	if not chunkInfo or not chunkUnlocked then
-		return nil
-	end
-	local chunkSize = tonumber(chunkInfo.ChunkSizeInCells)
-	local chunkColumns = tonumber(chunkInfo.ChunkColumns)
-	local chunkRows = tonumber(chunkInfo.ChunkRows)
-	if not chunkSize or chunkSize <= 0 or not chunkColumns or chunkColumns <= 0 or not chunkRows or chunkRows <= 0 then
-		return nil
-	end
-
-	local inBounds, cellX, cellZ = grid:WorldPointToCell(desiredWorld)
-	if not inBounds then
-		cellX, cellZ = grid:WorldPointToClampedCell(desiredWorld)
-	end
-	local chunkX, chunkZ = grid:CellToChunk(cellX, cellZ, chunkSize)
-	if chunkX >= 1 and chunkX <= chunkColumns and chunkZ >= 1 and chunkZ <= chunkRows then
-		local chunkIndex = (chunkZ - 1) * chunkColumns + chunkX
-		if chunkUnlocked[chunkIndex] == true then
-			return grid:CellToWorldCenter(cellX, cellZ)
-		end
-	end
-
-	local fallbackChunkX, fallbackChunkZ = findNearestUnlockedChunk(chunkX, chunkZ, chunkColumns, chunkUnlocked)
-	if not fallbackChunkX or not fallbackChunkZ then
-		return nil
-	end
-
-	local minCellX = (fallbackChunkX - 1) * chunkSize + 1
-	local maxCellX = minCellX + chunkSize - 1
-	local minCellZ = (fallbackChunkZ - 1) * chunkSize + 1
-	local maxCellZ = minCellZ + chunkSize - 1
-
-	local clampedCellX = math.clamp(cellX, minCellX, maxCellX)
-	local clampedCellZ = math.clamp(cellZ, minCellZ, maxCellZ)
-	local centerPos = grid:CellToWorldCenter(clampedCellX, clampedCellZ)
-	local jitterRange = math.min((grid.CellSize or 0) * 0.25, 2)
-	if jitterRange > 0 then
-		local jitter = Vector3.new((math.random() * 2 - 1) * jitterRange, 0, (math.random() * 2 - 1) * jitterRange)
-		return centerPos + jitter
-	end
-	return centerPos
-end
-
-local function computeWanderTarget(state: ResidentState, origin: Vector3): Vector3
-	if state.OwnerUserId == LOCAL_USER_ID then
-		local tenantId = state.Data and state.Data.TenantId
-		if type(tenantId) == "string" and tenantId ~= "" then
 			local roomTarget = TenantRoomTracker.GetRandomTargetForTenant(tenantId)
 			if roomTarget then
-				return roomTarget
+				-- Room data available, start wandering
+				while not cancelToken.Cancelled do
+					local model = state.Model
+					if not model or not model.Parent then
+						break
+					end
+
+					roomTarget = TenantRoomTracker.GetRandomTargetForTenant(tenantId)
+					if not roomTarget then
+						break
+					end
+
+					ClientResidentMovement.GoToWorldPosition(model, roomTarget, {
+						CancelToken = cancelToken,
+						TimeoutSeconds = 10,
+					})
+
+					if not cancelToken.Cancelled then
+						task.wait(math.random(3, 8))
+					end
+				end
+				return
+			end
+
+			if attempt < maxAttempts then
+				task.wait(0.5)
 			end
 		end
-	end
-
-	local randomOffset = Vector3.new(math.random(-15, 15), 0, math.random(-15, 15))
-	local desired = origin + randomOffset
-	local restricted = restrictTargetToUnlocked(state.OwnerUserId, desired)
-	if restricted then
-		return restricted
-	end
-	return desired
+	end)
 end
 
-local function startWanderLoop(state: ResidentState)
+-- Non-tenant residents wander across unlocked chunks
+function startWanderLoop(state: ResidentState)
 	if state.ActionThread then
 		return
 	end
@@ -177,17 +138,18 @@ local function startWanderLoop(state: ResidentState)
 
 	state.ActionThread = task.spawn(function()
 		while not token.Cancelled do
-			if not state.Model or not state.Model.Parent then
+			local model = state.Model
+			if not model or not model.Parent then
 				break
 			end
 
-			-- Simple wander logic
-			local root = state.Model:FindFirstChild("HumanoidRootPart") :: BasePart
+			local root = model:FindFirstChild("HumanoidRootPart") :: BasePart
 			if root then
 				local origin = root.Position
-				local target = computeWanderTarget(state, origin)
+				local randomOffset = Vector3.new(math.random(-15, 15), 0, math.random(-15, 15))
+				local target = origin + randomOffset
 
-				ClientResidentMovement.GoToWorldPosition(state.Model, target, {
+				ClientResidentMovement.GoToWorldPosition(model, target, {
 					CancelToken = token,
 					TimeoutSeconds = 10,
 				})
@@ -226,8 +188,22 @@ local function onResidentDelta(userId: number, residentName: string, deltaList: 
 	for _, data in ipairs(deltaList) do
 		local existing = residentsMap[residentName]
 		if not existing then
-			-- Create new
-			local model = ClientResidentPlacer.Spawn(userId, data)
+			-- Create new - try to reuse prospect position for seamless transition
+			local spawnCFrame: CFrame? = nil
+			local tenantId = resolveTenantId(data)
+
+			-- For tenants, get position from TenantProspectController (seamless handoff)
+			if tenantId then
+				-- TenantId matches ProspectId, so we can look it up
+				local prospectPosition = TenantProspectController.GetProspectPosition(tenantId)
+				if prospectPosition then
+					spawnCFrame = prospectPosition
+					-- Remove prospect model now that we have position
+					TenantProspectController.RemoveProspect(tenantId)
+				end
+			end
+
+			local model = ClientResidentPlacer.Spawn(userId, data, spawnCFrame)
 			if model then
 				local state = {
 					OwnerUserId = userId,
@@ -235,15 +211,56 @@ local function onResidentDelta(userId: number, residentName: string, deltaList: 
 					Data = data,
 				}
 				applyModelMetadata(model, data)
+				updateResidentData(state, data)
 				residentsMap[residentName] = state
 				ResidentReactions.Register(model)
-				startWanderLoop(state)
+				-- Tenants wander in their room, non-tenants wander plot
+				if tenantId then
+					startTenantRoomWander(state)
+				else
+					startWanderLoop(state)
+				end
 			end
 		else
 			existing.OwnerUserId = existing.OwnerUserId or userId
+			-- Check if TenantId changed
+			local oldTenantId = resolveTenantId(existing.Data)
+			local newTenantId = resolveTenantId(data)
+			local tenantIdChanged = oldTenantId ~= newTenantId
 			-- Update existing data
-			existing.Data = data
+			updateResidentData(existing, data)
 			applyModelMetadata(existing.Model, data)
+			-- If TenantId changed, restart wander behavior
+			if tenantIdChanged then
+				print(
+					"[ResidentController] TenantId changed from",
+					oldTenantId,
+					"to",
+					newTenantId,
+					"for:",
+					residentName
+				)
+				stopResidentAction(existing)
+
+				-- If becoming a tenant, teleport to prospect position for seamless transition
+				if newTenantId and not oldTenantId then
+					print("[ResidentController] Resident becoming tenant, looking for prospect position:", newTenantId)
+					local prospectPosition = TenantProspectController.GetProspectPosition(newTenantId)
+					if prospectPosition and existing.Model then
+						print("[ResidentController] Teleporting to prospect position:", prospectPosition)
+						existing.Model:PivotTo(prospectPosition)
+						TenantProspectController.RemoveProspect(newTenantId)
+					else
+						print("[ResidentController] WARNING: No prospect position found for seamless handoff")
+					end
+				end
+
+				if newTenantId then
+					startTenantRoomWander(existing)
+				else
+					startWanderLoop(existing)
+				end
+			end
 			-- If model is missing (e.g. streamed out), try to respawn?
 			if not existing.Model or not existing.Model.Parent then
 				local model = ClientResidentPlacer.Spawn(userId, data)
@@ -251,7 +268,11 @@ local function onResidentDelta(userId: number, residentName: string, deltaList: 
 					existing.Model = model
 					applyModelMetadata(model, data)
 					ResidentReactions.Register(model)
-					startWanderLoop(existing)
+					if resolveTenantId(data) then
+						startTenantRoomWander(existing)
+					else
+						startWanderLoop(existing)
+					end
 				end
 			end
 		end
@@ -276,7 +297,19 @@ local function onResidentsSync(payload: any)
 
 		local existing = residentsMap[name]
 		if not existing then
-			local model = ClientResidentPlacer.Spawn(userId, data)
+			-- Try to reuse prospect position for seamless transition
+			local spawnCFrame: CFrame? = nil
+			local tenantId = resolveTenantId(data)
+
+			if tenantId then
+				local prospectPosition = TenantProspectController.GetProspectPosition(tenantId)
+				if prospectPosition then
+					spawnCFrame = prospectPosition
+					TenantProspectController.RemoveProspect(tenantId)
+				end
+			end
+
+			local model = ClientResidentPlacer.Spawn(userId, data, spawnCFrame)
 			if model then
 				local state = {
 					OwnerUserId = userId,
@@ -284,13 +317,18 @@ local function onResidentsSync(payload: any)
 					Data = data,
 				}
 				applyModelMetadata(model, data)
+				updateResidentData(state, data)
 				residentsMap[name] = state
 				ResidentReactions.Register(model)
-				startWanderLoop(state)
+				if tenantId then
+					startTenantRoomWander(state)
+				else
+					startWanderLoop(state)
+				end
 			end
 		else
 			existing.OwnerUserId = existing.OwnerUserId or userId
-			existing.Data = data
+			updateResidentData(existing, data)
 			applyModelMetadata(existing.Model, data)
 			if not existing.Model or not existing.Model.Parent then
 				local model = ClientResidentPlacer.Spawn(userId, data)

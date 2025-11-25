@@ -1,5 +1,8 @@
 --!strict
--- Minimal room query - delegates to server, simple caching
+-- Room query - uses server authority with efficient hash lookup
+-- ⚠️ This module ONLY queries server data - never calculates rooms
+-- Room detection logic lives in: src/Server/Classes/PlotState/Rooms.luau
+-- Uses O(1) cell index hash lookup - no bounding box approximations
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TenantPackets = require(ReplicatedStorage.Network.TenantPackets)
@@ -24,8 +27,12 @@ export type ServerRoom = {
 local RoomQuery = {}
 local cachedRooms: { ServerRoom }? = nil
 local cacheTime = 0
-local CACHE_DURATION = 10 -- Increased from 2s - rooms don't change frequently
+local CACHE_DURATION = 10
 local cellLookupCache: { [number]: { [number]: boolean } } = {} -- [roomIndex][cellIndex] = true
+
+local function computeCellIndex(columns: number, cellX: number, cellZ: number): number
+	return (cellZ - 1) * columns + cellX
+end
 
 function RoomQuery.GetRoomsFromServer(forceRefresh: boolean?): { ServerRoom }?
 	local now = os.clock()
@@ -40,6 +47,7 @@ function RoomQuery.GetRoomsFromServer(forceRefresh: boolean?): { ServerRoom }?
 	if ok and typeof(response) == "table" and typeof(response.Rooms) == "table" then
 		cachedRooms = response.Rooms
 		cacheTime = now
+
 		-- Build hash set lookup cache for O(1) cell membership checks
 		table.clear(cellLookupCache)
 		for i, room in ipairs(response.Rooms) do
@@ -57,18 +65,13 @@ function RoomQuery.GetRoomsFromServer(forceRefresh: boolean?): { ServerRoom }?
 	return nil
 end
 
--- Helper to compute cell index from coordinates
-local function computeCellIndex(columns: number, cellX: number, cellZ: number): number
-	return (cellZ - 1) * columns + cellX
-end
-
 function RoomQuery.FindRoomAtPosition(level: number, cellX: number, cellZ: number, forceRefresh: boolean?): ServerRoom?
 	local rooms = RoomQuery.GetRoomsFromServer(forceRefresh)
 	if not rooms then
 		return nil
 	end
 
-	-- Get grid info from PlotStateStore
+	-- Get grid columns from PlotStateStore
 	local Players = game:GetService("Players")
 	local LocalPlayer = Players.LocalPlayer
 	if not LocalPlayer then
@@ -92,22 +95,19 @@ function RoomQuery.FindRoomAtPosition(level: number, cellX: number, cellZ: numbe
 		end
 	end
 
+	-- Always require cell hash lookup - no bounding box fallback
+	if not columns then
+		warn("[RoomQuery] Cannot determine room without grid columns")
+		return nil
+	end
+
+	local targetIndex = computeCellIndex(columns, cellX, cellZ)
+
 	for i, room in ipairs(rooms) do
 		if room.Level == level then
-			-- First, try using cached hash lookup (O(1) instead of O(n))
 			local lookup = cellLookupCache[i]
-			if lookup and columns then
-				local targetIndex = computeCellIndex(columns, cellX, cellZ)
-				if lookup[targetIndex] then
-					return room
-				end
-			else
-				-- Fallback to bounding box check (less accurate but works without grid info)
-				local maxX = room.MinCellX + room.SizeX - 1
-				local maxZ = room.MinCellZ + room.SizeZ - 1
-				if cellX >= room.MinCellX and cellX <= maxX and cellZ >= room.MinCellZ and cellZ <= maxZ then
-					return room
-				end
+			if lookup and lookup[targetIndex] then
+				return room
 			end
 		end
 	end

@@ -180,7 +180,7 @@ function UtilityService.Recalculate(player: Player, forceUpdateKeys: { [string]:
 	-- 1. Scan all objects using PlacedObjectUtils
 	print("[UtilityService] Recalculating for player", player.Name)
 
-	local isOutage = player:GetAttribute("BillingPowerOutageActive") == true
+	local isOutage = player:GetAttribute("PowerOutageActive") == true
 
 	-- Type cast for compatibility with PlacedObjectUtils
 	local placedObjects = plotState.Save.PlacedObjects :: any

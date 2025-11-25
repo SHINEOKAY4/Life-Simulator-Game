@@ -12,6 +12,7 @@ local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local UtilityVisuals = require(script.Parent.UtilityVisuals)
 
 local WireController = {}
+local FORCE_SHOW_SOURCE = "WireDrag"
 
 local isDragging = false
 local potentialDrag = false
@@ -146,7 +147,7 @@ local function createDragVisuals(_startPos: Vector3)
 end
 
 local function destroyDragVisuals()
-	UtilityVisuals.SetForceShow(false)
+	UtilityVisuals.SetForceShow(false, FORCE_SHOW_SOURCE)
 	for _, seg in ipairs(dragSegments) do
 		seg.Beam:Destroy()
 		seg.Attachment0:Destroy()
@@ -180,7 +181,7 @@ local function startDragging()
 	end
 
 	isDragging = true
-	UtilityVisuals.SetForceShow(true)
+	UtilityVisuals.SetForceShow(true, FORCE_SHOW_SOURCE)
 
 	local startPos = getWireAttachmentPosition(sourceInstance, sourceSpec)
 
@@ -346,14 +347,6 @@ local function isAnyConflictingUIActive(): boolean
 
 		local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
 		if PlotExpansionEnabled and PlotExpansionEnabled:IsA("BoolValue") and PlotExpansionEnabled.Value then
-			return true
-		end
-	end
-
-	local MainHUD = PlayerGui:FindFirstChild("MainHUD")
-	if MainHUD then
-		local BillFrame = MainHUD:FindFirstChild("BillFrame")
-		if BillFrame and BillFrame:IsA("Frame") and BillFrame.Visible then
 			return true
 		end
 	end

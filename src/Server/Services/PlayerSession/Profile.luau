@@ -34,17 +34,15 @@ local Profile = {
 		ActiveEvents = {},
 	},
 	BillingState = {
-		lastPaymentTime = 0,
-		BillingGraceActive = false,
-		GraceElapsedSeconds = 0,
-		OverduePayments = 0,
-		CurrentCycleRecordedOverdue = false,
-		CycleState = "Active",
-		OutstandingBreakdown = {
-			PlotTax = 0,
-			Electric = 0,
-			Interest = 0,
+		LastBillTime = 0,
+		UnpaidTime = nil,
+		CurrentCycle = {
+			PropertyTax = 0,
+			Electricity = 0,
+			Water = 0,
+			Internet = 0,
 		},
+		InternetTier = "None",
 	},
 	EnergyState = {
 		BaseLoad = 0,

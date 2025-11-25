@@ -3,9 +3,12 @@
 -- Scores a player's plot using catalog metadata to derive baseline rent suggestions.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local TenantConfig = require(ReplicatedStorage.Shared.Configurations.TenantConfig)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local ComfortRating = require(ReplicatedStorage.Shared.Utilities.ComfortRating)
+local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 
 export type ScoreTier = TenantConfig.ScoreTier
 export type ValuationBreakdown = {
@@ -14,6 +17,7 @@ export type ValuationBreakdown = {
 	AmenityScore: number,
 	CostScore: number,
 	DecorScore: number,
+	ComfortScore: number,
 	AmenityDetails: { [string]: number },
 	AmenityCounts: { [string]: number },
 }
@@ -34,6 +38,7 @@ local AmenitySoftCaps = Valuation.AmenitySoftCaps
 local ExcessAmenityMultiplier = Valuation.ExcessAmenityMultiplier
 local CostWeight = Valuation.CostWeight
 local DecorWeight = Valuation.DecorWeight
+local ComfortWeight = Valuation.ComfortWeight
 local ChunkValue = Valuation.ChunkValue
 local RentPerPoint = Valuation.RentPerPoint
 local MinimumRent = Valuation.MinimumRent
@@ -93,7 +98,37 @@ local function accumulateTags(spec: { [string]: any }, tagCounts: { [string]: nu
 	return total
 end
 
-function TenantValuation.Evaluate(plotState: any, averageReviewScore: number?): ValuationResult?
+local function getAverageRoomTemperature(plotState: any): number?
+	if typeof(plotState) ~= "table" or typeof(plotState.GetRoomsForLevel) ~= "function" then
+		return nil
+	end
+
+	local totalTemp = 0
+	local roomCount = 0
+	local maxLevel = plotState.MaxFloorLevel or 0
+
+	for level = 0, maxLevel do
+		local rooms = plotState:GetRoomsForLevel(level)
+		if rooms then
+			for _, room in ipairs(rooms) do
+				if room.CellCount > 0 and room.InsulationScore > 0.2 then
+					if typeof(room.CurrentTemperature) == "number" then
+						totalTemp += room.CurrentTemperature
+						roomCount += 1
+					end
+				end
+			end
+		end
+	end
+
+	if roomCount == 0 then
+		return nil
+	end
+
+	return totalTemp / roomCount
+end
+
+function TenantValuation.Evaluate(plotState: any, averageReviewScore: number?, player: Player?): ValuationResult?
 	if typeof(plotState) ~= "table" then
 		return nil
 	end
@@ -215,7 +250,38 @@ function TenantValuation.Evaluate(plotState: any, averageReviewScore: number?): 
 	amenityScore *= varietyMultiplier
 	decorScore *= synergyMultiplier
 
-	local totalScore = basePlotScore + amenityScore + costScore + decorScore
+	-- Calculate Comfort Score (furniture quality + temperature)
+	local comfortScore = 0
+	local avgTemp = getAverageRoomTemperature(plotState)
+
+	-- Count residents and tenants for occupancy
+	local residentCount = 0
+	local tenantCount = 0
+	if player then
+		local residents = ResidentService.GetResidents(player)
+		if residents then
+			for _ in pairs(residents) do
+				residentCount += 1
+			end
+		end
+		-- TenantService would create circular dependency, so we estimate based on plot size
+		tenantCount = math.floor(chunkCount / 3) -- Rough estimate: 1 tenant per 3 chunks
+	end
+
+	-- Convert PlacedObjects to format expected by ComfortRating
+	local placedItemsForComfort: { [string]: { id: string } } = {}
+	if typeof(placedObjects) == "table" then
+		for key, placed in placedObjects do
+			if typeof(placed) == "table" and placed.id then
+				placedItemsForComfort[key] = { id = placed.id }
+			end
+		end
+	end
+
+	local comfortComponents = ComfortRating.Calculate(placedItemsForComfort, avgTemp, residentCount, tenantCount)
+	comfortScore = comfortComponents.TotalScore * ComfortWeight
+
+	local totalScore = basePlotScore + amenityScore + costScore + decorScore + comfortScore
 
 	local tier = getLeaseTier(totalScore)
 	local tierId = tier and tier.Id or DefaultTierId
@@ -245,6 +311,7 @@ function TenantValuation.Evaluate(plotState: any, averageReviewScore: number?): 
 		AmenityScore = amenityScore,
 		CostScore = costScore,
 		DecorScore = decorScore,
+		ComfortScore = comfortScore,
 		AmenityDetails = amenityDetails,
 		AmenityCounts = amenityCounts,
 	}

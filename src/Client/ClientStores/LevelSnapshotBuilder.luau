@@ -1,10 +1,9 @@
 --!strict
 -- Client/ClientStores/LevelSnapshotBuilder.luau
--- Extracts level-specific analysis (floors, walls, roofs, rooms) from placement data
+-- Extracts level-specific analysis (floors, walls, roofs) from placement data
+-- Room detection removed - uses server-replicated data only
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local FloodFillCore = require(ReplicatedStorage.Shared.Utilities.FloodFillCore)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 
 type FloorCellDescriptor = {
@@ -121,14 +120,6 @@ local function clampFootprint(
 		math.clamp(maxCellZ, 1, rows)
 end
 
-local function makeEdgeKey(ax: number, az: number, bx: number, bz: number): string
-	if ax > bx or (ax == bx and az > bz) then
-		ax, bx = bx, ax
-		az, bz = bz, az
-	end
-	return ("%d:%d:%d:%d"):format(ax, az, bx, bz)
-end
-
 local function resolveCardinalAdjacency(
 	cellX: number,
 	cellZ: number,
@@ -146,63 +137,10 @@ local function resolveCardinalAdjacency(
 	return nil, nil
 end
 
-local function buildRoomsForLevel(
-	level: number,
-	columns: number,
-	rows: number,
-	floorCellsList: { FloorCellDescriptor },
-	blockedEdges: { [string]: WallSegmentDescriptor }
-): ({ [number]: number }, { [number]: RoomRecord }, { RoomRecord })
-	local roomAssignments: { [number]: number } = {}
-	local roomsById: { [number]: RoomRecord } = {}
-	local roomsList: { RoomRecord } = {}
-
-	local floorFilled: { [number]: boolean } = {}
-	for _, cell in ipairs(floorCellsList) do
-		floorFilled[cell.CellIndex] = true
-	end
-
-	local function isEdgeBlocked(cx: number, cz: number, direction: string): boolean
-		local nx, nz
-		if direction == "North" then
-			nx, nz = cx, cz - 1
-		elseif direction == "South" then
-			nx, nz = cx, cz + 1
-		elseif direction == "West" then
-			nx, nz = cx - 1, cz
-		elseif direction == "East" then
-			nx, nz = cx + 1, cz
-		else
-			return true
-		end
-		local edgeKey = makeEdgeKey(cx, cz, nx, nz)
-		return blockedEdges[edgeKey] ~= nil
-	end
-
-	local areas = FloodFillCore.FindAllAreas(columns, rows, floorFilled, isEdgeBlocked, nil)
-
-	for roomId, area in ipairs(areas) do
-		local roomRecord: RoomRecord = {
-			Id = roomId,
-			Level = level,
-			CellCount = area.CellCount,
-			MinCellX = area.MinX,
-			MaxCellX = area.MaxX,
-			MinCellZ = area.MinZ,
-			MaxCellZ = area.MaxZ,
-			CellIndices = area.Cells,
-		}
-
-		for _, cellIndex in ipairs(area.Cells) do
-			roomAssignments[cellIndex] = roomId
-		end
-
-		roomsById[roomId] = roomRecord
-		roomsList[#roomsList + 1] = roomRecord
-	end
-
-	return roomAssignments, roomsById, roomsList
-end
+-- ⚠️ CRITICAL: Room detection has been removed from client
+-- Server is the single source of truth for room boundaries via RoomDataSync packet
+-- Do NOT re-add FloodFillCore or room calculation logic here
+-- All room data comes from PlotState/Rooms.luau (server) → PlotStateStore (client)
 
 function LevelSnapshotBuilder.Build(
 	level: number,
@@ -216,7 +154,6 @@ function LevelSnapshotBuilder.Build(
 	local roofCellsByIndex: { [number]: boolean } = {}
 	local cardinalWalls: { WallSegmentDescriptor } = {}
 	local diagonalWalls: { WallSegmentDescriptor } = {}
-	local blockedEdges: { [string]: WallSegmentDescriptor } = {}
 	local coverageCellsByPlacement: {
 		[string]: {
 			PlacementType: string,
@@ -333,7 +270,6 @@ function LevelSnapshotBuilder.Build(
 			local anchorX = math.floor((record.cellX or 1) + 0.5)
 			local anchorZ = math.floor((record.cellZ or 1) + 0.5)
 			local orientation: "Cardinal" | "Diagonal" = if CARDINAL_FACINGS[facing] then "Cardinal" else "Diagonal"
-			local blocksRooms = orientation == "Cardinal" and variant ~= "Door"
 			local segment: WallSegmentDescriptor = {
 				CellX = anchorX,
 				CellZ = anchorZ,
@@ -342,7 +278,7 @@ function LevelSnapshotBuilder.Build(
 				ItemId = record.id,
 				Variant = variant,
 				Orientation = orientation,
-				BlocksRooms = blocksRooms,
+				BlocksRooms = false, -- Server determines room boundaries
 				AdjacentCells = { CellA = nil, CellB = nil },
 			}
 
@@ -350,50 +286,22 @@ function LevelSnapshotBuilder.Build(
 				local cellA, cellB = resolveCardinalAdjacency(anchorX, anchorZ, facing)
 				segment.AdjacentCells = { CellA = cellA, CellB = cellB }
 				cardinalWalls[#cardinalWalls + 1] = segment
-				if blocksRooms and cellA and cellB then
-					local ax, az = cellA.CellX, cellA.CellZ
-					local bx, bz = cellB.CellX, cellB.CellZ
-					if
-						ax >= 1
-						and ax <= columns
-						and az >= 1
-						and az <= rows
-						and bx >= 1
-						and bx <= columns
-						and bz >= 1
-						and bz <= rows
-					then
-						local edgeKeyValue = makeEdgeKey(ax, az, bx, bz)
-						blockedEdges[edgeKeyValue] = segment
-					end
-				end
 			else
 				diagonalWalls[#diagonalWalls + 1] = segment
 			end
 		end
 	end
 
-	local roomAssignments, roomsById, roomsList = buildRoomsForLevel(level, columns, rows, floorCellsList, blockedEdges)
-
+	-- Room coverage analysis deferred until server sends room data
 	local placementCoverageByKey: { [string]: PlacementRoomCoverageRecord } = {}
 	for placementKey, coverage in pairs(coverageCellsByPlacement) do
-		local roomMap: { [number]: boolean } = {}
-		local hasOutdoor = false
-		for _, cellIndex in ipairs(coverage.Cells) do
-			local roomId = roomAssignments[cellIndex]
-			if roomId then
-				roomMap[roomId] = true
-			else
-				hasOutdoor = true
-			end
-		end
 		placementCoverageByKey[placementKey] = {
 			PlacementKey = placementKey,
 			PlacementType = coverage.PlacementType,
 			Level = level,
 			Facing = coverage.Facing,
-			RoomIds = roomMap,
-			HasOutdoorCells = hasOutdoor,
+			RoomIds = {}, -- Populated by PlotStateStore when room data arrives
+			HasOutdoorCells = false,
 		}
 	end
 
@@ -414,10 +322,10 @@ function LevelSnapshotBuilder.Build(
 		RoofCellsByIndex = roofCellsByIndex,
 		WallSegments = wallSegments,
 		CardinalWallSegments = cardinalWalls,
-		BlockedCardinalEdges = blockedEdges,
-		RoomAssignments = roomAssignments,
-		RoomsById = roomsById,
-		RoomsList = roomsList,
+		BlockedCardinalEdges = {}, -- No longer used for room detection
+		RoomAssignments = {}, -- Populated by server data
+		RoomsById = {}, -- Populated by server data
+		RoomsList = {}, -- Populated by server data
 		PlacementCoverageByKey = placementCoverageByKey,
 	}
 end

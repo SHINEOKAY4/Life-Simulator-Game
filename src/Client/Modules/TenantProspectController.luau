@@ -662,4 +662,18 @@ function TenantProspectController.Init()
 	end)
 end
 
+-- Get prospect position for seamless tenant handoff
+function TenantProspectController.GetProspectPosition(prospectId: string): CFrame?
+	local record = ProspectVisualsById[prospectId]
+	if not record or not record.Model then
+		return nil
+	end
+	return record.Model:GetPivot()
+end
+
+-- Remove prospect model (called by ResidentController for seamless handoff)
+function TenantProspectController.RemoveProspect(prospectId: string)
+	destroyProspect(prospectId)
+end
+
 return TenantProspectController

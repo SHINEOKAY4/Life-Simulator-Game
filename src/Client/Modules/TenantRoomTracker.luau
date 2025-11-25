@@ -62,15 +62,18 @@ local function rebuildRoomSamples()
 	for level = startLevel, endLevel do
 		PlotStateStore.IterateRooms(level, function(room)
 			if room.CellCount and room.CellCount > 0 then
-				local key = RoomCore.MakeRoomKey(room.Level, room.MinCellX, room.MinCellZ)
-				roomSamplesByKey[key] = {
-					Level = room.Level,
-					CellIndices = copyNumberArray(room.CellIndices),
-					MinCellX = room.MinCellX,
-					MaxCellX = room.MaxCellX,
-					MinCellZ = room.MinCellZ,
-					MaxCellZ = room.MaxCellZ,
-				}
+				-- Use room.Id for unique key generation (room.Id should always be available from server)
+				local key = if room.Id then RoomCore.MakeRoomKey(room.Level, room.Id) else nil
+				if key then
+					roomSamplesByKey[key] = {
+						Level = room.Level,
+						CellIndices = copyNumberArray(room.CellIndices),
+						MinCellX = room.MinCellX,
+						MaxCellX = room.MaxCellX,
+						MinCellZ = room.MinCellZ,
+						MaxCellZ = room.MaxCellZ,
+					}
+				end
 			end
 			return nil
 		end)
@@ -200,18 +203,27 @@ function TenantRoomTracker.GetRandomTargetForTenant(tenantId: string): Vector3?
 	if type(tenantId) ~= "string" or tenantId == "" then
 		return nil
 	end
+
+	local roomKey = tenantRoomKeys[tenantId]
+	if not roomKey then
+		return nil
+	end
+
 	local sample = TenantRoomTracker.GetRoomSampleForTenant(tenantId)
 	if not sample then
 		return nil
 	end
+
 	local grid = PlotStateStore.GetGrid()
 	if not grid then
 		return nil
 	end
+
 	local cellX, cellZ = pickCellFromRoom(sample)
 	if not cellX or not cellZ then
 		return nil
 	end
+
 	local heightOffset = PlotStateStore.GetLevelHeight(sample.Level)
 	local position = grid:CellToWorldCenter(cellX, cellZ, heightOffset)
 	local jitterRange = math.min(grid.CellSize * 0.35, 2)
@@ -220,6 +232,7 @@ function TenantRoomTracker.GetRandomTargetForTenant(tenantId: string): Vector3?
 		local jitterZ = rng:NextNumber(-jitterRange, jitterRange)
 		position += Vector3.new(jitterX, 0, jitterZ)
 	end
+
 	return position
 end
 

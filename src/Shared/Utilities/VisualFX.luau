@@ -4,6 +4,93 @@ local RunService = game:GetService("RunService")
 
 local VisualFX = {}
 
+local POPUP_SCALE_NAME = "__VisualFXPopupScale"
+local POPUP_HIDDEN_SCALE = 0.9
+local POPUP_SHOW_TWEEN = TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local POPUP_HIDE_TWEEN = TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+
+type PopupOptions = {
+	hiddenScale: number?,
+	showTweenInfo: TweenInfo?,
+	hideTweenInfo: TweenInfo?,
+	onHidden: (() -> ())?,
+}
+
+local popupTweens: { [GuiObject]: Tween } = {}
+local popupTargets: { [GuiObject]: boolean } = {}
+
+local function ensurePopupScale(target: GuiObject): UIScale
+	local existing = target:FindFirstChild(POPUP_SCALE_NAME)
+	if existing and existing:IsA("UIScale") then
+		return existing
+	end
+	local scale = Instance.new("UIScale")
+	scale.Name = POPUP_SCALE_NAME
+	scale.Scale = 1
+	scale.Parent = target
+	return scale
+end
+
+function VisualFX.SetPopupVisible(target: GuiObject, shouldShow: boolean, options: PopupOptions?)
+	local hiddenScale = if options and typeof(options.hiddenScale) == "number"
+		then math.clamp(options.hiddenScale, 0.01, 1)
+		else POPUP_HIDDEN_SCALE
+	local showTweenInfo = if options and options.showTweenInfo then options.showTweenInfo else POPUP_SHOW_TWEEN
+	local hideTweenInfo = if options and options.hideTweenInfo then options.hideTweenInfo else POPUP_HIDE_TWEEN
+	local scale = ensurePopupScale(target)
+	local activeTween = popupTweens[target]
+	if activeTween then
+		activeTween:Cancel()
+		popupTweens[target] = nil
+	end
+
+	if shouldShow then
+		popupTargets[target] = true
+		target.Visible = true
+		scale.Scale = hiddenScale
+		local tween = TweenService:Create(scale, showTweenInfo, {
+			Scale = 1,
+		})
+		popupTweens[target] = tween
+		tween.Completed:Connect(function()
+			if popupTweens[target] == tween then
+				popupTweens[target] = nil
+			end
+		end)
+		tween:Play()
+		return tween
+	end
+
+	popupTargets[target] = false
+	if not target.Visible then
+		scale.Scale = 1
+		if options and typeof(options.onHidden) == "function" then
+			options.onHidden()
+		end
+		return nil
+	end
+
+	local tween = TweenService:Create(scale, hideTweenInfo, {
+		Scale = hiddenScale,
+	})
+	popupTweens[target] = tween
+	tween.Completed:Connect(function()
+		if popupTweens[target] ~= tween then
+			return
+		end
+		popupTweens[target] = nil
+		if popupTargets[target] == false then
+			target.Visible = false
+			scale.Scale = 1
+			if options and typeof(options.onHidden) == "function" then
+				options.onHidden()
+			end
+		end
+	end)
+	tween:Play()
+	return tween
+end
+
 function VisualFX.Fade(uiElement, targetTransparency, duration)
 	local start = uiElement.BackgroundTransparency
 	local time = 0

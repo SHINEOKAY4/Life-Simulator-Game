@@ -16,7 +16,6 @@ local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 local SurfacePaintController = require(ModulesFolder.SurfacePaintController)
 local BuildPaletteUI = require(UserInterfaceFolder.BuildPaletteUI)
 -- Removed ObjectSelector require (binding no longer triggered from menu; state value still observed)
-local CutawayViewController = require(ModulesFolder.CutawayViewController)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local PlotStateStore = require(ClientStoresFolder.PlotStateStore)
 local MenuController = require(script.Controllers.MenuController)
@@ -99,8 +98,6 @@ local Categories = {
 }
 
 local INPUT_DEBOUNCE_SECONDS = 0.2
-local UPGRADE_CUTAWAY_SOURCE = "PlotBuilderUpgrade"
-local CUTAWAY_PRIORITY = 20
 
 local PlotBuilderUI = {}
 local upgradeViewChangedSignal = GoodSignal.new()
@@ -352,18 +349,6 @@ local function shouldShowMainFrame(): boolean
 	return true
 end
 
-local function refreshUpgradeCutaway()
-	if not isUpgradeViewActive or not shouldShowMainFrame() then
-		CutawayViewController.Release(UPGRADE_CUTAWAY_SOURCE)
-		return
-	end
-
-	CutawayViewController.Request(UPGRADE_CUTAWAY_SOURCE, {
-		Priority = CUTAWAY_PRIORITY,
-		TargetLevel = PlotStateStore.GetActiveLevel(),
-	})
-end
-
 local function isMenuBlocked(): boolean
 	if storageMenuActive then
 		return true
@@ -444,8 +429,6 @@ local function syncVisibility()
 
 	setPopupVisible(MenuFrame, builderVisible and showMenuFrame)
 	setPopupVisible(RightFrame, builderVisible and showRightFrame)
-
-	refreshUpgradeCutaway()
 end
 
 local function setUpgradeViewActive(active: boolean)
@@ -628,7 +611,6 @@ function PlotBuilderUI:Init()
 	end
 	ActiveLevelChangedConnection = PlotStateStore.OnActiveLevelChanged(function()
 		refreshLevelControls()
-		refreshUpgradeCutaway()
 	end)
 	refreshLevelControls()
 	catalog:SelectInitialCategory()
@@ -663,7 +645,6 @@ function PlotBuilderUI.Hide()
 	LeftFrame.Visible = false
 	setPopupVisible(RightFrame, false)
 	MainFrame.Visible = false
-	CutawayViewController.Release(UPGRADE_CUTAWAY_SOURCE)
 	local controller = previewController
 	if controller then
 		controller:UpdateCancelButtonState()

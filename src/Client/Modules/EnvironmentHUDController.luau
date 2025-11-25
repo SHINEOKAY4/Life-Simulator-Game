@@ -5,14 +5,18 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
+local InsulationConstants = require(ReplicatedStorage.Shared.Configurations.InsulationConstants)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local WeatherController = require(script.Parent.WeatherController)
+local RoomCore = require(ReplicatedStorage.Shared.Utilities.RoomCore)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 
 local EnvironmentHUDController = {}
 
 local CurrentRoomId: number? = nil
 local CurrentLevel: number? = nil
+local CurrentCellX: number? = nil
+local CurrentCellZ: number? = nil
 
 -- Assets
 local Icons = {
@@ -365,9 +369,11 @@ function EnvironmentHUDController.Init()
 		-- Track room/cell changes
 		CurrentRoomId = roomId
 		CurrentLevel = level
+		CurrentCellX = cellX
+		CurrentCellZ = cellZ
 
 		if CurrentRoomId and CurrentLevel ~= nil then
-			-- Read temperature from plot model attribute (efficient, stable)
+			-- Read temperature from plot model attribute using room key
 			local localPlayer = Players.LocalPlayer
 			local plotIndexValue = localPlayer:GetAttribute("OwnedPlotIndex")
 			local temp: number? = nil
@@ -375,31 +381,16 @@ function EnvironmentHUDController.Init()
 			if typeof(plotIndexValue) == "number" then
 				local plotModel = PlotFinder.FindPlot(plotIndexValue)
 				if plotModel then
-					-- Use structured key: "RoomTemp_Level_RoomId"
-					local attrKey = string.format("RoomTemp_%d_%d", CurrentLevel, CurrentRoomId)
-					local attrValue = plotModel:GetAttribute(attrKey)
-					if typeof(attrValue) == "number" then
-						temp = attrValue
-					end
-					print(
-						string.format(
-							"[EnvironmentHUD] Read %s from plot model: %s",
-							attrKey,
-							if temp then string.format("%.1f°C", temp) else "nil"
-						)
-					)
-				else
-					print(string.format("[EnvironmentHUD] Plot model not found: %s", tostring(plotIndexValue)))
+					-- Get temperature attribute using level and room ID
+					-- Format: "Temp_<level>_<roomId>" e.g. "Temp_0_1"
+					local attributeName = string.format("Temp_%d_%d", CurrentLevel, CurrentRoomId)
+					temp = plotModel:GetAttribute(attributeName)
 				end
 			end
 
-			-- Default to current weather temperature if no data yet (not hardcoded 20°C)
+			-- Default to ambient if no data yet
 			if not temp then
-				local fallbackTemp = WeatherController.GetCurrentTemperature()
-				temp = fallbackTemp
-				print(
-					string.format("[EnvironmentHUD] No temp attribute, using weather fallback: %.1f°C", fallbackTemp)
-				)
+				temp = InsulationConstants.AmbientTemperature
 			end
 			updateTemperatureVisuals(temp, true)
 		else

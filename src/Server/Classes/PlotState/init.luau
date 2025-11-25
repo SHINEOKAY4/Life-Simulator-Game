@@ -125,6 +125,7 @@ export type SaveData = {
 }
 
 export type PlotState = {
+	Owner: Player?,
 	Grid: any,
 	ChunkSizeInCells: number,
 	ChunkColumns: number,
@@ -607,6 +608,7 @@ end
 function PlotState.new(grid: any, chunkSizeInCells: number, save: SaveData): PlotState
 	local chunkColumns: number, chunkRows: number = grid:ChunkCounts(chunkSizeInCells)
 	local self = setmetatable({} :: any, PlotState) :: PlotState
+	self.Owner = nil
 	self.Grid = grid
 	self.ChunkSizeInCells = chunkSizeInCells
 	self.ChunkColumns = chunkColumns

@@ -132,9 +132,18 @@ local function ensureTenantRooms(runtime: RuntimeState): { [string]: any }?
 	local leases = DataNormalization.EnsureActiveLeases(runtime.Save, serverNow(), RentConfig.IntervalSeconds)
 	local assignments = DataNormalization.EnsureRoomAssignments(runtime.Save)
 
-	RoomManager.ReconcileAssignments(leases, rooms, assignments, function(tenantId)
+	local changedTenants = RoomManager.ReconcileAssignments(leases, rooms, assignments, function(tenantId)
 		concludeLease(runtime, tenantId, "NoRoom")
 	end)
+
+	if changedTenants then
+		for tenantId in pairs(changedTenants) do
+			local lease = leases[tenantId]
+			if lease then
+				broadcastTenantDelta(runtime, tenantId, lease)
+			end
+		end
+	end
 
 	return rooms
 end
@@ -336,7 +345,7 @@ local function refreshValuation(runtime: RuntimeState, now: number)
 	end
 
 	local avgRating = getAverageRating(runtime.Player)
-	local valuation = TenantValuation.Evaluate(plotState, avgRating)
+	local valuation = TenantValuation.Evaluate(plotState, avgRating, runtime.Player)
 	if not valuation then
 		local retry =
 			math.clamp(runtime.ValuationRetrySeconds * 2, MIN_VALUATION_RETRY_SECONDS, MAX_VALUATION_RETRY_SECONDS)

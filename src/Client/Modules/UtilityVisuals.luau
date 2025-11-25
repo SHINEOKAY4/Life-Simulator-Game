@@ -8,7 +8,6 @@ local Workspace = game:GetService("Workspace")
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local SelectionController = require(script.Parent.SelectionController)
-local CutawayViewController = require(script.Parent.CutawayViewController)
 
 local UtilityVisuals = {}
 local Icons = {} -- [key] = BillboardGui
@@ -16,8 +15,6 @@ local RadiusVisual: BasePart? = nil
 local SelectionHighlight: Highlight? = nil
 local ConnectionCountVisual: BillboardGui? = nil
 local WireBeams = {} -- [connectionKey] = { {Beam, Attachment0, Attachment1}, ... }
-
-local CUTAWAY_SOURCE = "UtilityMode"
 
 local function getFloorY(level: number?): number
 	local surface = PlotStateStore.GetSurface()
@@ -185,6 +182,7 @@ local function drawWire(keyA: string, keyB: string)
 end
 
 local forceShowWires = false
+local forceShowSources: { [string]: boolean } = {}
 
 local function isAnyConflictingUIActive(): boolean
 	local PlayerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
@@ -206,14 +204,6 @@ local function isAnyConflictingUIActive(): boolean
 
 		local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled")
 		if PlotExpansionEnabled and PlotExpansionEnabled:IsA("BoolValue") and PlotExpansionEnabled.Value then
-			return true
-		end
-	end
-
-	local MainHUD = PlayerGui:FindFirstChild("MainHUD")
-	if MainHUD then
-		local BillFrame = MainHUD:FindFirstChild("BillFrame")
-		if BillFrame and BillFrame:IsA("Frame") and BillFrame.Visible then
 			return true
 		end
 	end
@@ -256,17 +246,6 @@ local function shouldShowWires()
 		or spec.RequiresWater
 		or spec.WaterSource
 		or spec.WaterConductor
-end
-
-local function updateCutaway()
-	if shouldShowWires() then
-		CutawayViewController.Request(CUTAWAY_SOURCE, {
-			Priority = 10,
-			TargetLevel = PlotStateStore.GetActiveLevel(),
-		})
-	else
-		CutawayViewController.Release(CUTAWAY_SOURCE)
-	end
 end
 
 local function getConnectedNetwork(startKey: string): { [string]: boolean }
@@ -692,13 +671,11 @@ function UtilityVisuals.Init()
 		updateVisuals()
 		updateWires()
 		updateSelectionVisuals()
-		updateCutaway()
 	end)
 	PlotStateStore.OnRoomSnapshotChanged(function()
 		updateVisuals()
 		updateSelectionVisuals()
 		updateWires()
-		updateCutaway()
 	end)
 
 	-- Listen for selection changes to show radius
@@ -706,20 +683,32 @@ function UtilityVisuals.Init()
 		updateSelectionVisuals()
 		updateWires()
 		updateVisuals()
-		updateCutaway()
 	end)
 
 	PlotStateStore.OnActiveLevelChanged(function()
-		if shouldShowWires() then
-			updateCutaway()
-		end
+		-- Level changed
 	end)
 end
 
-function UtilityVisuals.SetForceShow(val: boolean)
-	forceShowWires = val
-	updateWires()
-	updateCutaway()
+function UtilityVisuals.SetForceShow(val: boolean, sourceId: string?)
+	local key = sourceId or "__default"
+	if val then
+		forceShowSources[key] = true
+	else
+		forceShowSources[key] = nil
+	end
+
+	local shouldForce = next(forceShowSources) ~= nil
+	if forceShowWires ~= shouldForce then
+		forceShowWires = shouldForce
+		updateVisuals()
+		updateWires()
+	elseif shouldForce then
+		-- Already forcing visibility but refresh to reflect new placements/icons quickly.
+		updateVisuals()
+		updateWires()
+	end
+	-- When no sources remain and state unchanged, no refresh needed.
 end
 
 return UtilityVisuals

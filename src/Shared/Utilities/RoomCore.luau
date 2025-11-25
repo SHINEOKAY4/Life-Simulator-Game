@@ -1,10 +1,15 @@
 --!strict
 -- Unified room system - single source of truth for all room logic
+--
+-- ROOM KEY FORMAT: "level:roomId" (e.g., "0:1", "0:2", "1:1")
+-- - Uses room ID instead of coordinates to guarantee uniqueness
+-- - Previously used "level:minX:minZ" which caused duplicate keys when rooms shared minimum coordinates
+-- - Old keys in saved data are auto-migrated by TenantService.RoomManager.ReconcileAssignments
 
 local RoomCore = {}
 
 -- Constants
-RoomCore.MIN_TENANT_ROOM_DIM = 5
+RoomCore.MIN_TENANT_ROOM_DIM = 4
 RoomCore.MIN_TENANT_ROOM_CELLS = RoomCore.MIN_TENANT_ROOM_DIM * RoomCore.MIN_TENANT_ROOM_DIM
 
 export type MinimalRoom = {
@@ -38,28 +43,31 @@ export type TenantRoom = {
 }
 
 -- Room key utilities
-function RoomCore.MakeRoomKey(level: number, minX: number, minZ: number): string
-	return string.format("%d:%d:%d", level, minX, minZ)
+-- Format: "level:roomId" for guaranteed uniqueness
+function RoomCore.MakeRoomKey(level: number, roomId: number): string
+	return string.format("%d:%d", level, roomId)
 end
 
-function RoomCore.ParseRoomKey(roomKey: string?): (number?, number?, number?)
+-- Parse room key in format "level:roomId"
+-- Returns (level, roomId)
+function RoomCore.ParseRoomKey(roomKey: string?): (number?, number?)
 	if type(roomKey) ~= "string" or roomKey == "" then
-		return nil, nil, nil
+		return nil, nil
 	end
-	local pattern = "^(%-?%d+):(%-?%d+):(%-?%d+)$"
-	local levelStr, xStr, zStr = string.match(roomKey, pattern)
+	local pattern = "^(%-?%d+):(%-?%d+)$"
+	local levelStr, idStr = string.match(roomKey, pattern)
 	if not levelStr then
-		return nil, nil, nil
+		return nil, nil
 	end
-	return tonumber(levelStr), tonumber(xStr), tonumber(zStr)
+	return tonumber(levelStr), tonumber(idStr)
 end
 
 function RoomCore.NormalizeRoomKey(roomKey: string?): string?
-	local level, minX, minZ = RoomCore.ParseRoomKey(roomKey)
-	if not level or not minX or not minZ then
+	local level, roomId = RoomCore.ParseRoomKey(roomKey)
+	if not level or not roomId then
 		return nil
 	end
-	return RoomCore.MakeRoomKey(level, minX, minZ)
+	return RoomCore.MakeRoomKey(level, roomId)
 end
 
 -- Room validation
@@ -106,7 +114,8 @@ function RoomCore.EvaluateTenantReadiness(room: TenantRoom): (boolean, string?)
 		return false, "TooSmall"
 	end
 
-	return false, "NotTenantReady"
+	-- All checks passed
+	return true, nil
 end
 
 -- Reason messages

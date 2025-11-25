@@ -226,4 +226,20 @@ PlacementPackets.TogglePowerRequest = Packet("TogglePowerRequest", {
 	IsOn = Packet.Boolean8,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
+-- Room replication (server → client) - replaces client-side room detection
+PlacementPackets.RoomDataSync = Packet("RoomDataSync", {
+	Level = Packet.NumberU8,
+	Rooms = {
+		{
+			Id = Packet.NumberU16,
+			RoomKey = Packet.String,
+			MinCellX = Packet.NumberU16,
+			MaxCellX = Packet.NumberU16,
+			MinCellZ = Packet.NumberU16,
+			MaxCellZ = Packet.NumberU16,
+			CellIndices = { Packet.NumberU16 },
+		},
+	},
+})
+
 return PlacementPackets

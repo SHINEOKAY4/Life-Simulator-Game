@@ -10,15 +10,14 @@ local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 local Packets = require(ReplicatedStorage.Network.TemperaturePackets)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local HVACCore = require(ReplicatedStorage.Shared.Utilities.HVACCore)
-local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local WeatherService = require(ServerScriptService.Server.Services.WeatherService)
+local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local _InsulationConstants = require(ReplicatedStorage.Shared.Configurations.InsulationConstants)
 
 local TemperatureService = {}
 
 function TemperatureService.Init()
-	print("[TemperatureService] Initializing temperature service")
 	-- Update temperature every 1 second
 	WorldUpdate.Subscribe("TemperatureUpdate", 1.0, function(dt)
 		TemperatureService:Update(dt)
@@ -131,39 +130,30 @@ function TemperatureService:Update(dt: number)
 	for _, player in ipairs(Players:GetPlayers()) do
 		local plotState = PlotService.GetState(player)
 		if plotState then
+			-- Get plot model to set attributes on
+			local plotIndexValue = player:GetAttribute("OwnedPlotIndex")
+			if typeof(plotIndexValue) ~= "number" then
+				continue
+			end
+
+			local plotModel = PlotFinder.FindPlot(plotIndexValue)
+			if not plotModel then
+				continue
+			end
+
 			local minLevel = plotState.DefaultLevel or 0
 			local maxLevel = plotState.MaxFloorLevel or 3
 
-			-- Get the plot model once per player using PlotFinder
-			local plotIndex = player:GetAttribute("OwnedPlotIndex")
-			if typeof(plotIndex) ~= "number" then
-				print("[TemperatureService] WARNING: No plot index for player", player.Name)
-				continue
-			end
-
-			local plotModel = PlotFinder.FindPlot(plotIndex)
-			if not plotModel then
-				print("[TemperatureService] WARNING: Plot model not found for player", player.Name)
-				continue
-			end
-
 			for level = minLevel, maxLevel do
 				local rooms = plotState:GetRoomsForLevel(level)
+
 				for _, room in ipairs(rooms) do
 					self:UpdateRoomTemperature(room, dt)
 
-					-- Replicate temperature via Plot Model Attribute (efficient, stable)
-					-- Use structured key: "RoomTemp_Level_RoomId"
-					local attrKey = string.format("RoomTemp_%d_%d", level, room.Id)
-					plotModel:SetAttribute(attrKey, room.CurrentTemperature)
-					print(
-						string.format(
-							"[TemperatureService] Set %s = %.1f°C (ambient: %.1f°C)",
-							attrKey,
-							room.CurrentTemperature,
-							WeatherService.GetCurrentTemperature()
-						)
-					)
+					-- Replicate temperature via plot model attribute using room key
+					-- Format: "Temp_<level>_<roomId>" e.g. "Temp_0_1"
+					local attributeName = string.format("Temp_%d_%d", level, room.Id)
+					plotModel:SetAttribute(attributeName, room.CurrentTemperature)
 				end
 			end
 		end
@@ -176,18 +166,6 @@ function TemperatureService:UpdateRoomTemperature(room: any, dt: number)
 	local heatingCap = room.HeatingPower
 	local coolingCap = room.CoolingPower
 	local current = room.CurrentTemperature
-
-	print(
-		string.format(
-			"[TemperatureService] UpdateRoom: RoomId=%d, Current=%.1f°C, Ambient=%.1f°C, Insulation=%.2f, Heating=%.1f, Cooling=%.1f",
-			room.Id or 0,
-			current,
-			ambient,
-			insulation,
-			heatingCap,
-			coolingCap
-		)
-	)
 
 	-- Physics Constants
 	local THERMAL_MASS_PER_CELL = 50 -- Joules/Degree (Arbitrary unit to tune speed)

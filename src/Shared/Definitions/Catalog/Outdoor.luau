@@ -73,6 +73,7 @@ local Outdoor = {
 			DepthCells = 2,
 			Facing = { "North", "East", "South", "West" },
 			Cost = 200,
+			ComfortScore = 1,
 			Description = "Classic wooden park bench perfect for relaxing outdoors.",
 			Rules = { RequiresFloorUnderAllCells = false },
 			Tags = { "Basic", "Seating" },

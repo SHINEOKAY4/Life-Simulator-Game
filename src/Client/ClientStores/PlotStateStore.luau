@@ -13,7 +13,6 @@ local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildCons
 
 local LevelSnapshotBuilder = require(script.Parent.LevelSnapshotBuilder)
 local DataNormalization = require(script.Parent.DataNormalization)
-local CutawayStateManager = require(script.Parent.CutawayStateManager)
 local PacketProcessor = require(script.Parent.PacketProcessor)
 
 type StateSnapshotType = {
@@ -38,12 +37,6 @@ local ActiveLevel = 0
 local ActiveLevelChanged = GoodSignal.new()
 local RoomSnapshotChanged = GoodSignal.new()
 local PlacementMetadataChanged = GoodSignal.new()
-
--- Cutaway state manager instance
-local CutawayManager: any = nil
-
-export type CutawayState = CutawayStateManager.CutawayState
-export type CutawayRequestOptions = CutawayStateManager.CutawayRequestOptions
 
 -- Type aliases for types used in public API
 type FloorCellDescriptor = {
@@ -95,10 +88,24 @@ export type PlacementFootprint = {
 
 export type PlacementRoomCoverageRecord = LevelSnapshotBuilder.PlacementRoomCoverageRecord
 
--- Derived level metadata caches powering cutaway heuristics.
+-- Derived level metadata caches for room detection and placement analysis.
 local DerivedLevelSnapshots: { [number]: LevelDerivedSnapshot } = {}
 
+-- Preserved room data that survives snapshot invalidation
+local PreservedRoomData: { [number]: { RoomAssignments: any, RoomsById: any, RoomsList: any } } = {}
+
 local function invalidateDerivedLevelSnapshots()
+	-- Preserve room data when invalidating (room data comes from server via RoomDataSync)
+	for level, snapshot in pairs(DerivedLevelSnapshots) do
+		if snapshot.RoomAssignments and next(snapshot.RoomAssignments) then
+			PreservedRoomData[level] = {
+				RoomAssignments = snapshot.RoomAssignments,
+				RoomsById = snapshot.RoomsById,
+				RoomsList = snapshot.RoomsList,
+			}
+		end
+	end
+
 	DerivedLevelSnapshots = {}
 	RoomSnapshotChanged:Fire()
 end
@@ -199,6 +206,15 @@ local function getLevelDerivedSnapshot(level: number): LevelDerivedSnapshot?
 
 	local built = LevelSnapshotBuilder.Build(level, columns, rows, placedItems, PlotStateStore.GetDefaultLevel())
 	DerivedLevelSnapshots[level] = built
+
+	-- Restore preserved room data if it exists
+	local preserved = PreservedRoomData[level]
+	if preserved then
+		built.RoomAssignments = preserved.RoomAssignments
+		built.RoomsById = preserved.RoomsById
+		built.RoomsList = preserved.RoomsList
+	end
+
 	return built
 end
 
@@ -207,12 +223,8 @@ local function ChunkToIndex(chunkX: number, chunkZ: number, chunkColumns: number
 end
 
 function PlotStateStore.Init()
-	-- Initialize CutawayManager
 	local defaultLevel = 0
 	local maxLevel = 0
-	local function getActiveLevel(): number
-		return ActiveLevel
-	end
 
 	Packets.PlotStateSync.OnClientEvent:Connect(function(chunkInfo, unlockedChunks, placedItems, surfaceMounts)
 		StateSnapshot.ChunkInfo = chunkInfo
@@ -223,11 +235,6 @@ function PlotStateStore.Init()
 
 		defaultLevel = if typeof(chunkInfo.DefaultLevel) == "number" then chunkInfo.DefaultLevel else 0
 		maxLevel = if typeof(chunkInfo.MaxLevel) == "number" then chunkInfo.MaxLevel else defaultLevel
-
-		-- Initialize CutawayManager on first sync
-		if not CutawayManager then
-			CutawayManager = CutawayStateManager.new(defaultLevel, maxLevel, getActiveLevel)
-		end
 
 		if not ActiveLevelInitialized then
 			ActiveLevel = defaultLevel
@@ -346,6 +353,91 @@ function PlotStateStore.Init()
 			PlacementMetadataChanged:Fire()
 		end
 	end)
+
+	-- Room replication from server - single source of truth
+	-- Server calculates rooms using FloodFillCore and sends minimal data here
+	-- Client never recalculates rooms - only displays server authority
+	Packets.RoomDataSync.OnClientEvent:Connect(function(payload)
+		local level = payload.Level
+
+		-- Ensure snapshot exists before populating room data
+		local snapshot = getLevelDerivedSnapshot(level)
+		if not snapshot then
+			return
+		end
+
+		-- Clear existing room data
+		snapshot.RoomAssignments = {}
+		snapshot.RoomsById = {}
+		snapshot.RoomsList = {}
+
+		-- Populate from server data (includes Id, RoomKey, bounds, CellIndices)
+		for _, serverRoom in ipairs(payload.Rooms) do
+			local roomRecord: RoomRecord = {
+				Id = serverRoom.Id,
+				Level = level,
+				CellCount = #serverRoom.CellIndices,
+				MinCellX = serverRoom.MinCellX,
+				MaxCellX = serverRoom.MaxCellX,
+				MinCellZ = serverRoom.MinCellZ,
+				MaxCellZ = serverRoom.MaxCellZ,
+				CellIndices = serverRoom.CellIndices,
+			}
+
+			for _, cellIndex in ipairs(serverRoom.CellIndices) do
+				snapshot.RoomAssignments[cellIndex] = serverRoom.Id
+			end
+
+			snapshot.RoomsById[serverRoom.Id] = roomRecord
+			table.insert(snapshot.RoomsList, roomRecord)
+		end
+
+		-- Update placement coverage with accurate room data
+		for placementKey, coverage in pairs(snapshot.PlacementCoverageByKey) do
+			local roomMap: { [number]: boolean } = {}
+			local hasOutdoor = false
+
+			-- Find coverage cells by looking up the placement
+			local placementData = StateSnapshot.PlacedItems and StateSnapshot.PlacedItems[placementKey]
+			if placementData then
+				-- Use item footprint to determine covered cells
+				local itemSpec = ItemFinder.FindItemById(placementData.id)
+				if itemSpec then
+					local widthCells, depthCells = rotateFootprint(
+						placementData.WidthCells or itemSpec.WidthCells,
+						placementData.DepthCells or itemSpec.DepthCells,
+						placementData.facing
+					)
+					local grid = PlotStateStore.GetGrid()
+					if grid then
+						local minX, minZ, maxX, maxZ = grid:FootprintBounds(
+							placementData.cellX,
+							placementData.cellZ,
+							widthCells,
+							depthCells,
+							placementData.facing
+						)
+						for cellZ = minZ, maxZ do
+							for cellX = minX, maxX do
+								local cellIndex = (cellZ - 1) * grid.Columns + cellX
+								local roomId = snapshot.RoomAssignments[cellIndex]
+								if roomId then
+									roomMap[roomId] = true
+								else
+									hasOutdoor = true
+								end
+							end
+						end
+					end
+				end
+			end
+
+			coverage.RoomIds = roomMap
+			coverage.HasOutdoorCells = hasOutdoor
+		end
+
+		RoomSnapshotChanged:Fire()
+	end)
 end
 
 function PlotStateStore.GetStateSnapshot()
@@ -406,54 +498,10 @@ function PlotStateStore.SetActiveLevel(level: number)
 	ActiveLevelInitialized = true
 	StateSnapshot.ActiveLevel = ActiveLevel
 	ActiveLevelChanged:Fire(ActiveLevel)
-	if CutawayManager then
-		CutawayManager.RefreshState()
-	end
 end
 
 function PlotStateStore.OnActiveLevelChanged(handler: (number) -> ()): RBXScriptConnection
 	return ActiveLevelChanged:Connect(handler)
-end
-
-function PlotStateStore.RequestCutaway(source: string, options: CutawayRequestOptions?)
-	if not CutawayManager then
-		return
-	end
-	CutawayManager.RequestCutaway(source, options)
-end
-
-function PlotStateStore.ReleaseCutaway(source: string)
-	if not CutawayManager then
-		return
-	end
-	CutawayManager.ReleaseCutaway(source)
-end
-
-function PlotStateStore.ClearCutawayRequests()
-	if not CutawayManager then
-		return
-	end
-	CutawayManager.ClearAllRequests()
-end
-
-function PlotStateStore.GetCutawayState(): CutawayState
-	if not CutawayManager then
-		return {
-			Visible = false,
-			Source = nil,
-			TargetLevel = PlotStateStore.GetActiveLevel(),
-			HidePlacementTypes = {},
-		}
-	end
-	return CutawayManager.GetState()
-end
-
-function PlotStateStore.OnCutawayChanged(handler: (CutawayState) -> ()): RBXScriptConnection
-	if not CutawayManager then
-		local signal = GoodSignal.new()
-		return signal:Connect(handler)
-	end
-	return CutawayManager.OnCutawayChanged(handler)
 end
 
 function PlotStateStore.OnRoomSnapshotChanged(handler: () -> ()): RBXScriptConnection

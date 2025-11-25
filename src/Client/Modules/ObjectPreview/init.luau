@@ -11,7 +11,6 @@ local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local PlacementBehavior = require(ReplicatedStorage.Shared.Utilities.PlacementBehavior)
 local PlotStateStore = require(script.Parent.Parent:WaitForChild("ClientStores"):WaitForChild("PlotStateStore"))
-local CutawayViewController = require(script.Parent:WaitForChild("CutawayViewController"))
 local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
 
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
@@ -73,8 +72,6 @@ local objectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnab
 
 local storedPromptServiceEnabled: boolean? = nil
 local proximityPromptsSuppressed = false
-local CeilingCutawaySuppressed = false
-local CEILING_CUTAWAY_SOURCE = "CeilingPreview"
 
 -- Temporarily disable proximity prompts so preview input keys do not trigger world interactions.
 
@@ -98,32 +95,6 @@ local function restoreProximityPrompts()
 	end
 	ProximityPromptService.Enabled = desiredState
 	storedPromptServiceEnabled = nil
-end
-
-local function disableCutawayForCeiling()
-	if CeilingCutawaySuppressed then
-		return
-	end
-	CeilingCutawaySuppressed = true
-	CutawayViewController.Request(CEILING_CUTAWAY_SOURCE, {
-		Priority = 64,
-		TargetLevel = PlotStateStore.GetMaxLevel(),
-		HidePlacementTypes = {
-			Wall = false,
-			Roof = false,
-			Ceiling = false,
-			Floor = false,
-			CellObject = false,
-		},
-	})
-end
-
-local function restoreCutawayAfterCeiling()
-	if not CeilingCutawaySuppressed then
-		return
-	end
-	CeilingCutawaySuppressed = false
-	CutawayViewController.Release(CEILING_CUTAWAY_SOURCE)
 end
 
 local Camera = workspace.CurrentCamera
@@ -1175,10 +1146,8 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 	CurrentItemId = itemId
 	CurrentKind = resolvedPreviewKind
 	if resolvedPreviewKind == "Ceiling" then
-		disableCutawayForCeiling()
 		CeilingPreviewState.Initialize(CurrentItemSpec)
 	else
-		restoreCutawayAfterCeiling()
 		CeilingPreviewState.Reset()
 	end
 	local sequenceForCurrent, indexForCurrent = rotationSequenceForCurrent()
@@ -1463,6 +1432,25 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 		}
 
 		if shouldSkipPose(poseInfo) then
+			-- Even when skipping full render, update window pose so placement uses current data
+			if windowVariantActive and windowPose then
+				local wallModelForWindow = hitWallModel or RaycastUtils.FindWallModel(result.Instance)
+				if wallModelForWindow then
+					local wallPart = wallModelForWindow.PrimaryPart
+						or wallModelForWindow:FindFirstChildWhichIsA("BasePart")
+					if wallPart then
+						-- Store the current window pose without full re-render
+						WindowPreviewController.RenderOnWall({
+							model = model,
+							wallPart = wallPart,
+							pose = windowPose,
+							windowConfig = (itemSpec and itemSpec.WindowCutoutConfig) or nil,
+							pivotRotation = CurrentPivotRotation,
+							highlight = PreviewHighlight,
+						})
+					end
+				end
+			end
 			Renderer.StepModel(model)
 			return
 		end
@@ -1604,7 +1592,6 @@ function ObjectPreview.ClearPreview()
 	CurrentCeilingMountPose = nil
 	CurrentSubSlotId = nil
 	CeilingPreviewState.Reset()
-	restoreCutawayAfterCeiling()
 end
 
 function ObjectPreview.GetCurrentPose(): PreviewPose?

@@ -60,7 +60,12 @@ function RoomManager.CollectRooms(plotState: any): ({ [string]: any }, { [string
 
 		if success and typeof(levelRooms) == "table" then
 			for _, room in ipairs(levelRooms) do
-				local roomKey = room.RoomKey or RoomCore.MakeRoomKey(level, room.MinX, room.MinZ)
+				-- Room should always have RoomKey set during creation
+				-- Fallback uses room.Id for uniqueness (not coordinates)
+				local roomKey = room.RoomKey or (room.Id and RoomCore.MakeRoomKey(level, room.Id))
+				if not roomKey then
+					continue
+				end
 				local ready, reason = RoomCore.EvaluateTenantReadiness(room)
 				diagnostics[roomKey] = {
 					Room = room,
@@ -82,7 +87,16 @@ function RoomManager.ReconcileAssignments(
 	roomMap: { [string]: any }?,
 	assignments: RoomAssignmentMap,
 	onEvict: (tenantId: string) -> ()
-)
+): { [string]: boolean }
+	local changedTenants: { [string]: boolean } = {}
+
+	local function setLeaseRoom(tenantId: string, lease: TenantLease, roomKey: string?)
+		if lease.RoomKey ~= roomKey then
+			lease.RoomKey = roomKey
+			changedTenants[tenantId] = true
+		end
+	end
+
 	-- Clear all assignments
 	for key in pairs(assignments) do
 		assignments[key] = nil :: any
@@ -93,7 +107,7 @@ function RoomManager.ReconcileAssignments(
 		for tenantId in pairs(leases) do
 			onEvict(tenantId)
 		end
-		return
+		return changedTenants
 	end
 
 	-- Build occupancy map
@@ -115,11 +129,11 @@ function RoomManager.ReconcileAssignments(
 			if used < capacity then
 				occupancy[roomKey] = used + 1
 			else
-				lease.RoomKey = nil
+				setLeaseRoom(tenantId, lease, nil)
 				reassignQueue[#reassignQueue + 1] = tenantId
 			end
 		else
-			lease.RoomKey = nil
+			setLeaseRoom(tenantId, lease, nil)
 			reassignQueue[#reassignQueue + 1] = tenantId
 		end
 	end
@@ -133,7 +147,7 @@ function RoomManager.ReconcileAssignments(
 				local capacity = room.TenantCapacity or 0
 				local used = occupancy[roomKey] or 0
 				if capacity > 0 and used < capacity then
-					lease.RoomKey = roomKey
+					setLeaseRoom(tenantId, lease, roomKey)
 					occupancy[roomKey] = used + 1
 					assigned = true
 					break
@@ -152,6 +166,8 @@ function RoomManager.ReconcileAssignments(
 			assignments[roomKey] = used
 		end
 	end
+
+	return changedTenants
 end
 
 function RoomManager.FindAvailableRoom(roomMap: { [string]: any }?, assignments: RoomAssignmentMap): string?

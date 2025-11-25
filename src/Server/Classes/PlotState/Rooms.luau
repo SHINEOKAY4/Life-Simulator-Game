@@ -6,12 +6,12 @@ local InsulationConstants = require(ReplicatedStorage.Shared.Configurations.Insu
 local FloodFillCore = require(ReplicatedStorage.Shared.Utilities.FloodFillCore)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local HVACCore = require(ReplicatedStorage.Shared.Utilities.HVACCore)
+local RoomCore = require(ReplicatedStorage.Shared.Utilities.RoomCore)
 local WeatherService = require(ServerScriptService.Server.Services.WeatherService)
+local PlacementPackets = require(ReplicatedStorage.Network.PlacementPackets)
 
 local Rooms = {}
 
-local REQUIRED_ROOM_DIM = 5
-local REQUIRED_ROOM_CELLS = REQUIRED_ROOM_DIM * REQUIRED_ROOM_DIM
 local DEFAULT_TENANT_CAPACITY_PER_ROOM = 1 -- Base occupants per tenant-ready room (gamepasses can override per player)
 
 local function hasTag(spec: { [string]: any }?, targetTag: string): boolean
@@ -30,14 +30,12 @@ local function hasTag(spec: { [string]: any }?, targetTag: string): boolean
 	return false
 end
 
-local function computeRoomKey(level: number, minX: number, minZ: number): string
-	return ("%d:%d:%d"):format(level, minX, minZ)
-end
-
 local function meetsMinimumRoomSize(room: any): boolean
 	local width = room.MaxX - room.MinX + 1
 	local depth = room.MaxZ - room.MinZ + 1
-	return width >= REQUIRED_ROOM_DIM and depth >= REQUIRED_ROOM_DIM and room.CellCount >= REQUIRED_ROOM_CELLS
+	return width >= RoomCore.MIN_TENANT_ROOM_DIM
+		and depth >= RoomCore.MIN_TENANT_ROOM_DIM
+		and room.CellCount >= RoomCore.MIN_TENANT_ROOM_CELLS
 end
 
 type BedPlacement = {
@@ -158,14 +156,14 @@ export type Room = {
 
 local function calculateRoomCapacity(room: Room): number
 	local limitingDim = math.min(room.WidthCells, room.DepthCells)
-	if limitingDim < REQUIRED_ROOM_DIM then
+	if limitingDim < RoomCore.MIN_TENANT_ROOM_DIM then
 		return 0
 	end
-	local segments = math.floor(limitingDim / REQUIRED_ROOM_DIM)
+	local segments = math.floor(limitingDim / RoomCore.MIN_TENANT_ROOM_DIM)
 	if segments <= 0 then
 		return 0
 	end
-	-- Each 5-cell band on the limiting axis allows two tenants (two beds).
+	-- Each segment on the limiting axis allows two tenants (two beds).
 	return segments * 2
 end
 
@@ -180,6 +178,9 @@ function Rooms.attach(PlotState: any)
 		if self.RoomCache then
 			self.RoomCache[level] = nil
 		end
+
+		-- Trigger room recalculation and send to client
+		self:RecalculateRooms(level)
 	end
 
 	function PlotState:GetRoomsForLevel(yLevel: number?): { Room }
@@ -191,6 +192,31 @@ function Rooms.attach(PlotState: any)
 		end
 
 		return self:RecalculateRooms(level)
+	end
+
+	-- Send minimal room data to client for replication
+	local function sendRoomDataToClient(player: Player?, level: number, rooms: { Room })
+		if not player or not player:IsA("Player") then
+			return
+		end
+
+		local minimalRooms = {}
+		for _, room in ipairs(rooms) do
+			table.insert(minimalRooms, {
+				Id = room.Id,
+				RoomKey = room.RoomKey,
+				MinCellX = room.MinX,
+				MaxCellX = room.MaxX,
+				MinCellZ = room.MinZ,
+				MaxCellZ = room.MaxZ,
+				CellIndices = room.Cells,
+			})
+		end
+
+		PlacementPackets.RoomDataSync:FireClient(player, {
+			Level = level,
+			Rooms = minimalRooms,
+		})
 	end
 
 	function PlotState:GetRoomAt(cellX: number, cellZ: number, yLevel: number?): Room?
@@ -470,7 +496,8 @@ function Rooms.attach(PlotState: any)
 			local depthCells = currentRoom.MaxZ - currentRoom.MinZ + 1
 			currentRoom.WidthCells = widthCells
 			currentRoom.DepthCells = depthCells
-			currentRoom.RoomKey = computeRoomKey(level, currentRoom.MinX, currentRoom.MinZ)
+			-- Use room ID to guarantee uniqueness across all rooms
+			currentRoom.RoomKey = string.format("%d:%d", level, roomIdCounter)
 			currentRoom.IsEnclosed = isPerimeterEnclosed(self, currentRoom, horizontalEdges, verticalEdges)
 			table.insert(rooms, currentRoom)
 		end
@@ -502,25 +529,9 @@ function Rooms.attach(PlotState: any)
 
 		self:UpdateRoomStats(level)
 
-		-- DEBUG: Print found rooms
-		print(string.format("[Rooms] Recalculated level %d. Found %d rooms.", level, #rooms))
-		for _, r in ipairs(rooms) do
-			print(
-				string.format(
-					"  Room %d (%s): %dx%d cells (X:%d-%d, Z:%d-%d) Cells=%d Enclosed=%s Bed=%s",
-					r.Id,
-					r.RoomKey,
-					r.WidthCells,
-					r.DepthCells,
-					r.MinX,
-					r.MaxX,
-					r.MinZ,
-					r.MaxZ,
-					r.CellCount,
-					tostring(r.IsEnclosed),
-					tostring(r.HasBed)
-				)
-			)
+		-- Send minimal room data to client
+		if self.Owner and self.Owner:IsA("Player") then
+			sendRoomDataToClient(self.Owner, level, rooms)
 		end
 
 		return rooms

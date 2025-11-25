@@ -15,7 +15,6 @@ local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local RepairManager = require(ServerScriptService.Server.Modules.Chores.RepairManager)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
-local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 
@@ -52,7 +51,7 @@ type StationInstanceMap = { [string]: StationOccupancy }
 type PlayerStationCache = { [string]: StationInstanceMap }
 
 local PlotService = {}
-local POWER_OUTAGE_OVERRIDE = BillingConstants.PowerOutageOverrideKey or "BillingPowerOutage"
+local POWER_OUTAGE_OVERRIDE = "PowerOutage"
 local PlotModels: { [number]: Model } = PlotFinder.GetOrderedPlots()
 local PlotGrids: { [number]: any } = {} -- [plotIndex] = Grid
 local PlayerRuntime: { [number]: PlotRuntimeState } = {}
@@ -280,6 +279,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 
 	local chunkSizeInCells = 5
 	local runtimeState = PlotState.new(grid, chunkSizeInCells, plotStateData)
+	runtimeState.Owner = player
 	runtimeState:HydrateFromSave()
 
 	PlayerRuntime[userId] = runtimeState
@@ -306,7 +306,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 				stationCache[stationType] = stationScope
 			end
 			local activeOverrideValue = nil
-			if player:GetAttribute("BillingPowerOutageActive") == true then
+			if player:GetAttribute("PowerOutageActive") == true then
 				if typeof(energyPerHour) == "number" and energyPerHour > 0 then
 					activeOverrideValue = POWER_OUTAGE_OVERRIDE
 				end
@@ -362,7 +362,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 	)
 
 	EnergyUsageTracker.SyncBaseLoad(player, totalEnergyLoad)
-	local outageActive = player:GetAttribute("BillingPowerOutageActive") == true
+	local outageActive = player:GetAttribute("PowerOutageActive") == true
 	EnergyUsageTracker.SetOutage(player, outageActive)
 end
 
@@ -514,7 +514,7 @@ function PlotService.AddStationForPlayer(player: Player, stationName: string, un
 	local itemSpec = ItemFinder.FindItemById(itemId)
 	local energyPerHour = itemSpec and itemSpec.EnergyConsumptionPerHour
 	local activeOverrideValue = nil
-	if player:GetAttribute("BillingPowerOutageActive") == true then
+	if player:GetAttribute("PowerOutageActive") == true then
 		if typeof(energyPerHour) == "number" and energyPerHour > 0 then
 			activeOverrideValue = POWER_OUTAGE_OVERRIDE
 		end

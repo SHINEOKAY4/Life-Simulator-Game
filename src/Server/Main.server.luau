@@ -52,6 +52,7 @@ end)
 local function OnPlayerAdded(player: Player)
 	print("Player added: " .. player.Name)
 	print(PlayerSession.GetDataAwait(player))
+	BillingService.LoadPlayer(player)
 	TutorialService.OnPlayerAdded(player)
 	--PlayerSession.ClearData(player)
 	local character = player.Character or player.CharacterAdded:Wait()
@@ -68,7 +69,7 @@ local function OnPlayerRemoving(player: Player)
 
 	ResidentService.Unload(player) -- This should always be higher in the unload order
 	PlotService.Unclaim(player) -- This should always be lower in the unload order
-	BillingService.Remove(player)
+	BillingService.UnloadPlayer(player)
 	UtilityService.ClearCache(player)
 end
 

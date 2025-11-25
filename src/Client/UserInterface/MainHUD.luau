@@ -4,18 +4,16 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 
 local Formatter = require(ReplicatedStorage.Shared.Utilities.Formatter)
-local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local VisualFX = require(ReplicatedStorage.Shared.Utilities.VisualFX)
-local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local CurrencyPackets = require(ReplicatedStorage.Network.CurrencyPackets)
-local BillingPackets = require(ReplicatedStorage.Network.BillingPackets)
+local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
 local SoundtrackManager = require(script.Parent.Parent.Modules.SoundtrackManager)
 local ReviewsUI = require(script.Parent.ReviewsUI)
+local ProfileUI = require(script.Parent.ProfileUI)
+local BillUI = require(script.Parent.BillUI)
 local PlotExpansion = require(script.Parent.Parent.Modules.PlotExpansion)
-local ProfilePanel = require(script.Parent.ProfilePanel)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -23,9 +21,6 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
 local InterfacesTemplatesFolder = AssetsFolder:WaitForChild("InterfacesTemplates")
 local CancelButtonTemplate = InterfacesTemplatesFolder:WaitForChild("CancelButton") :: TextButton
-
-local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
-local BillContext = InputContextsFolder:WaitForChild("BillContext")
 
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 if not ActiveQueryFolder then
@@ -52,99 +47,38 @@ local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnab
 local LevelUpOverlayActive = ensureQueryBool("LevelUpOverlayActive", false)
 
 local MainHUDGui = PlayerGui:WaitForChild("MainHUD") :: ScreenGui
-local BillFrame = MainHUDGui:WaitForChild("BillFrame") :: Frame
-local BillPanel = BillFrame:WaitForChild("BillPanel")
-local ItemsContainer = BillPanel:WaitForChild("ItemsContainer")
-local PlotTaxFrame = ItemsContainer:WaitForChild("PlotTaxFrame")
-local ElectricityFrame = ItemsContainer:WaitForChild("ElectricityFrame")
-local OverdueFrame = ItemsContainer:WaitForChild("OverdueFrame")
-local TotalFrame = BillPanel:WaitForChild("TotalFrame")
-local PlotTaxAmountLabel = PlotTaxFrame:WaitForChild("TextLabel") :: TextLabel
-local ElectricAmountLabel = ElectricityFrame:WaitForChild("TextLabel") :: TextLabel
-local OverdueAmountLabel = OverdueFrame:WaitForChild("TextLabel") :: TextLabel
-
--- Dynamic Frame Creation for Water and Internet
-local WaterFrame = ItemsContainer:FindFirstChild("WaterFrame") :: Frame?
-if not WaterFrame then
-	local clone = ElectricityFrame:Clone() :: Frame
-	clone.Name = "WaterFrame"
-	clone.LayoutOrder = (ElectricityFrame :: Frame).LayoutOrder + 1
-	local titleLabel = clone:FindFirstChild("TitleLabel")
-		or clone:FindFirstChild("Label")
-		or clone:FindFirstChild("Title")
-	if titleLabel and titleLabel:IsA("TextLabel") then
-		titleLabel.Text = "Water"
-	end
-	clone.Parent = ItemsContainer
-	WaterFrame = clone
-end
-local WaterAmountLabel = (WaterFrame :: Frame):WaitForChild("TextLabel") :: TextLabel
-
-local InternetFrame = ItemsContainer:FindFirstChild("InternetFrame") :: Frame?
-if not InternetFrame then
-	local clone = ElectricityFrame:Clone() :: Frame
-	clone.Name = "InternetFrame"
-	clone.LayoutOrder = (ElectricityFrame :: Frame).LayoutOrder + 2
-	local titleLabel = clone:FindFirstChild("TitleLabel")
-		or clone:FindFirstChild("Label")
-		or clone:FindFirstChild("Title")
-	if titleLabel and titleLabel:IsA("TextLabel") then
-		titleLabel.Text = "Internet"
-	end
-	clone.Parent = ItemsContainer
-	InternetFrame = clone
-end
-local InternetAmountLabel = (InternetFrame :: Frame):WaitForChild("TextLabel") :: TextLabel
-
-local TotalRow = TotalFrame:WaitForChild("TotalRow")
-local TotalAmountLabel = TotalRow:WaitForChild("TotalLabel") :: TextLabel
-
 local BottomRight = MainHUDGui:WaitForChild("BottomRight") :: Frame
 local TopRight = MainHUDGui:WaitForChild("TopRight")
 local TextFrame = TopRight:WaitForChild("TextFrame") :: Frame
 local CashLabel = TextFrame:WaitForChild("CashLabel") :: TextLabel
 local IncomePerSecondLabel = TopRight:WaitForChild("IncomePerSecondLabel") :: TextLabel
 local BuildButton = BottomRight:WaitForChild("BuildButton") :: TextButton
-local BillsButton = BottomRight:WaitForChild("BillsButton") :: TextButton
 -- ExpandButton moved into PlotBuilder menu; this slot now hosts ProfileButton
 local ProfileButton = BottomRight:WaitForChild("ProfileButton") :: TextButton
 local ReviewsButton = BottomRight:WaitForChild("ReviewsButton") :: TextButton
-local BillImageFrame = BillsButton:WaitForChild("Image") :: Frame
-local TimeTextFrame = BillImageFrame:WaitForChild("TimeTextFrame") :: Frame
-local TimeTextLabel = TimeTextFrame:WaitForChild("TimeTextLabel") :: TextLabel
+local BillsButton = BottomRight:WaitForChild("BillsButton") :: TextButton
+local NotifierSymbol = BillsButton:FindFirstChild("NotifierSymbol") :: ImageLabel? -- Notifier for bill due
 local ProgressionBar = MainHUDGui:WaitForChild("ProgressionBar") :: Frame
 local ProgressionForeground = ProgressionBar:WaitForChild("Foreground") :: Frame
 local ProgressionBarFill = ProgressionForeground:WaitForChild("Bar") :: Frame
 local XPLabel = ProgressionBar:WaitForChild("XPLabel") :: TextLabel
 local LevelLabel = ProgressionBar:WaitForChild("LevelLabel") :: TextLabel
 
-local function ensureProfilePanelFrame(): Frame
-	local existing = MainHUDGui:FindFirstChild("ProfilePanelFrame")
-	if existing and existing:IsA("Frame") then
-		existing.BackgroundTransparency = 0
-		existing.BackgroundColor3 = Color3.fromRGB(20, 26, 46)
-		existing.BorderSizePixel = 0
-		existing.Visible = false
-		existing.Active = false
-		existing.Size = UDim2.fromScale(1, 1)
-		existing.ZIndex = math.max(existing.ZIndex, 10)
-		return existing
-	end
-
-	local frame = Instance.new("Frame")
-	frame.Name = "ProfilePanelFrame"
-	frame.BackgroundTransparency = 0
-	frame.BackgroundColor3 = Color3.fromRGB(20, 26, 46)
-	frame.BorderSizePixel = 0
-	frame.Visible = false
-	frame.Active = false
-	frame.Size = UDim2.fromScale(1, 1)
-	frame.ZIndex = 10
-	frame.Parent = MainHUDGui
-	return frame
+local function syncBottomRightVisibility()
+	BottomRight.Visible = HUDBottomRightEnabled.Value
 end
 
-local ProfilePanelFrame = ensureProfilePanelFrame()
+syncBottomRightVisibility()
+
+HUDBottomRightEnabled:GetPropertyChangedSignal("Value"):Connect(syncBottomRightVisibility)
+
+local function setBottomRightEnabled(enabled: boolean)
+	if HUDBottomRightEnabled.Value == enabled then
+		syncBottomRightVisibility()
+		return
+	end
+	HUDBottomRightEnabled.Value = enabled
+end
 
 local function isPlotExpansionActive(): boolean
 	return PlotExpansionEnabled ~= nil and PlotExpansionEnabled.Value == true
@@ -228,15 +162,12 @@ end
 
 local INCOME_RATE_ATTRIBUTE_NAME = "TenantIncomePerSecond"
 
-local FoodFrame = ItemsContainer:FindFirstChild("FoodFrame")
-if FoodFrame and FoodFrame:IsA("Frame") then
-	FoodFrame.Visible = false
-end
-
 local rng = Random.new()
 local CASH_ATTRIBUTE_NAME = "Cash"
 local CASH_FORMAT_OPTIONS = {
 	currencySymbol = "$",
+	useAbbreviation = true,
+	decimalPlaces = 2,
 }
 local lastCash: number? = nil
 local pendingCashIncrease = 0
@@ -514,30 +445,6 @@ local function scaleUDim2(size: UDim2, scaleX: number, scaleY: number): UDim2
 	return UDim2.new(size.X.Scale * scaleX, size.X.Offset * scaleX, size.Y.Scale * scaleY, size.Y.Offset * scaleY)
 end
 
-local function formatClockLabel(clockTime: number): string
-	local normalized = (clockTime % 24 + 24) % 24
-	local hourComponent = math.floor(normalized)
-	local minuteFloat = (normalized - hourComponent) * 60
-	local minuteComponent = math.floor(minuteFloat + 0.5)
-
-	if minuteComponent >= 60 then
-		minuteComponent -= 60
-		hourComponent = (hourComponent + 1) % 24
-	end
-
-	local suffix = if hourComponent >= 12 then "pm" else "am"
-	local displayHour = hourComponent % 12
-	if displayHour == 0 then
-		displayHour = 12
-	end
-
-	if minuteComponent == 0 then
-		return string.format("%d %s", displayHour, suffix)
-	end
-
-	return string.format("%d:%02d %s", displayHour, minuteComponent, suffix)
-end
-
 local function configureButtonVisuals(button: TextButton)
 	local imageFrame = button:FindFirstChild("Image")
 	if not imageFrame or not imageFrame:IsA("Frame") then
@@ -650,305 +557,7 @@ function MainHUD.Init()
 		showCashPop(amount, resolvedResidentName)
 	end)
 
-	local BILLING_TOGGLE_DEBOUNCE = 0.3
-	local BILLING_PAY_DEBOUNCE = 0.5
-	local lastFormattedClockTime: string? = nil
-	local needsClockUpdate = false
-	local graceCountdownDeadline: number? = nil
-	local graceCountdownConnection: RBXScriptConnection? = nil
-	local lastOutstandingTotal: number? = nil
-	local lastTimeRemainingSeconds: number? = nil
-	local lastDueClockTime: number? = nil
-
-	local function stopGraceCountdown()
-		if graceCountdownConnection then
-			graceCountdownConnection:Disconnect()
-			graceCountdownConnection = nil
-		end
-		graceCountdownDeadline = nil
-	end
-
-	local function formatGraceCountdownLabel(timeRemainingSeconds: number): string
-		local remaining = math.max(math.ceil(timeRemainingSeconds), 0)
-		local minutes = math.floor(remaining / 60)
-		local seconds = remaining % 60
-		return string.format("grace %d:%02d", minutes, seconds)
-	end
-
-	local function resolveNextBillingLabel(
-		timeRemainingSeconds: number?,
-		outstandingTotal: number?,
-		isGraceActive: boolean,
-		isOverdueActive: boolean
-	): string
-		local resolvedOutstanding = if typeof(outstandingTotal) == "number" then outstandingTotal else 0
-
-		if isOverdueActive then
-			return "overdue"
-		end
-
-		if isGraceActive then
-			if typeof(timeRemainingSeconds) == "number" and timeRemainingSeconds > 0 then
-				return formatGraceCountdownLabel(timeRemainingSeconds)
-			end
-			if resolvedOutstanding > 0 then
-				return "due"
-			end
-			return "grace 0:00"
-		end
-
-		if typeof(timeRemainingSeconds) == "number" and timeRemainingSeconds <= 0 and resolvedOutstanding > 0 then
-			return "due"
-		end
-
-		if typeof(timeRemainingSeconds) == "number" and timeRemainingSeconds > 0 then
-			local currentClock = TimeScale.GetClockTime()
-			local additionalHours = TimeScale.GameHoursFromRealDelta(timeRemainingSeconds)
-			local formattedTime = formatClockLabel(currentClock + additionalHours)
-
-			if not lastFormattedClockTime then
-				lastFormattedClockTime = formattedTime
-			end
-			if needsClockUpdate then
-				lastFormattedClockTime = formattedTime
-			end
-			return lastFormattedClockTime or formattedTime
-		end
-
-		return "-"
-	end
-
-	local function syncGraceCountdown(timeRemainingSeconds: number?, isGraceActive: boolean, isOverdueActive: boolean)
-		if isOverdueActive or not isGraceActive then
-			stopGraceCountdown()
-			return
-		end
-		if typeof(timeRemainingSeconds) ~= "number" or timeRemainingSeconds <= 0 then
-			stopGraceCountdown()
-			return
-		end
-
-		graceCountdownDeadline = os.clock() + timeRemainingSeconds
-
-		if graceCountdownConnection then
-			return
-		end
-
-		graceCountdownConnection = RunService.Heartbeat:Connect(function()
-			local deadline = graceCountdownDeadline
-			if not deadline then
-				stopGraceCountdown()
-				return
-			end
-
-			local remaining = deadline - os.clock()
-			if remaining <= 0 then
-				stopGraceCountdown()
-				local overdueActive = Player:GetAttribute("BillingOverdueActive") == true
-				if overdueActive then
-					TimeTextLabel.Text = "overdue"
-					return
-				end
-				local outstanding = if typeof(lastOutstandingTotal) == "number" then lastOutstandingTotal else 0
-				if outstanding > 0 then
-					TimeTextLabel.Text = "due"
-				else
-					TimeTextLabel.Text = "grace 0:00"
-				end
-				return
-			end
-
-			TimeTextLabel.Text = formatGraceCountdownLabel(remaining)
-		end)
-	end
-
-	local function clampAmount(value: any): number
-		if typeof(value) ~= "number" or not value then
-			return 0
-		end
-		return value
-	end
-
-	local function resolveOverdueInterest(
-		plotTax: number?,
-		electricityCost: number?,
-		waterCost: number?,
-		internetCost: number?,
-		totalCost: number?,
-		providedOverdue: number?
-	): number
-		if typeof(providedOverdue) == "number" then
-			return providedOverdue
-		end
-
-		local total = if typeof(totalCost) == "number" then totalCost else 0
-		if total <= 0 then
-			return 0
-		end
-
-		local baseSum = 0
-		if typeof(plotTax) == "number" then
-			baseSum += plotTax
-		end
-		if typeof(electricityCost) == "number" then
-			baseSum += electricityCost
-		end
-		if typeof(waterCost) == "number" then
-			baseSum += waterCost
-		end
-		if typeof(internetCost) == "number" then
-			baseSum += internetCost
-		end
-
-		local interest = total - baseSum
-		if interest <= 0 then
-			return 0
-		end
-
-		return interest
-	end
-
-	local function updateBillDisplay(
-		plotTax: number?,
-		electricityCost: number?,
-		waterCost: number?,
-		internetCost: number?,
-		overdueInterest: number?,
-		totalCost: number?
-	)
-		local sanitizedPlotTax = clampAmount(plotTax)
-		local sanitizedElectric = clampAmount(electricityCost)
-		local sanitizedWater = clampAmount(waterCost)
-		local sanitizedInternet = clampAmount(internetCost)
-		local sanitizedOverdue = clampAmount(overdueInterest)
-		local sanitizedTotal = clampAmount(totalCost)
-
-		PlotTaxAmountLabel.Text = Formatter.formatCurrency(sanitizedPlotTax, CASH_FORMAT_OPTIONS)
-		ElectricAmountLabel.Text = Formatter.formatCurrency(sanitizedElectric, CASH_FORMAT_OPTIONS)
-		WaterAmountLabel.Text = Formatter.formatCurrency(sanitizedWater, CASH_FORMAT_OPTIONS)
-		InternetAmountLabel.Text = Formatter.formatCurrency(sanitizedInternet, CASH_FORMAT_OPTIONS)
-		OverdueAmountLabel.Text = Formatter.formatCurrency(sanitizedOverdue, CASH_FORMAT_OPTIONS)
-		TotalAmountLabel.Text = Formatter.formatCurrency(sanitizedTotal, CASH_FORMAT_OPTIONS)
-	end
-
-	local function updateDueLabel(
-		dueClockTime: number?,
-		timeRemaining: number?,
-		outstandingTotal: number?,
-		isNeedClockUpdate: boolean
-	)
-		lastDueClockTime = dueClockTime
-		if typeof(timeRemaining) == "number" then
-			lastTimeRemainingSeconds = timeRemaining
-		else
-			lastTimeRemainingSeconds = nil
-		end
-		if typeof(outstandingTotal) == "number" then
-			lastOutstandingTotal = outstandingTotal
-		else
-			lastOutstandingTotal = nil
-		end
-
-		local graceActive = Player:GetAttribute("BillingGraceActive") == true
-		local overdueActive = Player:GetAttribute("BillingOverdueActive") == true
-		if overdueActive then
-			graceActive = false
-		end
-
-		needsClockUpdate = if graceActive then false else isNeedClockUpdate
-
-		TimeTextLabel.Text = resolveNextBillingLabel(timeRemaining, outstandingTotal, graceActive, overdueActive)
-		syncGraceCountdown(timeRemaining, graceActive, overdueActive)
-	end
-
-	-- Listen for real-time billing updates from server
-	BillingPackets.BillingBreakdownUpdate.OnClientEvent:Connect(function(payload)
-		if typeof(payload) ~= "table" then
-			return
-		end
-
-		local plotTax = payload.PlotTax
-		local electricityCost = payload.Electric
-		local waterCost = payload.Water
-		local internetCost = payload.Internet
-		local outstandingTotal = payload.OutstandingTotal
-		local totalCost = payload.Total
-		local overdueInterest = resolveOverdueInterest(
-			plotTax,
-			electricityCost,
-			waterCost,
-			internetCost,
-			totalCost,
-			rawget(payload, "Overdue")
-		)
-		local dueClockTime = payload.DueClockTime
-		local timeRemaining = payload.TimeRemaining
-
-		updateDueLabel(dueClockTime, timeRemaining, outstandingTotal, true)
-
-		-- Only update bill breakdown if the bill frame is currently visible
-		if BillFrame.Visible then
-			updateBillDisplay(plotTax, electricityCost, waterCost, internetCost, overdueInterest, totalCost)
-		end
-	end)
-
-	local function requestAndUpdateBillingInfo()
-		local payload = BillingPackets.RequestBillingInfo:Fire()
-		if typeof(payload) ~= "table" then
-			return
-		end
-
-		local plotTax = payload.PlotTax
-		local electricityCost = payload.Electric
-		local waterCost = payload.Water
-		local internetCost = payload.Internet
-		local outstandingTotal = payload.OutstandingTotal
-		local totalCost = payload.Total
-		local overdueInterest = resolveOverdueInterest(
-			plotTax,
-			electricityCost,
-			waterCost,
-			internetCost,
-			totalCost,
-			rawget(payload, "Overdue")
-		)
-		local dueClockTime = payload.DueClockTime
-		local timeRemaining = payload.TimeRemaining
-
-		updateDueLabel(dueClockTime, timeRemaining, outstandingTotal, false)
-
-		if BillFrame.Visible then
-			updateBillDisplay(plotTax, electricityCost, waterCost, internetCost, overdueInterest, totalCost)
-		end
-	end
-
-	BillContext.Toggle.Pressed:Connect(function()
-		Debounce.RunIfAvailable("BillTogglePress", BILLING_TOGGLE_DEBOUNCE, function()
-			SoundtrackManager.PlayBillToggle()
-			BillFrame.Visible = not BillFrame.Visible
-			if BillFrame.Visible then
-				ProfilePanel.Hide()
-				ReviewsUI.SetVisible(false)
-				requestAndUpdateBillingInfo()
-			end
-		end, Player.UserId)
-	end)
-
-	BillContext.PayAction.Pressed:Connect(function()
-		Debounce.RunIfAvailable("BillPayPress", BILLING_PAY_DEBOUNCE, function()
-			local success, message = BillingPackets.PayBillRequest:Fire()
-			if success then
-				SoundtrackManager.PlayBillPaid()
-				print(message or "Bill paid successfully")
-			else
-				warn(message or "Unable to process bill payment")
-			end
-		end, Player.UserId)
-	end)
-
 	ReviewsButton.Activated:Connect(function()
-		BillFrame.Visible = false
-		ProfilePanel.Hide()
 		ReviewsUI.Toggle()
 	end)
 
@@ -959,33 +568,17 @@ function MainHUD.Init()
 			MainHUD.Show()
 		end
 	end)
-	-- Initial request on script load
-	task.defer(requestAndUpdateBillingInfo)
-
-	-- Listen for when player claims or loses a plot
-	Player:GetAttributeChangedSignal("OwnedPlotIndex"):Connect(function()
+	local function handleOwnedPlotChanged()
 		local plotIndex = Player:GetAttribute("OwnedPlotIndex")
 		if plotIndex ~= nil then
-			-- Player claimed a plot, request billing info
-			requestAndUpdateBillingInfo()
-		else
-			-- Player lost their plot, reset to default
-			stopGraceCountdown()
-			TimeTextLabel.Text = resolveNextBillingLabel(
-				nil,
-				nil,
-				Player:GetAttribute("BillingGraceActive") == true,
-				Player:GetAttribute("BillingOverdueActive") == true
-			)
+			setBottomRightEnabled(true)
+			return
 		end
-	end)
-
-	local function onBillingAttributeChanged()
-		updateDueLabel(lastDueClockTime, lastTimeRemainingSeconds, lastOutstandingTotal, false)
+		setBottomRightEnabled(false)
 	end
 
-	Player:GetAttributeChangedSignal("BillingGraceActive"):Connect(onBillingAttributeChanged)
-	Player:GetAttributeChangedSignal("BillingOverdueActive"):Connect(onBillingAttributeChanged)
+	handleOwnedPlotChanged()
+	Player:GetAttributeChangedSignal("OwnedPlotIndex"):Connect(handleOwnedPlotChanged)
 
 	Player:GetAttributeChangedSignal(CASH_ATTRIBUTE_NAME):Connect(function()
 		local newValue = Player:GetAttribute(CASH_ATTRIBUTE_NAME)
@@ -1032,50 +625,70 @@ function MainHUD.Init()
 		Player:GetAttributeChangedSignal(attributeName):Connect(updateProgressionDisplay)
 	end
 
-	for _, button in ipairs({ BuildButton, BillsButton, ReviewsButton, ProfileButton }) do
+	for _, button in ipairs({ BuildButton, ReviewsButton, ProfileButton, BillsButton }) do
 		configureButtonVisuals(button)
 	end
 
 	local function handleProfileButtonActivated()
-		if BillFrame.Visible then
-			BillFrame.Visible = false
-		end
 		ReviewsUI.SetVisible(false)
-		ProfilePanel.Toggle()
+		ProfileUI.Toggle()
 	end
 
 	ProfileButton.Activated:Connect(handleProfileButtonActivated)
-	ProfilePanel.Init(ProfilePanelFrame)
 
-	ProfilePanel.VisibilityChanged:Connect(function(isVisible: boolean)
-		if not isVisible then
+	-- Billing system: Listen to BillDue attribute
+	local notifierTween = nil
+	local function updateBillNotifier()
+		if not NotifierSymbol then
 			return
 		end
-		if BillFrame.Visible then
-			BillFrame.Visible = false
-		end
-		ReviewsUI.SetVisible(false)
-	end)
+		local billDue = Player:GetAttribute(BillingConstants.BillDueAttribute) == true
+		NotifierSymbol.Visible = billDue
 
-	TimeTextLabel.Text = resolveNextBillingLabel(
-		nil,
-		nil,
-		Player:GetAttribute("BillingGraceActive") == true,
-		Player:GetAttribute("BillingOverdueActive") == true
-	)
+		-- Add pulsing tween animation when bill is due
+		if billDue then
+			if notifierTween then
+				notifierTween:Cancel()
+			end
+
+			local tweenInfo = TweenInfo.new(
+				0.6, -- Duration
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.InOut,
+				-1, -- Repeat infinitely
+				true -- Reverse
+			)
+
+			notifierTween = TweenService:Create(NotifierSymbol, tweenInfo, {
+				Size = UDim2.fromScale(NotifierSymbol.Size.X.Scale * 1.2, NotifierSymbol.Size.Y.Scale * 1.2),
+				Rotation = 15,
+			})
+			notifierTween:Play()
+		else
+			-- Stop tween and reset when bill is paid
+			if notifierTween then
+				notifierTween:Cancel()
+				NotifierSymbol.Size = UDim2.fromScale(1, 1)
+				NotifierSymbol.Rotation = 0
+			end
+		end
+	end
+
+	updateBillNotifier()
+	Player:GetAttributeChangedSignal(BillingConstants.BillDueAttribute):Connect(updateBillNotifier)
+
+	-- Bills button activated: Toggle BillUI
+	BillsButton.Activated:Connect(function()
+		BillUI.Toggle()
+	end)
 end
 
 function MainHUD.Show()
-	-- Code to show the MainHUD goes here
-	BottomRight.Visible = true
-	HUDBottomRightEnabled.Value = true
+	setBottomRightEnabled(true)
 end
 
 function MainHUD.Hide()
-	-- Code to hide the MainHUD goes here
-	BottomRight.Visible = false
-	HUDBottomRightEnabled.Value = false
-	ProfilePanel.Hide()
+	setBottomRightEnabled(false)
 end
 
 return MainHUD
