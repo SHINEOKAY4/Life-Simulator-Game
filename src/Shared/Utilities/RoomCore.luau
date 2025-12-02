@@ -84,12 +84,16 @@ function RoomCore.CalculateTenantCapacity(room: MinimalRoom): number
 	local depth = room.MaxZ - room.MinZ + 1
 	local limitingDim = math.min(width, depth)
 
+	-- Must meet minimum room size
 	if limitingDim < RoomCore.MIN_TENANT_ROOM_DIM then
 		return 0
 	end
 
-	local segments = math.floor(limitingDim / RoomCore.MIN_TENANT_ROOM_DIM)
-	return math.max(0, segments * 2)
+	-- Scale capacity based on total room area
+	-- 32 cells per tenant (8x8 room = 64 cells = 2 tenants)
+	local cellCount = room.CellCount
+	local capacity = math.floor(cellCount / 32)
+	return math.max(1, capacity) -- At least 1 tenant if room meets minimum size
 end
 
 function RoomCore.EvaluateTenantReadiness(room: TenantRoom): (boolean, string?)

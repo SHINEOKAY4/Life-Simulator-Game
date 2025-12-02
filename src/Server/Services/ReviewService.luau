@@ -29,7 +29,8 @@ local function getAverageRoomTemperature(player: Player): number
 	local roomCount = 0
 	for level = 0, plotState.MaxFloorLevel do
 		for _, room in ipairs(plotState:GetRoomsForLevel(level)) do
-			if room.CellCount > 0 and room.InsulationScore > 0.2 then
+			-- Only consider enclosed rooms for temperature averaging
+			if room.IsEnclosed and room.CellCount > 0 then
 				totalTemp += room.CurrentTemperature
 				roomCount += 1
 			end

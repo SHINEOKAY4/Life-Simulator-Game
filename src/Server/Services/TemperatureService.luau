@@ -148,12 +148,15 @@ function TemperatureService:Update(dt: number)
 				local rooms = plotState:GetRoomsForLevel(level)
 
 				for _, room in ipairs(rooms) do
-					self:UpdateRoomTemperature(room, dt)
+					-- Only track temperature for enclosed rooms (rooms with walls)
+					if room.IsEnclosed then
+						self:UpdateRoomTemperature(room, dt)
 
-					-- Replicate temperature via plot model attribute using room key
-					-- Format: "Temp_<level>_<roomId>" e.g. "Temp_0_1"
-					local attributeName = string.format("Temp_%d_%d", level, room.Id)
-					plotModel:SetAttribute(attributeName, room.CurrentTemperature)
+						-- Replicate temperature via plot model attribute using room key
+						-- Format: "Temp_<level>_<roomId>" e.g. "Temp_0_1"
+						local attributeName = string.format("Temp_%d_%d", level, room.Id)
+						plotModel:SetAttribute(attributeName, room.CurrentTemperature)
+					end
 				end
 			end
 		end

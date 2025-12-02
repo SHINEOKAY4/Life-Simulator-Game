@@ -8,15 +8,12 @@ local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local InsulationConstants = require(ReplicatedStorage.Shared.Configurations.InsulationConstants)
 local TimeScale = require(ReplicatedStorage.Shared.Utilities.TimeScale)
 local WeatherController = require(script.Parent.WeatherController)
-local RoomCore = require(ReplicatedStorage.Shared.Utilities.RoomCore)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 
 local EnvironmentHUDController = {}
 
 local CurrentRoomId: number? = nil
 local CurrentLevel: number? = nil
-local CurrentCellX: number? = nil
-local CurrentCellZ: number? = nil
 
 -- Assets
 local Icons = {
@@ -366,33 +363,42 @@ function EnvironmentHUDController.Init()
 
 		local roomId = PlotStateStore.GetRoomIdAtCell(level, cellX, cellZ)
 
-		-- Track room/cell changes
+		-- Track room/level changes
 		CurrentRoomId = roomId
 		CurrentLevel = level
-		CurrentCellX = cellX
-		CurrentCellZ = cellZ
 
 		if CurrentRoomId and CurrentLevel ~= nil then
-			-- Read temperature from plot model attribute using room key
-			local localPlayer = Players.LocalPlayer
-			local plotIndexValue = localPlayer:GetAttribute("OwnedPlotIndex")
-			local temp: number? = nil
+			-- Check if the room is enclosed before treating as indoor
+			local roomInfo = PlotStateStore.GetRoomInfo(CurrentLevel, CurrentRoomId)
+			local isEnclosed = roomInfo and roomInfo.IsEnclosed == true
 
-			if typeof(plotIndexValue) == "number" then
-				local plotModel = PlotFinder.FindPlot(plotIndexValue)
-				if plotModel then
-					-- Get temperature attribute using level and room ID
-					-- Format: "Temp_<level>_<roomId>" e.g. "Temp_0_1"
-					local attributeName = string.format("Temp_%d_%d", CurrentLevel, CurrentRoomId)
-					temp = plotModel:GetAttribute(attributeName)
+			-- Only show indoor temperature if the room is properly enclosed
+			if isEnclosed then
+				-- Read temperature from plot model attribute using room key
+				local localPlayer = Players.LocalPlayer
+				local plotIndexValue = localPlayer:GetAttribute("OwnedPlotIndex")
+				local temp: number? = nil
+
+				if typeof(plotIndexValue) == "number" then
+					local plotModel = PlotFinder.FindPlot(plotIndexValue)
+					if plotModel then
+						-- Get temperature attribute using level and room ID
+						-- Format: "Temp_<level>_<roomId>" e.g. "Temp_0_1"
+						local attributeName = string.format("Temp_%d_%d", CurrentLevel, CurrentRoomId)
+						temp = plotModel:GetAttribute(attributeName)
+					end
 				end
-			end
 
-			-- Default to ambient if no data yet
-			if not temp then
-				temp = InsulationConstants.AmbientTemperature
+				-- Default to ambient if no data yet
+				if not temp then
+					temp = InsulationConstants.AmbientTemperature
+				end
+				updateTemperatureVisuals(temp, true)
+			else
+				-- Room exists but is not enclosed (e.g., floor with no walls)
+				-- Show outdoor temperature
+				updateTemperatureVisuals(nil, false)
 			end
-			updateTemperatureVisuals(temp, true)
 		else
 			updateTemperatureVisuals(nil, false)
 		end

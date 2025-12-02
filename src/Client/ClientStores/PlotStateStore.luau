@@ -68,6 +68,7 @@ type RoomRecord = {
 	MinCellZ: number,
 	MaxCellZ: number,
 	CellIndices: { number },
+	IsEnclosed: boolean?,
 }
 
 type LevelDerivedSnapshot = LevelSnapshotBuilder.LevelDerivedSnapshot
@@ -382,8 +383,8 @@ function PlotStateStore.Init()
 				MinCellZ = serverRoom.MinCellZ,
 				MaxCellZ = serverRoom.MaxCellZ,
 				CellIndices = serverRoom.CellIndices,
+				IsEnclosed = serverRoom.IsEnclosed,
 			}
-
 			for _, cellIndex in ipairs(serverRoom.CellIndices) do
 				snapshot.RoomAssignments[cellIndex] = serverRoom.Id
 			end
@@ -718,6 +719,7 @@ function PlotStateStore.GetRoomsForLevel(level: number?): { RoomRecord }?
 			MaxCellZ = room.MaxCellZ,
 			CellIndices = copyNumberArray(room.CellIndices),
 			Cells = copyNumberArray(room.CellIndices), -- Alias for compatibility
+			IsEnclosed = room.IsEnclosed,
 		}
 	end
 	return rooms
@@ -759,6 +761,7 @@ function PlotStateStore.GetRoomInfo(level: number?, roomId: number): RoomRecord?
 		MinCellZ = room.MinCellZ,
 		MaxCellZ = room.MaxCellZ,
 		CellIndices = copyNumberArray(room.CellIndices),
+		IsEnclosed = room.IsEnclosed,
 	}
 end
 

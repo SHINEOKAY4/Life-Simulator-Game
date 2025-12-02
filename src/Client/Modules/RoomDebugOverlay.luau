@@ -105,10 +105,33 @@ local function updateMarkers()
 		return
 	end
 
+	local roomsArray = response.Rooms
+	print(string.format("[RoomDebugOverlay] Received %d rooms", #roomsArray))
+	for _, room in ipairs(roomsArray) do
+		print(
+			string.format(
+				"[RoomDebugOverlay] Room %s lvl %d cells:%d bounds:(%d,%d)+(%d,%d) ready:%s reason:%s hasBed:%s enclosed:%s capacity:%d/%d",
+				tostring(room.RoomKey or "<nil>"),
+				room.Level or 0,
+				room.CellCount or 0,
+				room.MinCellX or 0,
+				room.MinCellZ or 0,
+				(room.SizeX or 0) + (room.MinCellX or 0) - 1,
+				(room.SizeZ or 0) + (room.MinCellZ or 0) - 1,
+				tostring(room.Ready ~= false),
+				tostring(room.Reason or ""),
+				tostring(room.HasBed == true),
+				tostring(room.IsEnclosed == true),
+				room.Capacity or 0,
+				room.Occupied or 0
+			)
+		)
+	end
+
 	local defaultLevel = PlotStateStore.GetDefaultLevel()
 	local floorHeight = PlotStateStore.GetFloorHeightStuds()
 
-	for _, room in ipairs(response.Rooms) do
+	for _, room in ipairs(roomsArray) do
 		createMarker(room, grid, defaultLevel, floorHeight)
 	end
 end

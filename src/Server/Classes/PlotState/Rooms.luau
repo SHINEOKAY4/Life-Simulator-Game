@@ -9,10 +9,9 @@ local HVACCore = require(ReplicatedStorage.Shared.Utilities.HVACCore)
 local RoomCore = require(ReplicatedStorage.Shared.Utilities.RoomCore)
 local WeatherService = require(ServerScriptService.Server.Services.WeatherService)
 local PlacementPackets = require(ReplicatedStorage.Network.PlacementPackets)
+local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 
 local Rooms = {}
-
-local DEFAULT_TENANT_CAPACITY_PER_ROOM = 1 -- Base occupants per tenant-ready room (gamepasses can override per player)
 
 local function hasTag(spec: { [string]: any }?, targetTag: string): boolean
 	if not spec then
@@ -107,23 +106,52 @@ end
 local function isPerimeterEnclosed(
 	self: any,
 	room: any,
-	horizontalEdges: { [number]: boolean },
-	verticalEdges: { [number]: boolean }
+	isEdgeBlocked: (cellX: number, cellZ: number, direction: string) -> boolean,
+	columns: number,
+	rows: number
 ): boolean
-	for x = room.MinX, room.MaxX do
-		local northIdx = self:HorizontalEdgeIndex(x, room.MinZ)
-		local southIdx = self:HorizontalEdgeIndex(x, room.MaxZ + 1)
-		if horizontalEdges[northIdx] ~= false or horizontalEdges[southIdx] ~= false then
-			return false
+	local cellSet: { [number]: boolean } = {}
+	for _, cellIndex in ipairs(room.Cells) do
+		cellSet[cellIndex] = true
+	end
+
+	for _, cellIndex in ipairs(room.Cells) do
+		local cx = ((cellIndex - 1) % columns) + 1
+		local cz = math.floor((cellIndex - 1) / columns) + 1
+
+		local neighbors = {
+			{ dir = "North", nx = cx, nz = cz - 1 },
+			{ dir = "South", nx = cx, nz = cz + 1 },
+			{ dir = "West", nx = cx - 1, nz = cz },
+			{ dir = "East", nx = cx + 1, nz = cz },
+		}
+
+		for _, neighbor in ipairs(neighbors) do
+			local nx = neighbor.nx
+			local nz = neighbor.nz
+			local neighborIndex: number? = nil
+			if nx >= 1 and nx <= columns and nz >= 1 and nz <= rows then
+				neighborIndex = self.Grid:CellToIndex(nx, nz)
+			end
+			if not neighborIndex or not cellSet[neighborIndex] then
+				if not isEdgeBlocked(cx, cz, neighbor.dir) then
+					warn(
+						string.format(
+							"[Rooms] Gap for room %s at cell (%d,%d) facing %s -> neighbor (%s,%s)",
+							tostring(room.RoomKey or room.Id),
+							cx,
+							cz,
+							neighbor.dir,
+							if neighborIndex then tostring(nx) else "out",
+							if neighborIndex then tostring(nz) else "of"
+						)
+					)
+					return false
+				end
+			end
 		end
 	end
-	for z = room.MinZ, room.MaxZ do
-		local westIdx = self:VerticalEdgeIndex(room.MinX, z)
-		local eastIdx = self:VerticalEdgeIndex(room.MaxX + 1, z)
-		if verticalEdges[westIdx] ~= false or verticalEdges[eastIdx] ~= false then
-			return false
-		end
-	end
+
 	return true
 end
 
@@ -156,15 +184,16 @@ export type Room = {
 
 local function calculateRoomCapacity(room: Room): number
 	local limitingDim = math.min(room.WidthCells, room.DepthCells)
+	-- Must meet minimum room size
 	if limitingDim < RoomCore.MIN_TENANT_ROOM_DIM then
 		return 0
 	end
-	local segments = math.floor(limitingDim / RoomCore.MIN_TENANT_ROOM_DIM)
-	if segments <= 0 then
-		return 0
-	end
-	-- Each segment on the limiting axis allows two tenants (two beds).
-	return segments * 2
+
+	-- Scale capacity based on total room area
+	-- 32 cells per tenant (8x8 room = 64 cells = 2 tenants)
+	local cellCount = room.CellCount
+	local capacity = math.floor(cellCount / 32)
+	return math.max(1, capacity) -- At least 1 tenant if room meets minimum size
 end
 
 type RoomCacheEntry = {
@@ -210,6 +239,7 @@ function Rooms.attach(PlotState: any)
 				MinCellZ = room.MinZ,
 				MaxCellZ = room.MaxZ,
 				CellIndices = room.Cells,
+				IsEnclosed = room.IsEnclosed,
 			})
 		end
 
@@ -324,9 +354,137 @@ function Rooms.attach(PlotState: any)
 		local columns = grid.Columns
 		local rows = grid.Rows
 
-		local floorFilled = self:GetFloorFilledForLevel(level)
+		local baseFloorFilled = self:GetFloorFilledForLevel(level)
 		local horizontalEdges = self:GetEdgeFreeHorizontalForLevel(level)
 		local verticalEdges = self:GetEdgeFreeVerticalForLevel(level)
+
+		local diagonalFacingDirections = {
+			NorthEast = { "North", "East" },
+			SouthEast = { "South", "East" },
+			SouthWest = { "South", "West" },
+			NorthWest = { "North", "West" },
+		}
+
+		local oppositeDirection = {
+			North = "South",
+			South = "North",
+			East = "West",
+			West = "East",
+		}
+
+		local function resolveWallLoss(spec: { [string]: any }?): number
+			if not spec then
+				return InsulationConstants.BaseWallLoss
+			end
+			local loss = if hasTag(spec, "Glass")
+				then InsulationConstants.GlassWallLoss
+				else InsulationConstants.BaseWallLoss
+			if spec.WallVariant == "Door" then
+				return InsulationConstants.DoorLoss
+			elseif spec.WallVariant == "Window" then
+				return InsulationConstants.WindowLoss
+			end
+			return loss
+		end
+
+		-- Track diagonal walls by cell so both flood fill and heat loss honor their blocked edges.
+		local diagonalHeatLossByCell: { [number]: { [string]: number } } = {}
+		for _, saved in pairs(self.Save.PlacedObjects) do
+			if typeof(saved) == "table" then
+				local savedLevel = self:NormalizeLevel(saved.yLevel)
+				if savedLevel == level and typeof(saved.cellX) == "number" and typeof(saved.cellZ) == "number" then
+					local resolvedFacing = PlacementKey.NormalizeFacing(saved.facing :: any)
+					local directions = diagonalFacingDirections[resolvedFacing :: any]
+					if directions then
+						local spec = ItemFinder.FindItemById(saved.id)
+						local cellIndex = grid:CellToIndex(saved.cellX, saved.cellZ)
+						diagonalHeatLossByCell[cellIndex] = diagonalHeatLossByCell[cellIndex] or {}
+						local loss = resolveWallLoss(spec)
+						for _, direction in ipairs(directions) do
+							diagonalHeatLossByCell[cellIndex][direction] = loss
+						end
+					end
+				end
+			end
+		end
+
+		local floorFilled = baseFloorFilled
+		if next(diagonalHeatLossByCell) then
+			floorFilled = table.clone(baseFloorFilled)
+			-- Diagonal walls consume their anchor cells; exclude them from flood fill to avoid phantom rooms.
+			for cellIndex in pairs(diagonalHeatLossByCell) do
+				floorFilled[cellIndex] = false
+			end
+		end
+
+		local function getDiagonalHeatLoss(cellX: number, cellZ: number, direction: string): number?
+			if cellX < 1 or cellX > columns or cellZ < 1 or cellZ > rows then
+				return nil
+			end
+			local index = grid:CellToIndex(cellX, cellZ)
+			local byDirection = diagonalHeatLossByCell[index]
+			if byDirection then
+				local loss = byDirection[direction]
+				if loss then
+					return loss
+				end
+			end
+			-- Treat any adjacency that touches a diagonal wall cell as closed for enclosure checks.
+			local neighborX = cellX
+			local neighborZ = cellZ
+			if direction == "North" then
+				neighborZ -= 1
+			elseif direction == "South" then
+				neighborZ += 1
+			elseif direction == "West" then
+				neighborX -= 1
+			elseif direction == "East" then
+				neighborX += 1
+			end
+			if neighborX < 1 or neighborX > columns or neighborZ < 1 or neighborZ > rows then
+				return nil
+			end
+			local neighborIndex = grid:CellToIndex(neighborX, neighborZ)
+			local neighborDirections = diagonalHeatLossByCell[neighborIndex]
+			if neighborDirections then
+				return neighborDirections[oppositeDirection[direction]]
+			end
+			return nil
+		end
+
+		local function edgeBlockedByDiagonal(cellX: number, cellZ: number, direction: string): boolean
+			local index = grid:CellToIndex(cellX, cellZ)
+			local byDirection = diagonalHeatLossByCell[index]
+			if byDirection and byDirection[direction] then
+				return true
+			end
+
+			local neighborX = cellX
+			local neighborZ = cellZ
+			if direction == "North" then
+				neighborZ -= 1
+			elseif direction == "South" then
+				neighborZ += 1
+			elseif direction == "West" then
+				neighborX -= 1
+			elseif direction == "East" then
+				neighborX += 1
+			end
+
+			if neighborX < 1 or neighborX > columns or neighborZ < 1 or neighborZ > rows then
+				return false
+			end
+
+			local neighborIndex = grid:CellToIndex(neighborX, neighborZ)
+			local neighborDirections = diagonalHeatLossByCell[neighborIndex]
+			-- If the neighbor has any diagonal wall, treat the edge as blocked for enclosure purposes
+			-- since diagonal wall cells are excluded from flood fill
+			if neighborDirections ~= nil then
+				return true
+			end
+			return false
+		end
+
 		local bedPlacements = collectBedPlacements(self, level)
 
 		local rooms = {}
@@ -340,38 +498,34 @@ function Rooms.attach(PlotState: any)
 			if not saved then
 				return InsulationConstants.OpenAirLoss
 			end
-
-			local loss = InsulationConstants.BaseWallLoss
 			local spec = ItemFinder.FindItemById(saved.id)
-			if spec and spec.Tags and table.find(spec.Tags, "Glass") then
-				loss = InsulationConstants.GlassWallLoss
-			end
-
-			if spec and spec.WallVariant == "Door" then
-				loss = InsulationConstants.DoorLoss
-			elseif spec and spec.WallVariant == "Window" then
-				loss = InsulationConstants.WindowLoss
-			end
-
-			return loss
+			return resolveWallLoss(spec)
 		end
 
 		-- Edge checker function for FloodFillCore
 		local function isEdgeBlocked(cx: number, cz: number, direction: string): boolean
 			if direction == "North" then
 				local edgeIdx = self:HorizontalEdgeIndex(cx, cz)
-				return not horizontalEdges[edgeIdx] -- true if wall exists (edge not free)
+				if not horizontalEdges[edgeIdx] then
+					return true
+				end
 			elseif direction == "South" then
 				local edgeIdx = self:HorizontalEdgeIndex(cx, cz + 1)
-				return not horizontalEdges[edgeIdx]
+				if not horizontalEdges[edgeIdx] then
+					return true
+				end
 			elseif direction == "West" then
 				local edgeIdx = self:VerticalEdgeIndex(cx, cz)
-				return not verticalEdges[edgeIdx]
+				if not verticalEdges[edgeIdx] then
+					return true
+				end
 			elseif direction == "East" then
 				local edgeIdx = self:VerticalEdgeIndex(cx + 1, cz)
-				return not verticalEdges[edgeIdx]
+				if not verticalEdges[edgeIdx] then
+					return true
+				end
 			end
-			return true
+			return edgeBlockedByDiagonal(cx, cz, direction)
 		end
 
 		-- Use FloodFillCore to find all room areas
@@ -418,67 +572,31 @@ function Rooms.attach(PlotState: any)
 				local cx = ((cellIndex - 1) % columns) + 1
 				local cz = math.floor((cellIndex - 1) / columns) + 1
 
-				-- Check all 4 walls
-				local directions = {
-					{
-						facing = "North",
-						nx = cx,
-						nz = cz - 1,
-						edgeCheck = function()
-							local edgeIdx = self:HorizontalEdgeIndex(cx, cz)
-							return horizontalEdges[edgeIdx]
-						end,
-					},
-					{
-						facing = "South",
-						nx = cx,
-						nz = cz + 1,
-						edgeCheck = function()
-							local edgeIdx = self:HorizontalEdgeIndex(cx, cz + 1)
-							return horizontalEdges[edgeIdx]
-						end,
-					},
-					{
-						facing = "West",
-						nx = cx - 1,
-						nz = cz,
-						edgeCheck = function()
-							local edgeIdx = self:VerticalEdgeIndex(cx, cz)
-							return verticalEdges[edgeIdx]
-						end,
-					},
-					{
-						facing = "East",
-						nx = cx + 1,
-						nz = cz,
-						edgeCheck = function()
-							local edgeIdx = self:VerticalEdgeIndex(cx + 1, cz)
-							return verticalEdges[edgeIdx]
-						end,
-					},
-				}
-
-				for _, dir in ipairs(directions) do
-					local neighborX = dir.nx
-					local neighborZ = dir.nz
-					local isEdgeFree = dir.edgeCheck()
-
-					-- Check if neighbor is within bounds and has floor
-					local hasNeighborFloor = neighborX >= 1
+				local function applyEdgeLoss(
+					direction: string,
+					neighborX: number,
+					neighborZ: number,
+					hasCardinalWall: boolean
+				)
+					local neighborHasFloor = neighborX >= 1
 						and neighborX <= columns
 						and neighborZ >= 1
 						and neighborZ <= rows
 						and floorFilled[self.Grid:CellToIndex(neighborX, neighborZ)]
-
-					if not isEdgeFree then
-						-- Wall exists
-						totalHeatLoss += getWallInsulation(cx, cz, dir.facing)
-					elseif not hasNeighborFloor then
-						-- Edge of floor, open air
+					local diagonalLoss = getDiagonalHeatLoss(cx, cz, direction)
+					if hasCardinalWall then
+						totalHeatLoss += getWallInsulation(cx, cz, direction)
+					elseif diagonalLoss then
+						totalHeatLoss += diagonalLoss
+					elseif not neighborHasFloor then
 						totalHeatLoss += InsulationConstants.OpenAirLoss
 					end
-					-- If neighbor has floor and edge is free, it's same room - no loss
 				end
+
+				applyEdgeLoss("North", cx, cz - 1, not horizontalEdges[self:HorizontalEdgeIndex(cx, cz)])
+				applyEdgeLoss("South", cx, cz + 1, not horizontalEdges[self:HorizontalEdgeIndex(cx, cz + 1)])
+				applyEdgeLoss("West", cx - 1, cz, not verticalEdges[self:VerticalEdgeIndex(cx, cz)])
+				applyEdgeLoss("East", cx + 1, cz, not verticalEdges[self:VerticalEdgeIndex(cx + 1, cz)])
 
 				-- Vertical heat loss (up/down)
 				if self:HasFloorAtCell(level + 1, cx, cz) then
@@ -498,7 +616,7 @@ function Rooms.attach(PlotState: any)
 			currentRoom.DepthCells = depthCells
 			-- Use room ID to guarantee uniqueness across all rooms
 			currentRoom.RoomKey = string.format("%d:%d", level, roomIdCounter)
-			currentRoom.IsEnclosed = isPerimeterEnclosed(self, currentRoom, horizontalEdges, verticalEdges)
+			currentRoom.IsEnclosed = isPerimeterEnclosed(self, currentRoom, isEdgeBlocked, columns, rows)
 			table.insert(rooms, currentRoom)
 		end
 
@@ -511,8 +629,8 @@ function Rooms.attach(PlotState: any)
 			if room.IsTenantRoom then
 				local sizeCapacity = calculateRoomCapacity(room)
 				if sizeCapacity > 0 and room.BedCount > 0 then
-					local bedLimitedCapacity = math.min(sizeCapacity, room.BedCount)
-					room.TenantCapacity = math.min(bedLimitedCapacity, DEFAULT_TENANT_CAPACITY_PER_ROOM)
+					-- Capacity scales with room size, limited only by bed count
+					room.TenantCapacity = math.min(sizeCapacity, room.BedCount)
 				else
 					room.TenantCapacity = 0
 				end

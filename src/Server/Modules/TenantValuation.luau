@@ -111,7 +111,8 @@ local function getAverageRoomTemperature(plotState: any): number?
 		local rooms = plotState:GetRoomsForLevel(level)
 		if rooms then
 			for _, room in ipairs(rooms) do
-				if room.CellCount > 0 and room.InsulationScore > 0.2 then
+				-- Only consider enclosed rooms for temperature averaging
+				if room.IsEnclosed and room.CellCount > 0 then
 					if typeof(room.CurrentTemperature) == "number" then
 						totalTemp += room.CurrentTemperature
 						roomCount += 1

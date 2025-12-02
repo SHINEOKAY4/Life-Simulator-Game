@@ -238,6 +238,7 @@ PlacementPackets.RoomDataSync = Packet("RoomDataSync", {
 			MinCellZ = Packet.NumberU16,
 			MaxCellZ = Packet.NumberU16,
 			CellIndices = { Packet.NumberU16 },
+			IsEnclosed = Packet.Boolean8,
 		},
 	},
 })
