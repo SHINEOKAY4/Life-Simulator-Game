@@ -25,7 +25,7 @@ PlacementPackets.PlotStateSync = Packet("PlotStateSync", {
 		id = Packet.String,
 		cellX = Packet.NumberU16,
 		cellZ = Packet.NumberU16,
-		facing = Packet.String,
+		facing = Packet.Static1,
 		WidthCells = Packet.NumberU16,
 		DepthCells = Packet.NumberU16,
 		Metadata = Packet.Any,
@@ -55,14 +55,14 @@ PlacementPackets.PlaceRequest = Packet("PlaceRequest", {
 	ItemId = Packet.String,
 	CellX = Packet.NumberU8,
 	CellZ = Packet.NumberU8,
-	Facing = Packet.String,
+	Facing = Packet.Static1,
 	Level = Packet.NumberU8,
 	SurfaceId = Packet.String,
 	SubSlotId = Packet.String,
 	WallMountEnabled = Packet.Boolean8,
 	WallMountCellX = Packet.NumberU16,
 	WallMountCellZ = Packet.NumberU16,
-	WallMountFacing = Packet.String,
+	WallMountFacing = Packet.Static1,
 	WallMountHeightOffset = Packet.NumberF32,
 	WallMountPosX = Packet.NumberF32,
 	WallMountPosY = Packet.NumberF32,
@@ -100,8 +100,8 @@ PlacementPackets.PlaceFloorAreaRequest = Packet("PlaceFloorAreaRequest", {
 
 PlacementPackets.PlaceWallStripRequest = Packet("PlaceWallStripRequest", {
 	ItemId = Packet.String,
-	Facing = Packet.String,
-	Orientation = Packet.String,
+	Facing = Packet.Static1,
+	Orientation = Packet.Static2,
 	StartCellX = Packet.NumberU16,
 	StartCellZ = Packet.NumberU16,
 	EndCellX = Packet.NumberU16,
@@ -120,12 +120,12 @@ PlacementPackets.PlaceRoofAreaRequest = Packet("PlaceRoofAreaRequest", {
 }):Response(Packet.Boolean8, Packet.StringLong)
 
 PlacementPackets.PlacementDelta = Packet("PlacementDelta", {
-	Action = Packet.String,
+	Action = Packet.Static2,
 	Item = {
 		ItemId = Packet.String,
 		CellX = Packet.NumberU8,
 		CellZ = Packet.NumberU8,
-		Facing = Packet.String,
+		Facing = Packet.Static1,
 		WidthCells = Packet.NumberU16,
 		DepthCells = Packet.NumberU16,
 		Metadata = Packet.Any,
@@ -135,7 +135,7 @@ PlacementPackets.PlacementDelta = Packet("PlacementDelta", {
 })
 
 PlacementPackets.SurfaceMountDelta = Packet("SurfaceMountDelta", {
-	Action = Packet.String,
+	Action = Packet.Static2,
 	Mount = {
 		Key = Packet.String,
 		ParentKey = Packet.String,
@@ -180,7 +180,7 @@ PlacementPackets.DestroyRequest = Packet("DestroyRequest", {
 	ItemId = Packet.String,
 	CellX = Packet.NumberU8,
 	CellZ = Packet.NumberU8,
-	Facing = Packet.String,
+	Facing = Packet.Static1,
 	Level = Packet.NumberU8,
 	SubSlotId = Packet.String,
 }):Response(Packet.Boolean8, Packet.StringLong)
@@ -189,11 +189,11 @@ PlacementPackets.MoveRequest = Packet("MoveRequest", {
 	ItemId = Packet.String,
 	FromCellX = Packet.NumberU8,
 	FromCellZ = Packet.NumberU8,
-	FromFacing = Packet.String,
+	FromFacing = Packet.Static1,
 	FromLevel = Packet.NumberU8,
 	ToCellX = Packet.NumberU8,
 	ToCellZ = Packet.NumberU8,
-	ToFacing = Packet.String, -- allow rotate-during-move; client can pass old facing if not rotating
+	ToFacing = Packet.Static1, -- allow rotate-during-move; client can pass old facing if not rotating
 	ToLevel = Packet.NumberU8,
 	SubSlotId = Packet.String,
 }):Response(Packet.Boolean8, Packet.StringLong)
@@ -201,7 +201,7 @@ PlacementPackets.MoveRequest = Packet("MoveRequest", {
 PlacementPackets.RotateRequest = Packet("RotateRequest", {
 	ItemId = Packet.String,
 	FromKey = Packet.String,
-	ToFacing = Packet.String,
+	ToFacing = Packet.Static1,
 }):Response(Packet.Boolean8, Packet.StringLong)
 
 PlacementPackets.UtilityUpdate = Packet("UtilityUpdate", {

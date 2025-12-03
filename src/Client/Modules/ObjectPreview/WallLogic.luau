@@ -200,29 +200,45 @@ function WallLogic.ComputeWallMountedPreview(
 		maxHeight = minHeight
 	end
 
+	-- Compute desired height from raycast, but clamp to valid range
 	local desiredHeight = MountLogic.ComputeHeightOffset(surface, result.Position)
 	local clampedHeight = math.clamp(desiredHeight, minHeight, maxHeight)
-	local adjustedPoint = MountLogic.AdjustPointToHeight(surface, result.Position, clampedHeight)
 
+	-- Get the snapped wall edge center position at the clamped height
+	-- This matches what the server does in computeWallMountMetadata
+	local wallEdgeCFrame = grid:CellToWorldEdgeCenterCFrame(wallCellX, wallCellZ, wallFacing, clampedHeight)
+	local snappedBasePosition = wallEdgeCFrame.Position
+
+	-- Start with the raycast normal (which side of wall the player is on)
 	local wallNormal = result.Normal
 	if wallNormal.Magnitude < 1e-3 then
+		-- Fallback to canonical if raycast didn't give us a normal
 		wallNormal = RaycastUtils.NormalFromFacing(wallFacing)
 	end
+	wallNormal = wallNormal.Unit
+
+	-- Get the canonical normal from the wall's facing to validate direction
 	local canonical = RaycastUtils.NormalFromFacing(wallFacing)
 	if canonical.Magnitude > 1e-3 then
-		if canonical:Dot(wallNormal) < 0 then
-			canonical = -canonical
+		canonical = canonical.Unit
+		-- If raycast normal points opposite to canonical, flip canonical to match
+		local alignment = canonical:Dot(wallNormal)
+		if alignment < -0.1 then
+			-- Raycast hit from opposite side, use negated canonical
+			wallNormal = -canonical
+		elseif alignment > 0.1 then
+			-- Raycast hit from expected side, use canonical
+			wallNormal = canonical
 		end
-		wallNormal = canonical.Unit
-	else
-		wallNormal = wallNormal.Unit
+		-- else: normals are perpendicular or ambiguous, keep raycast normal
 	end
 
 	local offsetFromWall = mountConfig.OffsetFromWall
 	if typeof(offsetFromWall) ~= "number" then
 		offsetFromWall = 0.1
 	end
-	local finalPosition = adjustedPoint + wallNormal * offsetFromWall
+	-- Use snapped position instead of adjusted raycast point
+	local finalPosition = snappedBasePosition + wallNormal * offsetFromWall
 
 	local chunkX, chunkZ = grid:CellToChunk(wallCellX, wallCellZ, chunkSize)
 	local isUnlocked = PlotStateStore.IsChunkUnlocked(chunkX, chunkZ)

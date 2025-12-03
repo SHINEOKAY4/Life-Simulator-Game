@@ -128,7 +128,7 @@ local TenantStore = require(script.Parent.ClientStores.TenantStore)
 
 ResidentsStore.Init()
 TenantStore.Init()
-RoomDebugOverlay.SetEnabled(true)
+--RoomDebugOverlay.SetEnabled(true)
 local function SetCollisionGroup(character: Model)
 	for _, descendant in ipairs(character:GetDescendants()) do
 		if descendant:IsA("BasePart") then

@@ -70,6 +70,20 @@ local PreviewHighlight = AssetsFolder.VisualTools:WaitForChild("PreviewHighlight
 local ActiveQueryFolder = PlayerGui:FindFirstChild("ActiveQuery")
 local objectPreviewEnabled = ActiveQueryFolder:FindFirstChild("ObjectPreviewEnabled") :: BoolValue
 
+local function resolveCeilingPlacementActive(): BoolValue
+	local value = ActiveQueryFolder:FindFirstChild("CeilingPlacementActive")
+	if value and value:IsA("BoolValue") then
+		return value
+	end
+	local created = Instance.new("BoolValue")
+	created.Name = "CeilingPlacementActive"
+	created.Value = false
+	created.Parent = ActiveQueryFolder
+	return created
+end
+
+local ceilingPlacementActive = resolveCeilingPlacementActive()
+
 local storedPromptServiceEnabled: boolean? = nil
 local proximityPromptsSuppressed = false
 
@@ -1008,7 +1022,32 @@ local function renderDefaultPreview(args: DefaultPreviewArgs)
 			end
 		end
 
-		local canPlace = isUnlocked and not blocked and not missingFloorSupport
+		-- Check for floor at level above when placing roof
+		local floorAboveConflict = false
+		if resolvedPreviewKind == "Roof" then
+			local maxLevel = 3 -- Default max level
+			if activeLevel < maxLevel then
+				local levelAbove = activeLevel + 1
+				local floorCellMapAbove: { [number]: boolean } = {}
+				PlacementUtils.PopulateCellMapForType(
+					grid,
+					placed,
+					"Floor",
+					floorCellMapAbove,
+					ignorePlacement,
+					levelAbove
+				)
+				local cells = grid:ClippedFootprintCells(cellX, cellZ, baseWidthCells, baseDepthCells, CurrentFacing)
+				for _, index in cells do
+					if floorCellMapAbove[index] then
+						floorAboveConflict = true
+						break
+					end
+				end
+			end
+		end
+
+		local canPlace = isUnlocked and not blocked and not missingFloorSupport and not floorAboveConflict
 
 		if resolvedPreviewKind == "Wall" then
 			previewWall(model, grid, cellX, cellZ, previewFacing, levelHeight, lift)
@@ -1147,8 +1186,10 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 	CurrentKind = resolvedPreviewKind
 	if resolvedPreviewKind == "Ceiling" then
 		CeilingPreviewState.Initialize(CurrentItemSpec)
+		ceilingPlacementActive.Value = true
 	else
 		CeilingPreviewState.Reset()
+		ceilingPlacementActive.Value = false
 	end
 	local sequenceForCurrent, indexForCurrent = rotationSequenceForCurrent()
 	if sequenceForCurrent[1] and not indexForCurrent[CurrentFacing] then
@@ -1180,15 +1221,9 @@ function ObjectPreview.RenderPreview(itemId: string, initialFacing: PreviewFacin
 		local ray = Camera:ViewportPointToRay(mouse.X, mouse.Y)
 		local activeParams = if resolvedPreviewKind == "WallMounted" then wallRaycastParams else raycastParams
 		local result = Workspace:Raycast(ray.Origin, ray.Direction * 2048, activeParams)
-		local rejectedCeilingHit = false
-		if result and resolvedPreviewKind == "Ceiling" then
-			local plotUp = surface.CFrame.UpVector
-			local downwardAlignment = result.Normal:Dot(-plotUp.Unit)
-			if downwardAlignment < 0.5 then
-				rejectedCeilingHit = true
-			end
-		end
-		if not result or rejectedCeilingHit then
+		-- Ceiling objects now work like roofs - they raycast to the floor below and project upward
+		-- No need to reject ceiling hits based on normal direction
+		if not result then
 			handleRaycastMiss(resolvedPreviewKind, isWindowItem)
 			return
 		end
@@ -1592,6 +1627,7 @@ function ObjectPreview.ClearPreview()
 	CurrentCeilingMountPose = nil
 	CurrentSubSlotId = nil
 	CeilingPreviewState.Reset()
+	ceilingPlacementActive.Value = false
 end
 
 function ObjectPreview.GetCurrentPose(): PreviewPose?

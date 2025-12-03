@@ -376,6 +376,7 @@ function PlotService.Unclaim(player: Player)
 	if plotModel then
 		local containerFolder = plotModel:FindFirstChild("Container") :: Folder
 		local coversFolder = plotModel:FindFirstChild("Covers") :: Folder
+		local grid = PlotGrids[plotIndex]
 		for _, cover in ipairs(coversFolder:GetChildren()) do
 			if cover:IsA("BasePart") then
 				cover.Transparency = 0
@@ -393,6 +394,7 @@ function PlotService.Unclaim(player: Player)
 					local cellXAttr = item:GetAttribute("CellX")
 					local cellZAttr = item:GetAttribute("CellZ")
 					local facingAttr = item:GetAttribute("Facing")
+					local levelAttr = item:GetAttribute("Level")
 					if
 						typeof(itemIdAttr) == "string"
 						and typeof(cellXAttr) == "number"
@@ -400,7 +402,16 @@ function PlotService.Unclaim(player: Player)
 					then
 						local facingSource = if typeof(facingAttr) == "string" then facingAttr else "North"
 						local facingValue: Facing = PlacementKey.NormalizeFacing(facingSource :: any) :: Facing
-						WorldPlacer.Despawn(player, itemIdAttr, cellXAttr, cellZAttr, facingValue)
+						local normalizedLevel = if typeof(levelAttr) == "number" then levelAttr else nil
+						WorldPlacer.Despawn(
+							player,
+							grid,
+							itemIdAttr,
+							cellXAttr,
+							cellZAttr,
+							facingValue,
+							normalizedLevel
+						)
 					end
 					item:Destroy()
 				end

@@ -251,21 +251,23 @@ function PlotExpansion.Show()
 	if plotModel then
 		local cf, size = plotModel:GetBoundingBox()
 		local height = math.max(size.X, size.Z) * 0.48
-		local targetPos = cf.Position + Vector3.new(-4, height, 0)
 
-		-- Determine orientation based on Spawn part
+		-- Determine starting offset based on Spawn part position
 		local spawnPart = plotModel:FindFirstChild("Spawn")
-		local upVector = Vector3.new(0, 0, -1) -- Default North
+		local horizontalOffset = Vector3.new(-4, 0, 0) -- Default offset
 
 		if spawnPart and spawnPart:IsA("BasePart") then
 			local dir = (cf.Position - spawnPart.Position) * Vector3.new(1, 0, 1)
 			if dir.Magnitude > 0.1 then
-				upVector = dir.Unit
+				-- Use spawn direction to determine camera starting position offset
+				horizontalOffset = dir.Unit * 4
 			end
 		end
 
-		-- Build base camera CFrame
-		local baseCFrame = CFrame.lookAt(targetPos, cf.Position, upVector)
+		local targetPos = cf.Position + horizontalOffset + Vector3.new(0, height, 0)
+
+		-- Build base camera CFrame with consistent upVector (always North)
+		local baseCFrame = CFrame.lookAt(targetPos, cf.Position, Vector3.new(0, 0, -1))
 
 		-- Shift camera position upward in screen space (local Y-axis)
 		local screenOffsetY = 8 -- Adjust this value to move camera up/down in 2D view

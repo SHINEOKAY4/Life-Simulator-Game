@@ -400,7 +400,7 @@ function Renderer.PreviewWallMounted(
 	local forward = (-wallNormal).Unit
 	local safeUp = if upVector.Magnitude > 1e-3 then upVector.Unit else Vector3.new(0, 1, 0)
 	local previewCFrame = CFrame.lookAt(worldPosition, worldPosition + forward, safeUp)
-	applySmoothPivot(model, previewCFrame * pivotRotation)
+	applySmoothPivot(model, previewCFrame * pivotRotation, true)
 end
 
 function Renderer.PreviewSurfaceMount(

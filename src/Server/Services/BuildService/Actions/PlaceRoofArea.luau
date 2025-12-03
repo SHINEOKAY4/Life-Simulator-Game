@@ -82,6 +82,15 @@ local function PlaceRoofArea(player: Player, payload: Payload): (boolean, string
 		return false, "Selection blocked"
 	end
 
+	-- Check if there's a floor at the level above that would conflict
+	local maxLevel = state.MaxLevel or 3
+	if level < maxLevel then
+		local levelAbove = level + 1
+		if state:AnyFloorInFootprint(minCellX, minCellZ, widthCells, depthCells, facing, levelAbove) then
+			return false, "Remove the floor above before placing a roof here"
+		end
+	end
+
 	if itemData.Rules and itemData.Rules.RequiresFloorUnderAllCells then
 		if not state:HasFloorUnderFootprint(minCellX, minCellZ, widthCells, depthCells, facing, level) then
 			return false, "Floor required under roof"

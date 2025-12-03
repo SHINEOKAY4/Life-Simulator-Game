@@ -166,6 +166,17 @@ function Floors.attach(PlotState)
 			end
 		end
 
+		-- Check if there's a roof at the level below that would conflict with this floor
+		if level > 0 then
+			local levelBelow = level - 1
+			local levelRoofsBelow = self:GetRoofFilledForLevel(levelBelow)
+			for i = 1, #indices do
+				if levelRoofsBelow[indices[i]] then
+					return false
+				end
+			end
+		end
+
 		return true
 	end
 

@@ -13,6 +13,24 @@ local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 
 local Rooms = {}
 
+-- Build a spec cache from PlacedObjects to avoid redundant ItemFinder lookups
+local function buildSpecCache(placedObjects: { [string]: any }): { [string]: any }
+	local cache: { [string]: any } = {}
+	local seen: { [string]: boolean } = {}
+
+	for _, objectData in pairs(placedObjects) do
+		if typeof(objectData) == "table" and typeof(objectData.id) == "string" then
+			local itemId = objectData.id
+			if not seen[itemId] then
+				seen[itemId] = true
+				cache[itemId] = ItemFinder.FindItemById(itemId)
+			end
+		end
+	end
+
+	return cache
+end
+
 local function hasTag(spec: { [string]: any }?, targetTag: string): boolean
 	if not spec then
 		return false
@@ -42,13 +60,13 @@ type BedPlacement = {
 	Indices: { number },
 }
 
-local function collectBedPlacements(self: any, level: number): { BedPlacement }
+local function collectBedPlacements(self: any, level: number, specCache: { [string]: any }): { BedPlacement }
 	local placements: { BedPlacement } = {}
 	for _, objectData in pairs(self.Save.PlacedObjects) do
 		if self:NormalizeLevel(objectData.yLevel) ~= level then
 			continue
 		end
-		local spec = ItemFinder.FindItemById(objectData.id)
+		local spec = specCache[objectData.id]
 		if not hasTag(spec, "Bed") then
 			continue
 		end
@@ -282,10 +300,13 @@ function Rooms.attach(PlotState: any)
 			room.ThermostatTarget = nil
 		end
 
+		-- Build spec cache once for all objects
+		local specCache = buildSpecCache(self.Save.PlacedObjects)
+
 		-- Re-assign HVAC power to rooms
 		for _, objectData in pairs(self.Save.PlacedObjects) do
 			if self:NormalizeLevel(objectData.yLevel) == level then
-				local spec = ItemFinder.FindItemById(objectData.id)
+				local spec = specCache[objectData.id]
 				if spec then
 					local stats = HVACCore.ExtractHVACStats(spec)
 					if stats.Heating > 0 or stats.Cooling > 0 or stats.Lighting > 0 then
@@ -358,6 +379,9 @@ function Rooms.attach(PlotState: any)
 		local horizontalEdges = self:GetEdgeFreeHorizontalForLevel(level)
 		local verticalEdges = self:GetEdgeFreeVerticalForLevel(level)
 
+		-- Build spec cache once for the entire calculation
+		local specCache = buildSpecCache(self.Save.PlacedObjects)
+
 		local diagonalFacingDirections = {
 			NorthEast = { "North", "East" },
 			SouthEast = { "South", "East" },
@@ -396,7 +420,7 @@ function Rooms.attach(PlotState: any)
 					local resolvedFacing = PlacementKey.NormalizeFacing(saved.facing :: any)
 					local directions = diagonalFacingDirections[resolvedFacing :: any]
 					if directions then
-						local spec = ItemFinder.FindItemById(saved.id)
+						local spec = specCache[saved.id]
 						local cellIndex = grid:CellToIndex(saved.cellX, saved.cellZ)
 						diagonalHeatLossByCell[cellIndex] = diagonalHeatLossByCell[cellIndex] or {}
 						local loss = resolveWallLoss(spec)
@@ -485,7 +509,7 @@ function Rooms.attach(PlotState: any)
 			return false
 		end
 
-		local bedPlacements = collectBedPlacements(self, level)
+		local bedPlacements = collectBedPlacements(self, level, specCache)
 
 		local rooms = {}
 		local cellMap = {}
@@ -498,7 +522,7 @@ function Rooms.attach(PlotState: any)
 			if not saved then
 				return InsulationConstants.OpenAirLoss
 			end
-			local spec = ItemFinder.FindItemById(saved.id)
+			local spec = specCache[saved.id]
 			return resolveWallLoss(spec)
 		end
 

@@ -1,8 +1,13 @@
+-- Static2: Action and Orientation type enums
+-- Encodes Add/Remove/Update actions and wall orientations in 1 byte
 return {
-	"DataStore Failed To Load",
-	"Another Static String",
-	math.pi,
-	123456789,
-	Vector3.new(1, 2, 3),
-	"You can have upto 255 static values of any type"
+	-- Actions (indices 1-3)
+	"Add",
+	"Remove",
+	"Update", -- Reserved for future use
+	-- Wall Orientations (indices 4-7)
+	"Horizontal",
+	"Vertical",
+	"DiagonalForward",
+	"DiagonalBackward",
 }

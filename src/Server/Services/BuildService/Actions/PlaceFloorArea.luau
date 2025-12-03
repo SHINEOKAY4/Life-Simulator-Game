@@ -83,6 +83,14 @@ local function PlaceFloorArea(player: Player, payload: Payload): (boolean, strin
 		return false, "Remove the roof covering this area before placing a floor"
 	end
 
+	-- Check if there's a roof at the level below that would conflict
+	if level > 0 then
+		local levelBelow = level - 1
+		if state:AnyRoofInFootprint(minCellX, minCellZ, widthCells, depthCells, facing, levelBelow) then
+			return false, "Remove the roof below before placing a floor here"
+		end
+	end
+
 	if not state:CanPlaceFloor(minCellX, minCellZ, widthCells, depthCells, facing, level) then
 		return false, "Selection blocked"
 	end

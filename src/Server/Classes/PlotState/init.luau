@@ -265,6 +265,15 @@ export type PlotState = {
 		facing: Facing?,
 		yLevel: number?
 	) -> (),
+	AnyRoofInFootprint: (
+		self: PlotState,
+		cellX: number,
+		cellZ: number,
+		widthCells: number,
+		depthCells: number,
+		facing: Facing,
+		yLevel: number?
+	) -> boolean,
 	CanPlaceRoof: (
 		self: PlotState,
 		cellX: number,

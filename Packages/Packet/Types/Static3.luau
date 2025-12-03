@@ -1,8 +1,15 @@
+-- Static3: Season and WeatherType enums for weather system
+-- Encodes 9 total values in 1 byte instead of 4-6 bytes per string
 return {
-	"DataStore Failed To Load",
-	"Another Static String",
-	math.pi,
-	123456789,
-	Vector3.new(1, 2, 3),
-	"You can have upto 255 static values of any type"
+	-- Seasons (indices 1-4)
+	"Spring",
+	"Summer",
+	"Autumn",
+	"Winter",
+	-- Weather types (indices 5-9)
+	"Sunny",
+	"Rainy",
+	"Stormy",
+	"Snowy",
+	"Cloudy",
 }

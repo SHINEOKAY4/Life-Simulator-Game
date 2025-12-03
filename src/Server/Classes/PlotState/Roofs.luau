@@ -67,6 +67,18 @@ function Roofs.attach(PlotState)
 			end
 		end
 
+		-- Check if there's a floor at the level above that would conflict with this roof
+		local maxLevelValue = if typeof(self.MaxLevel) == "number" then self.MaxLevel else 3
+		if level < maxLevelValue then
+			local levelAbove = level + 1
+			local levelFloorsAbove = self:GetFloorFilledForLevel(levelAbove)
+			for i = 1, #indices do
+				if levelFloorsAbove[indices[i]] then
+					return false
+				end
+			end
+		end
+
 		return true
 	end
 

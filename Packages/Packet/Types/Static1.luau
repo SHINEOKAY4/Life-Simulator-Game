@@ -1,8 +1,12 @@
+-- Static1: Facing direction enum for placement system
+-- Encodes 8 facing directions in 1 byte instead of 5-10 bytes per string
 return {
-	"DataStore Failed To Load",
-	"Another Static String",
-	math.pi,
-	123456789,
-	Vector3.new(1, 2, 3),
-	"You can have upto 255 static values of any type"
+	"North",
+	"East",
+	"South",
+	"West",
+	"NorthEast",
+	"NorthWest",
+	"SouthEast",
+	"SouthWest",
 }

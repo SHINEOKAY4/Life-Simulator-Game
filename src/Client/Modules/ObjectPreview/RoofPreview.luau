@@ -259,8 +259,34 @@ function RoofPreview.Update(args: RoofUpdateArgs): RoofUpdateResult?
 		end
 	end
 
+	-- Check if there's a floor at the level above that would conflict
+	local floorAboveConflict = false
+	local maxLevel = 3 -- Default max level, should match server
+	if resolvedLevel < maxLevel then
+		local levelAbove = resolvedLevel + 1
+		local floorCellMapAbove: { [number]: boolean } = {}
+		PlacementUtils.PopulateCellMapForType(
+			args.grid,
+			args.placed,
+			"Floor",
+			floorCellMapAbove,
+			ignorePlacement,
+			levelAbove
+		)
+		for _, index in indices do
+			if floorCellMapAbove[index] then
+				floorAboveConflict = true
+				break
+			end
+		end
+	end
+
 	local selectionTooLarge = cellCount > MAX_ROOF_SELECTION_CELLS
-	local canPlace = areaUnlocked and not roofOccupied and not missingFloorSupport and not selectionTooLarge
+	local canPlace = areaUnlocked
+		and not roofOccupied
+		and not missingFloorSupport
+		and not floorAboveConflict
+		and not selectionTooLarge
 
 	if previewPart and previewBaseSize then
 		local widthScale = selectionWidthCells / math.max(previewBaseWidthCells, 1)
