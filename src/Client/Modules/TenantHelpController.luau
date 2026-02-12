@@ -7,7 +7,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local TenantHelpPackets = require(ReplicatedStorage.Network.TenantHelpPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
-local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -28,7 +27,6 @@ local TenantHelpController = {}
 local ActiveRequests: { [string]: HelpRecord } = {}
 
 local PROMPT_NAME = "TenantHelpPrompt"
-local PROMPT_OFFSET = Vector3.new(0, 2.5, 0)
 local MAX_RETRIES = 4
 
 local function cleanupPrompt(record: HelpRecord)
@@ -42,7 +40,6 @@ local function cleanupPrompt(record: HelpRecord)
 	end
 
 	if record.Prompt then
-		MinimalPromptUI.Detach(record.Prompt)
 		record.Prompt:Destroy()
 		record.Prompt = nil
 	end
@@ -119,14 +116,12 @@ local function attachPrompt(record: HelpRecord)
 	prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
 	prompt.RequiresLineOfSight = false
 	prompt.MaxActivationDistance = 14
-	prompt.Style = Enum.ProximityPromptStyle.Custom
+	prompt.Style = Enum.ProximityPromptStyle.Default
 	prompt.HoldDuration = 0
-	prompt:SetAttribute("MinimalPromptOffset", PROMPT_OFFSET)
 	prompt.Parent = parent
 
 	record.Prompt = prompt
 	record.Connections = record.Connections or {}
-	MinimalPromptUI.Attach(prompt)
 
 	record.Connections[#record.Connections + 1] = prompt.Triggered:Connect(function(player: Player)
 		if player ~= LocalPlayer then

@@ -3,6 +3,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
@@ -37,6 +38,7 @@ local ActiveLevel = 0
 local ActiveLevelChanged = GoodSignal.new()
 local RoomSnapshotChanged = GoodSignal.new()
 local PlacementMetadataChanged = GoodSignal.new()
+local PlacementsChanged = GoodSignal.new()
 
 -- Type aliases for types used in public API
 type FloorCellDescriptor = {
@@ -296,16 +298,43 @@ function PlotStateStore.Init()
 
 	-- Added: incremental placement updates (client-side snapshot append)
 	Packets.PlacementDelta.OnClientEvent:Connect(function(delta)
+		-- Unconditional debug: confirm packet arrival
+		print("[PlotStateStore] PlacementDelta received:", if delta then delta.Action else "nil")
+
 		if not StateSnapshot.PlacedItems then
 			StateSnapshot.PlacedItems = {}
 		end
-		local _, changed = PacketProcessor.ApplyPlacementDelta(
+		local appliedKey, changed = PacketProcessor.ApplyPlacementDelta(
 			StateSnapshot.PlacedItems :: { [string]: any },
 			delta,
 			PlotStateStore.GetDefaultLevel()
 		)
 		if changed then
+			local debugEnabled = RunService:IsStudio() or (workspace:GetAttribute("SurfacePaintDebug") == true)
+			if debugEnabled then
+				local entry = if appliedKey then (StateSnapshot.PlacedItems :: any)[appliedKey] else nil
+				local entryKeyType = if entry then entry.PlacementKeyType else nil
+				local entryType = if entry then entry.PlacementType else nil
+				local msg = {
+					action = delta and delta.Action,
+					appliedKey = appliedKey,
+					cellX = delta and delta.Item and delta.Item.CellX,
+					cellZ = delta and delta.Item and delta.Item.CellZ,
+					facing = delta and delta.Item and delta.Item.Facing,
+					itemId = delta and delta.Item and (delta.Item.ItemId or delta.Item.Id or delta.Item.id),
+					entryType = entryType,
+					entryKeyType = entryKeyType,
+				}
+				print("[PlotStateStore][Client] PlacementDelta applied :: ", msg)
+			end
+
 			invalidateDerivedLevelSnapshots()
+			-- Some systems (surface painting, mount placement, cutaway, etc.) depend on
+			-- derived level caches that combine placement data with server room data.
+			-- When placements change before the next RoomDataSync arrives, we still
+			-- need dependent controllers to refresh their hover/query caches.
+			RoomSnapshotChanged:Fire()
+			PlacementsChanged:Fire()
 		end
 	end)
 
@@ -511,6 +540,10 @@ end
 
 function PlotStateStore.OnPlacementMetadataChanged(handler: () -> ()): RBXScriptConnection
 	return PlacementMetadataChanged:Connect(handler)
+end
+
+function PlotStateStore.OnPlacementsChanged(handler: () -> ()): RBXScriptConnection
+	return PlacementsChanged:Connect(handler)
 end
 
 function PlotStateStore.GetFloorHeightStuds(): number

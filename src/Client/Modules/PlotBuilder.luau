@@ -412,7 +412,7 @@ function PlotBuilder.PlaceSelectedPreview()
 			PlacementCelebration.ShowFailure(failurePosition, pose.ItemId, message)
 			return
 		end
-		SoundtrackManager.PlayPlacementSuccess()
+		SoundtrackManager.PlayCoinPickup()
 		PlacementCelebration.ShowSuccess(surfacePose.WorldPosition, pose.ItemId)
 		return
 	elseif pose.Kind == "Ceiling" then
@@ -474,7 +474,7 @@ function PlotBuilder.PlaceSelectedPreview()
 		return
 	end
 
-	SoundtrackManager.PlayPlacementSuccess()
+	SoundtrackManager.PlayCoinPickup()
 	PlacementCelebration.CellObjectSuccess(pose.ItemId, cellX, cellZ, pose.Facing, poseLevel)
 	temporarilyHidePreviewForPlacement(pose)
 

@@ -215,7 +215,29 @@ local function applySurfacePaletteToModel(
 	spec: { [string]: any }?,
 	metadata: { [string]: any }?
 )
+	local function getAuthoredMaterialAndColor(targetModel: Model): (Enum.Material?, Color3?, number?)
+		local samplePart = targetModel.PrimaryPart
+		if not samplePart then
+			samplePart = targetModel:FindFirstChildWhichIsA("BasePart")
+		end
+		if not samplePart then
+			return nil, nil, nil
+		end
+		return samplePart.Material, samplePart.Color, samplePart.Transparency
+	end
+
 	local resolvedSurfaceId = readSurfaceId(metadata)
+	local authoredMaterial: Enum.Material? = nil
+	local authoredColor: Color3? = nil
+	local authoredTransparency: number? = nil
+	if not resolvedSurfaceId then
+		authoredMaterial, authoredColor, authoredTransparency = getAuthoredMaterialAndColor(model)
+		if authoredMaterial and (placementType == "Wall" or placementType == "Floor") then
+			local surfaceKindToken = if placementType == "Wall" then "Wall" else "Floor"
+			resolvedSurfaceId =
+				SurfacePalette.ResolveForPlacement(spec, "enum:" .. surfaceKindToken .. ":" .. authoredMaterial.Name)
+		end
+	end
 	if not resolvedSurfaceId and typeof(spec) == "table" then
 		local defaultSurfaceId = spec.DefaultSurfaceId
 		if typeof(defaultSurfaceId) == "string" and defaultSurfaceId ~= "" then
@@ -242,6 +264,9 @@ local function applySurfacePaletteToModel(
 	model:SetAttribute("SurfaceKind", definition.Kind)
 	local paintColor = readPaintColor(metadata)
 	local finalColor = paintColor or definition.Color
+	if not paintColor and authoredColor then
+		finalColor = authoredColor
+	end
 	model:SetAttribute("SurfaceColor", finalColor)
 	if paintColor then
 		model:SetAttribute("SurfaceColorOverride", finalColor)
@@ -252,6 +277,9 @@ local function applySurfacePaletteToModel(
 	local surfaceTransparency: number? = nil
 	if typeof(definition.Transparency) == "number" then
 		surfaceTransparency = math.clamp(definition.Transparency, 0, 1)
+	end
+	if surfaceTransparency == nil and authoredTransparency ~= nil then
+		surfaceTransparency = math.clamp(authoredTransparency, 0, 1)
 	end
 	model:SetAttribute("SurfaceTransparency", surfaceTransparency)
 	if typeof(definition.Roughness) == "number" then

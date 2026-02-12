@@ -11,6 +11,8 @@ local ProgressionPackets = require(ReplicatedStorage.Network.ProgressionPackets)
 local ProgressionConfig = require(ReplicatedStorage.Shared.Configurations.ProgressionConfig)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local VisualFX = require(ReplicatedStorage.Shared.Utilities.VisualFX)
+local PreviewToolController = require(script.Parent.Parent.Modules.PreviewToolController)
+local ObjectPreview = require(script.Parent.Parent.Modules.ObjectPreview)
 
 -- Constants
 local THUMBNAIL_TEMPLATE = "rbxthumb://type=Asset&id=%d&w=420&h=420"
@@ -60,6 +62,12 @@ local overlayRestoreMap: { [string]: boolean } = {}
 local celebrationQueue: { CelebrationPayload } = {}
 local isShowingCelebration = false
 
+-- Placement preview state needs special handling: the overlay suppresses `ObjectPreviewEnabled`,
+-- which clears the preview and can leave the cancel affordance/input in a bad state.
+local previewRestoreToken = 0
+local previewRestoreSnapshot: { wasActive: boolean, itemId: string?, facing: any? }?
+local overlayPreviewToolResume: (() -> ())? = nil
+
 -- Types
 type CelebrationPayload = {
 	Level: number,
@@ -105,6 +113,44 @@ end) :: Sound
 
 -- Overlay Suppression Management
 local function applyOverlaySuppression()
+	previewRestoreToken += 1
+	local token = previewRestoreToken
+
+	-- Suspend tool-side effects (equipped tools/head tracking/backpack suppression) while overlay is up.
+	if overlayPreviewToolResume then
+		overlayPreviewToolResume()
+		overlayPreviewToolResume = nil
+	end
+	overlayPreviewToolResume = PreviewToolController.Suspend("LevelUpUI")
+
+	-- Snapshot current object preview so we can re-hydrate it after the overlay.
+	local wasActive = false
+	local currentPose = ObjectPreview.GetCurrentPose()
+	if currentPose ~= nil then
+		wasActive = true
+	end
+	previewRestoreSnapshot = nil
+	task.defer(function()
+		-- Defer to allow any in-flight ClearPreview to settle.
+		if previewRestoreToken ~= token then
+			return
+		end
+		if not wasActive or currentPose == nil then
+			return
+		end
+		-- Store minimal info needed to re-render the preview.
+		-- We only restore simple cell-object preview; other kinds can be re-selected by the user.
+		local itemId = (currentPose :: any).ItemId
+		local facing = (currentPose :: any).Facing
+		if typeof(itemId) == "string" and itemId ~= "" then
+			previewRestoreSnapshot = {
+				wasActive = true,
+				itemId = itemId,
+				facing = facing,
+			}
+		end
+	end)
+
 	for _, name in ipairs(OVERLAY_SUPPRESSION_TARGETS) do
 		local boolValue = ActiveQueryFolder:FindFirstChild(name)
 		if boolValue and boolValue:IsA("BoolValue") then
@@ -118,6 +164,9 @@ local function applyOverlaySuppression()
 end
 
 local function releaseOverlaySuppression()
+	previewRestoreToken += 1
+	local token = previewRestoreToken
+
 	for name, previous in overlayRestoreMap do
 		local boolValue = ActiveQueryFolder:FindFirstChild(name)
 		if boolValue and boolValue:IsA("BoolValue") then
@@ -126,6 +175,28 @@ local function releaseOverlaySuppression()
 		overlayRestoreMap[name] = nil
 	end
 	LevelUpOverlayValue.Value = false
+
+	-- Restore tool state after overlay.
+	if overlayPreviewToolResume then
+		overlayPreviewToolResume()
+		overlayPreviewToolResume = nil
+	end
+
+	-- Best-effort restore of placement preview ghost if it was active.
+	local snapshot = previewRestoreSnapshot
+	previewRestoreSnapshot = nil
+	if snapshot and snapshot.wasActive and typeof(snapshot.itemId) == "string" and snapshot.itemId ~= "" then
+		task.defer(function()
+			if previewRestoreToken ~= token then
+				return
+			end
+			-- Only restore if user isn't in a competing mode.
+			if LevelUpOverlayValue.Value then
+				return
+			end
+			ObjectPreview.RenderPreview(snapshot.itemId, snapshot.facing)
+		end)
+	end
 end
 
 -- UI Utilities

@@ -277,7 +277,7 @@ function TipsController.Start()
 			if shouldFly then
 				flying = true
 				flyToPlayer(visual, trail, player, function()
-					SoundtrackManager.PlayNotificationSound()
+					SoundtrackManager.PlayCoinPickup()
 					TipsPackets.ClaimTip:Fire({ TipId = packet.TipId })
 					-- Optional: Add particle burst here if desired
 				end)

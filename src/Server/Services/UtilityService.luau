@@ -9,46 +9,30 @@ local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 local PlacedObjectUtils = require(ReplicatedStorage.Shared.Utilities.PlacedObjectUtils)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
+local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 
 local UtilityService = {}
-local LightCache = {} -- [number (UserId)] -> { [string (PlacementKey)] -> Light }
+local LightCache = {} -- [number (UserId)] -> { [string (PlacementKey)] -> Instance }
 
 -- Batching system to reduce network traffic
 local PendingUpdates: { [number]: { [string]: any } } = {} -- [userId][key] = metadata
 local DirtyPlayers: { [number]: boolean } = {} -- [userId] = true
 local BATCH_INTERVAL = 0.2 -- Send batched updates every 0.2 seconds
 
-local LIGHT_TYPES = { "PointLight", "SpotLight", "SurfaceLight" }
+-- Removed debugPrint function as it is no longer needed
 
-local function findLightInContainer(container: Instance): Light?
-	for _, lightType in LIGHT_TYPES do
-		local light = container:FindFirstChildWhichIsA(lightType :: any, true)
-		if light and (light:IsA("PointLight") or light:IsA("SpotLight") or light:IsA("SurfaceLight")) then
-			return light :: Light
+local function collectLights(root: Instance): { Light }
+	local lights: { Light } = {}
+	for _, descendant in root:GetDescendants() do
+		if descendant:IsA("PointLight") or descendant:IsA("SpotLight") or descendant:IsA("SurfaceLight") then
+			table.insert(lights, descendant :: Light)
 		end
 	end
-	return nil
+	return lights
 end
 
-local function findLight(instance: Instance): Light?
-	if instance:IsA("Model") then
-		for _, descendant in instance:GetDescendants() do
-			if descendant:IsA("Attachment") and descendant.Name == "Attachment" then
-				local light = findLightInContainer(descendant)
-				if light then
-					return light
-				end
-			end
-		end
-		return findLightInContainer(instance)
-	elseif instance:IsA("BasePart") then
-		return findLightInContainer(instance)
-	end
-	return nil
-end
-
-local function resolveLight(player: Player, placementKey: string): Light?
+local function resolvePlacementRoot(player: Player, placementKey: string): Instance?
 	local userId = player.UserId
 	local playerCache = LightCache[userId]
 	if not playerCache then
@@ -67,14 +51,12 @@ local function resolveLight(player: Player, placementKey: string): Light?
 
 	local model = WorldPlacer.GetPlacementModel(player, placementKey)
 	if not model then
+		-- Keep this silent unless we are in a light update path.
 		return nil
 	end
 
-	local light = findLight(model)
-	if light then
-		playerCache[placementKey] = light
-	end
-	return light
+	playerCache[placementKey] = model
+	return model
 end
 
 local function flushBatchedUpdates()
@@ -180,7 +162,7 @@ function UtilityService.Recalculate(player: Player, forceUpdateKeys: { [string]:
 	-- 1. Scan all objects using PlacedObjectUtils
 	print("[UtilityService] Recalculating for player", player.Name)
 
-	local isOutage = player:GetAttribute("PowerOutageActive") == true
+	local isOutage = player:GetAttribute(BillingConstants.PowerOutageAttribute) == true
 
 	-- Type cast for compatibility with PlacedObjectUtils
 	local placedObjects = plotState.Save.PlacedObjects :: any
@@ -217,7 +199,9 @@ function UtilityService.Recalculate(player: Player, forceUpdateKeys: { [string]:
 		end
 
 		-- Collect consumers and conductors for updates
-		if spec.RequiresPower or spec.RequiresWater or spec.PowerConductor or spec.WaterConductor then
+		local tags = spec.Tags
+		local isLight = typeof(tags) == "table" and table.find(tags, "Light") ~= nil
+		if spec.RequiresPower or spec.RequiresWater or spec.PowerConductor or spec.WaterConductor or isLight then
 			table.insert(consumers, { key = key, obj = obj, spec = spec })
 		end
 	end)
@@ -352,19 +336,45 @@ function UtilityService.Recalculate(player: Player, forceUpdateKeys: { [string]:
 
 	local function updateLightState(targetPlayer: Player, spec: any, key: string, isPowered: boolean, isOn: boolean)
 		local tags = spec.Tags
-		if typeof(tags) == "table" and table.find(tags, "Light") then
-			print(`[UtilityService] Checking light item: {spec.Name}, Key: {key}, Powered: {isPowered}`)
-			local light = resolveLight(targetPlayer, key)
-			if light then
-				local shouldBeEnabled = isPowered and isOn
-				print(`[UtilityService] Found light instance, setting Enabled to {shouldBeEnabled}`)
-				if light.Enabled ~= shouldBeEnabled then
-					light.Enabled = shouldBeEnabled
+		if typeof(tags) ~= "table" or table.find(tags, "Light") == nil then
+			return
+		end
+
+		local shouldBeEnabled = isPowered and isOn
+		local root = resolvePlacementRoot(targetPlayer, key)
+		if not root then
+			warn(`[UtilityService] Could not resolve placement model for {spec.Name} at key: {key}`)
+			return
+		end
+
+		local lights = collectLights(root)
+		if #lights == 0 then
+			-- Retry one tick later in case the model was just spawned and descendants aren't present yet.
+			task.defer(function()
+				local rootRetry = resolvePlacementRoot(targetPlayer, key)
+				if not rootRetry then
+					return
 				end
-			else
-				warn(`[UtilityService] Could not resolve Light instance for {spec.Name} at key: {key}`)
+				local retryLights = collectLights(rootRetry)
+				for _, light in retryLights do
+					if light.Enabled ~= shouldBeEnabled then
+						light.Enabled = shouldBeEnabled
+					end
+				end
+			end)
+			return
+		end
+
+		for _, light in lights do
+			if light.Enabled ~= shouldBeEnabled then
+				light.Enabled = shouldBeEnabled
 			end
 		end
+	end
+
+	local function isLightSpec(spec: any): boolean
+		local tags = spec.Tags
+		return typeof(tags) == "table" and table.find(tags, "Light") ~= nil
 	end
 
 	-- 3. Update Consumers AND Conductors
@@ -375,6 +385,37 @@ function UtilityService.Recalculate(player: Player, forceUpdateKeys: { [string]:
 		local metadata: { [string]: any } = obj.Metadata or {}
 		if typeof(metadata) ~= "table" then
 			metadata = {}
+		end
+
+		-- Lights are not part of the wiring/power graph anymore.
+		-- They are "smart": always on when power is available, off during outages.
+		if isLightSpec(spec) then
+			local hasPower = not isOutage
+			local isOn = true
+
+			updateLightState(player, spec, item.key, hasPower, isOn)
+
+			if updateMetadataField(metadata, "IsPowered", hasPower) then
+				needsUpdate = true
+			end
+
+			-- Clear stale toggles from before lights became smart.
+			if metadata.IsOn ~= nil then
+				metadata.IsOn = nil
+				needsUpdate = true
+			end
+
+			if needsUpdate then
+				obj.Metadata = metadata
+				local userId = player.UserId
+				if not PendingUpdates[userId] then
+					PendingUpdates[userId] = {}
+				end
+				PendingUpdates[userId][item.key] = metadata
+				DirtyPlayers[userId] = true
+			end
+
+			continue
 		end
 
 		-- Check Power

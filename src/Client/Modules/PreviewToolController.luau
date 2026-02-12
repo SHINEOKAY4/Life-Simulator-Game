@@ -318,6 +318,58 @@ local function onCharacterRemoving()
 	humanoidRootPart = nil
 end
 
+-- External overlay coordination
+-- Some full-screen UIs (e.g. level-up celebration) temporarily suppress build/preview.
+-- We need a reversible way to pause tool visuals/input side-effects without losing state.
+
+local suspendToken = 0
+local suspendDepth = 0
+local suspendedPaletteVisible: boolean? = nil
+local suspendedPaintActive: boolean? = nil
+local suspendedUpgradeActive: boolean? = nil
+
+function PreviewToolController.Suspend(_reason: string?): () -> ()
+	suspendDepth += 1
+	local myToken = suspendToken + 1
+	suspendToken = myToken
+
+	if suspendDepth == 1 then
+		-- Snapshot state so it can be restored.
+		suspendedPaletteVisible = paletteVisible
+		suspendedPaintActive = paintPreviewActive
+		suspendedUpgradeActive = upgradePreviewActive
+
+		-- Apply a neutral mode to avoid tools/head-follow/backpack glitches behind overlays.
+		paintPreviewActive = false
+		upgradePreviewActive = false
+		paletteVisible = false
+		evaluateMode()
+	end
+
+	local didResume = false
+	return function()
+		if didResume then
+			return
+		end
+		didResume = true
+		if suspendToken ~= myToken then
+			return
+		end
+		suspendDepth = math.max(0, suspendDepth - 1)
+		if suspendDepth > 0 then
+			return
+		end
+		-- Restore snapshot.
+		paintPreviewActive = suspendedPaintActive == true
+		upgradePreviewActive = suspendedUpgradeActive == true
+		paletteVisible = suspendedPaletteVisible == true
+		suspendedPaletteVisible = nil
+		suspendedPaintActive = nil
+		suspendedUpgradeActive = nil
+		evaluateMode()
+	end
+end
+
 function PreviewToolController.Init()
 	paintPreviewActive = BuildPaletteUI.IsSelectModeActive()
 	upgradePreviewActive = PlotBuilderUI.IsUpgradeViewActive()

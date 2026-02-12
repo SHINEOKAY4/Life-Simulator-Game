@@ -7,7 +7,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local Formatter = require(ReplicatedStorage.Shared.Utilities.Formatter)
 local MailboxPackets = require(ReplicatedStorage.Network.MailboxPackets)
-local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 local MailboxCashEffect = require(script.Parent.Parent.UserInterface.MailboxCashEffect)
 
 local LocalPlayer = Players.LocalPlayer
@@ -119,8 +118,6 @@ local function refreshDisplays()
 
 		prompt.ObjectText = PROMPT_OBJECT_TEXT
 		prompt.Enabled = true
-
-		MinimalPromptUI.Refresh(prompt)
 	end
 
 	local label = mailboxLabel
@@ -168,8 +165,6 @@ local function disconnectPrompt()
 	disconnectConnectionList(promptConnections)
 
 	if promptInstance then
-		MinimalPromptUI.Detach(promptInstance)
-
 		if promptCreatedByController then
 			promptInstance:Destroy()
 		end
@@ -230,7 +225,7 @@ local function configurePrompt(prompt: ProximityPrompt)
 	prompt.RequiresLineOfSight = false
 	prompt.HoldDuration = 0
 	prompt.MaxActivationDistance = MAX_PROMPT_DISTANCE
-	prompt.Style = Enum.ProximityPromptStyle.Custom
+	prompt.Style = Enum.ProximityPromptStyle.Default
 end
 
 local function attachPromptToPart(part: BasePart)
@@ -257,8 +252,6 @@ local function attachPromptToPart(part: BasePart)
 
 	promptInstance = prompt
 	promptCreatedByController = createdByController
-
-	MinimalPromptUI.Attach(prompt)
 	refreshDisplays()
 
 	promptConnections[#promptConnections + 1] = prompt.Destroying:Connect(function()

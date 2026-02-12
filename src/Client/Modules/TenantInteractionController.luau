@@ -8,7 +8,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local TenantPackets = require(ReplicatedStorage.Network.TenantPackets)
 local TenantStore = require(script.Parent.Parent.ClientStores.TenantStore)
-local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 local TenantEvictionBillboard = require(script.Parent.Parent.UserInterface.TenantEvictionBillboard)
 
 local LocalPlayer = Players.LocalPlayer
@@ -17,7 +16,6 @@ local LOCAL_USER_ID = LocalPlayer.UserId
 local PROMPT_ACTION_TEXT = "Evict"
 local PROMPT_NAME = "TenantEvictionPrompt"
 local MAX_PROMPT_DISTANCE = 15
-local PROMPT_OFFSET = Vector3.new(0, 0, 0)
 
 type TenantEntry = {
 	TenantId: string,
@@ -60,7 +58,6 @@ local function disposePrompt(record: ModelRecord)
 	record.Prompt = nil
 	record.PromptSuppressed = false
 	disconnectConnections(record.PromptConnections)
-	MinimalPromptUI.Detach(prompt)
 	prompt:Destroy()
 end
 
@@ -181,13 +178,11 @@ local function ensurePromptForRecord(record: ModelRecord)
 	prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
 	prompt.RequiresLineOfSight = false
 	prompt.MaxActivationDistance = MAX_PROMPT_DISTANCE
-	prompt.Style = Enum.ProximityPromptStyle.Custom
+	prompt.Style = Enum.ProximityPromptStyle.Default
 	prompt.HoldDuration = 0
-	prompt:SetAttribute("MinimalPromptOffset", PROMPT_OFFSET)
 	prompt.Parent = parentInstance
 
 	record.Prompt = prompt
-	MinimalPromptUI.Attach(prompt)
 	local promptConnection = prompt.Triggered:Connect(function(player: Player)
 		if player ~= LocalPlayer then
 			return

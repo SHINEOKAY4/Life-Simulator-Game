@@ -13,6 +13,7 @@ local SOUND_IDS = {
 	Music2 = "rbxassetid://1842205471",
 	ButtonClick = "rbxassetid://88442833509532",
 	PlacementSuccess = "rbxassetid://9119999441",
+	Coin = "rbxassetid://607665037",
 	Notification = "rbxassetid://9119999441",
 	ChoreCompleted = "rbxassetid://8486683243",
 }
@@ -150,6 +151,10 @@ end
 
 function SoundtrackManager.PlayPlacementSuccess()
 	playSfx(SOUND_IDS.PlacementSuccess, { Volume = 0.7 })
+end
+
+function SoundtrackManager.PlayCoinPickup()
+	playSfx(SOUND_IDS.Coin, { Volume = 0.8 })
 end
 
 function SoundtrackManager.PlayChoreCompleted()

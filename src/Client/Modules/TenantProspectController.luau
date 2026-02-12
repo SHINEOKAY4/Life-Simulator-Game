@@ -10,7 +10,6 @@ local RunService = game:GetService("RunService")
 local TenantPackets = require(ReplicatedStorage.Network.TenantPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local TenantProspectPrompt = require(script.Parent.Parent.UserInterface.TenantProspectPrompt)
-local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local RoomQuery = require(script.Parent.RoomQuery)
 
@@ -316,7 +315,6 @@ local function destroyProspect(id: string)
 	end
 
 	if record.Prompt then
-		MinimalPromptUI.Detach(record.Prompt)
 		record.Prompt:Destroy()
 	end
 
@@ -453,7 +451,7 @@ local function attachPrompt(record, payload)
 	prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
 	prompt.RequiresLineOfSight = false
 	prompt.HoldDuration = 0
-	prompt.Style = Enum.ProximityPromptStyle.Custom
+	prompt.Style = Enum.ProximityPromptStyle.Default
 
 	local promptParent: Instance = slotPart
 	local rootPart = record.RootPart :: BasePart?
@@ -472,11 +470,6 @@ local function attachPrompt(record, payload)
 	end
 
 	prompt.Parent = promptParent
-
-	-- Center prompt at model origin
-	prompt:SetAttribute("MinimalPromptOffset", Vector3.new(0, 0, 0))
-
-	MinimalPromptUI.Attach(prompt)
 
 	record.Prompt = prompt
 	record.Connections[#record.Connections + 1] = prompt.Triggered:Connect(function(player)

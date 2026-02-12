@@ -1,26 +1,15 @@
 --!strict
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 
 local ThermostatUI = require(script.Parent.Parent.UserInterface.ThermostatUI)
-local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 local Packets = require(ReplicatedStorage.Network.TemperaturePackets)
 
 local ThermostatInteractionController = {}
 
 function ThermostatInteractionController.Init()
-	local function onPromptAdded(prompt: ProximityPrompt)
-		MinimalPromptUI.Attach(prompt)
-	end
-
-	CollectionService:GetInstanceAddedSignal("ThermostatPrompt"):Connect(onPromptAdded)
-	for _, prompt in ipairs(CollectionService:GetTagged("ThermostatPrompt")) do
-		if prompt:IsA("ProximityPrompt") then
-			onPromptAdded(prompt)
-		end
-	end
+	-- Thermostat prompts use Roblox's default ProximityPrompt UI.
 
 	ProximityPromptService.PromptTriggered:Connect(function(prompt, player)
 		if player ~= Players.LocalPlayer then

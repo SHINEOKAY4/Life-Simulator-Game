@@ -520,6 +520,13 @@ local function updateVisuals()
 			continue
 		end
 
+		local tags = spec.Tags
+		local isLight = typeof(tags) == "table" and table.find(tags, "Light") ~= nil
+		if isLight then
+			-- Lights are not part of wiring/utility mode.
+			continue
+		end
+
 		local needsPower = spec.RequiresPower or spec.PowerConductor or spec.PowerSource
 		local needsWater = spec.RequiresWater or spec.WaterSource or spec.WaterConductor
 

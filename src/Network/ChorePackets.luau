@@ -21,4 +21,6 @@ ChorePackets.ChoreRemoved = Packet("ChoreRemoved", {
 
 ChorePackets.CompleteChore = Packet("CompleteChore", Packet.String):Response(Packet.Boolean8, Packet.String)
 
+-- Legacy trash carry/deposit flow removed. Trash chores now complete via `CompleteChore`.
+
 return ChorePackets

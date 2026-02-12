@@ -8,7 +8,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local ChorePackets = require(ReplicatedStorage.Network.ChorePackets)
-local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
+-- Chore prompts use the default ProximityPrompt UI (radial hold) for clarity.
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local SoundtrackManager = require(script.Parent.SoundtrackManager)
 local ResidentsFolderFinder = require(ReplicatedStorage.Shared.Utilities.ResidentsFolderFinder)
@@ -28,7 +28,59 @@ type ChoreVisual = {
 local ActiveChores: { [string]: ChoreVisual } = {}
 local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
 local rng = Random.new()
+
+local TRASH_HOLD_DURATION = 1.25
 local MAX_RESIDENT_RESOLVE_ATTEMPTS = 5
+
+local function playTrashPickupFeedback(visual: Instance)
+	local function fadeHighlight(model: Instance)
+		local highlight = model:FindFirstChild("TrashHighlight")
+		if highlight and highlight:IsA("Highlight") then
+			TweenService:Create(highlight, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				FillTransparency = 1,
+				OutlineTransparency = 1,
+			}):Play()
+		end
+	end
+
+	if visual:IsA("BasePart") then
+		fadeHighlight(visual)
+		local tween = TweenService:Create(visual, TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+			Transparency = 1,
+			Size = visual.Size * 0.6,
+		})
+		tween:Play()
+		task.delay(0.22, function()
+			visual:Destroy()
+		end)
+		return
+	end
+
+	if visual:IsA("Model") then
+		fadeHighlight(visual)
+		-- Fade all renderables and slightly shrink via pivot scale if possible
+		for _, child in ipairs(visual:GetDescendants()) do
+			if child:IsA("BasePart") then
+				child.CanCollide = false
+				TweenService:Create(child, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+					Transparency = 1,
+				}):Play()
+			elseif child:IsA("Decal") or child:IsA("Texture") then
+				TweenService:Create(child, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+					Transparency = 1,
+				}):Play()
+			end
+		end
+		-- Best-effort small pop (models often have anchored parts)
+		pcall(function()
+			local pivot = visual:GetPivot()
+			visual:PivotTo(pivot * CFrame.new(0, 0.1, 0))
+		end)
+		task.delay(0.22, function()
+			visual:Destroy()
+		end)
+	end
+end
 
 local function findTenantModel(tenantName: string): Model?
 	return ResidentsFolderFinder.FindResident(LocalPlayer, tenantName)
@@ -87,7 +139,7 @@ local function resolveTenantPosition(tenantName: string): Vector3?
 	return baseCFrame.Position + backOffset + jitter
 end
 
-local function createTrashVisual(position: Vector3): Model | BasePart
+local function createTrashVisual(position: Vector3): Instance
 	-- Try to find the TrashBag model
 	local assets = ReplicatedStorage:FindFirstChild("Assets")
 	local gameEffects = assets and assets:FindFirstChild("GameEffects")
@@ -119,27 +171,18 @@ local function createTrashVisual(position: Vector3): Model | BasePart
 	end
 
 	-- Fallback to simple part
-	local part = Instance.new("Part")
-	part.Name = "TrashMess"
-	part.Size = Vector3.new(1.5, 0.5, 1.5)
-	part.Position = position
-	part.Anchored = true
-	part.CanCollide = false
-	part.Material = Enum.Material.Fabric
-	part.Color = Color3.fromRGB(100, 100, 100)
-	part.TopSurface = Enum.SurfaceType.Smooth
-	part.BottomSurface = Enum.SurfaceType.Smooth
 
-	-- Add some random rotation for variety
-	part.CFrame = CFrame.new(position) * CFrame.Angles(0, math.random() * math.pi * 2, 0)
-
-	-- Add a highlight or decal to make it look like trash
-	local decal = Instance.new("Decal")
-	decal.Texture = "rbxassetid://6035236356" -- Generic trash texture or similar (placeholder)
-	decal.Face = Enum.NormalId.Top
-	decal.Parent = part
-
-	return part
+	local defaultPart = Instance.new("Part")
+	defaultPart.Size = Vector3.new(1.5, 0.5, 1.5)
+	defaultPart.Anchored = true
+	defaultPart.CanCollide = false
+	defaultPart.CanQuery = false
+	defaultPart.CanTouch = false
+	defaultPart.Material = Enum.Material.SmoothPlastic
+	defaultPart.Color = Color3.fromRGB(90, 90, 90)
+	defaultPart.Position = position
+	defaultPart.Name = "Trash"
+	return defaultPart
 end
 
 local function spawnTrashForPayload(
@@ -157,7 +200,15 @@ local function spawnTrashForPayload(
 	end
 
 	local metadata = payload.Metadata
-	local position = metadata and metadata.WorldPosition or resolveTenantPosition(payload.TenantName)
+	local worldPosition: Vector3? = nil
+	if metadata then
+		local candidate = metadata.WorldPosition
+		if typeof(candidate) == "Vector3" then
+			worldPosition = candidate
+		end
+	end
+
+	local position = worldPosition or resolveTenantPosition(payload.TenantName)
 	if not position then
 		if attempt < MAX_RESIDENT_RESOLVE_ATTEMPTS then
 			task.delay(0.75, function()
@@ -169,14 +220,11 @@ local function spawnTrashForPayload(
 		return
 	end
 
-	local visual: Model | BasePart
-	if payload.Type == "Trash" then
-		visual = createTrashVisual(position)
-	else
-		visual = createTrashVisual(position)
+	local visual = createTrashVisual(position)
+	if payload.Type ~= "Trash" then
 		if visual:IsA("BasePart") then
 			visual.Color = Color3.fromRGB(255, 0, 0)
-		else
+		elseif visual:IsA("Model") then
 			for _, child in ipairs(visual:GetDescendants()) do
 				if child:IsA("BasePart") then
 					child.Color = Color3.fromRGB(255, 0, 0)
@@ -189,25 +237,48 @@ local function spawnTrashForPayload(
 
 	-- Add Prompt
 	local prompt = Instance.new("ProximityPrompt")
-	prompt.ActionText = "Clean Up"
-	prompt.ObjectText = "Mess"
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
 	prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
-	prompt.HoldDuration = 0.5
+	if payload.Type == "Trash" then
+		prompt.ActionText = "Pick Up"
+		prompt.ObjectText = "Garbage"
+		prompt.HoldDuration = TRASH_HOLD_DURATION
+	else
+		prompt.ActionText = "Clean Up"
+		prompt.ObjectText = "Mess"
+		prompt.HoldDuration = 0.5
+	end
 	prompt.MaxActivationDistance = 8
 	prompt.RequiresLineOfSight = false
-	prompt.Style = Enum.ProximityPromptStyle.Custom
+	prompt.Style = Enum.ProximityPromptStyle.Default
+	-- Make the default prompt smaller while keeping radial hold behavior.
+	local scale = Instance.new("UIScale")
+	scale.Scale = 0.78
+	scale.Parent = prompt
 	prompt.Parent = visual
 
-	MinimalPromptUI.Attach(prompt)
-
 	prompt.Triggered:Connect(function()
+		if payload.Type == "Trash" then
+			prompt.Enabled = false
+			local success, msg = ChorePackets.CompleteChore:Fire(payload.ChoreId)
+			if success then
+				-- Replace old success feedback for trash with a cleaner pickup effect.
+				playTrashPickupFeedback(visual)
+			else
+				prompt.Enabled = true
+				warn("Failed to complete chore:", msg)
+			end
+			return
+		end
+
 		prompt.Enabled = false
 
-		-- Optimistic visual feedback
+		-- Optimistic visual feedback for non-trash chores
 		if visual:IsA("BasePart") then
-			local tween =
-				TweenService:Create(visual, TweenInfo.new(0.2), { Transparency = 1, Size = Vector3.new(0, 0, 0) })
+			local tween = TweenService:Create(visual, TweenInfo.new(0.2), {
+				Transparency = 1,
+				Size = Vector3.new(0, 0, 0),
+			})
 			tween:Play()
 		elseif visual:IsA("Model") then
 			for _, child in ipairs(visual:GetDescendants()) do
@@ -233,7 +304,8 @@ local function spawnTrashForPayload(
 			elseif visual:IsA("Model") then
 				for _, child in ipairs(visual:GetDescendants()) do
 					if child:IsA("BasePart") or child:IsA("Decal") or child:IsA("Texture") then
-						child.Transparency = 0
+						local transparentChild = child :: any
+						transparentChild.Transparency = 0
 					end
 				end
 			end
@@ -262,38 +334,53 @@ local function spawnRepairChore(
 		return
 	end
 
-	local metadata = payload.Metadata or {}
-	local model = getPlacementModel(metadata.PlacementKey)
+	local metadata: { [string]: any } = payload.Metadata or {}
+	local placementKeyValue = metadata.PlacementKey
+	if typeof(placementKeyValue) ~= "string" or placementKeyValue == "" then
+		if attempt < MAX_RESIDENT_RESOLVE_ATTEMPTS then
+			task.delay(0.75, function()
+				spawnRepairChore(payload, attempt + 1)
+			end)
+		else
+			warn("[ChoreController] Missing placement key for repair chore")
+		end
+		return
+	end
+
+	local model = getPlacementModel(placementKeyValue)
 	if not model then
 		if attempt < MAX_RESIDENT_RESOLVE_ATTEMPTS then
 			task.delay(0.75, function()
 				spawnRepairChore(payload, attempt + 1)
 			end)
 		else
-			warn("[ChoreController] Unable to resolve broken object for", metadata.PlacementKey)
+			warn("[ChoreController] Unable to resolve broken object for", placementKeyValue)
 		end
 		return
 	end
 
-	local severity = math.clamp((metadata.Severity or 0.5), 0.1, 1)
+	local severitySource = if typeof(metadata.Severity) == "number" then metadata.Severity else 0.5
+	local severity = math.clamp(severitySource, 0.1, 1)
+	local worldPosition = if typeof(metadata.WorldPosition) == "Vector3" then metadata.WorldPosition else nil
 	local cleanupEffects = RepairVFX.Attach(model, {
 		Severity = severity,
-		WorldPosition = metadata.WorldPosition,
+		WorldPosition = worldPosition,
 		VisualSeed = metadata.VisualSeed,
 	})
 
 	local promptParent: BasePart? = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
 	local anchor: Part? = nil
-	if not promptParent and metadata.WorldPosition then
-		anchor = Instance.new("Part")
-		anchor.Anchored = true
-		anchor.CanCollide = false
-		anchor.CanQuery = false
-		anchor.Transparency = 1
-		anchor.Size = Vector3.new(0.2, 0.2, 0.2)
-		anchor.Position = metadata.WorldPosition
-		anchor.Parent = Workspace
-		promptParent = anchor
+	if not promptParent and worldPosition then
+		local anchorPart = Instance.new("Part")
+		anchorPart.Anchored = true
+		anchorPart.CanCollide = false
+		anchorPart.CanQuery = false
+		anchorPart.Transparency = 1
+		anchorPart.Size = Vector3.new(0.2, 0.2, 0.2)
+		anchorPart.Position = worldPosition
+		anchorPart.Parent = Workspace
+		promptParent = anchorPart
+		anchor = anchorPart
 	end
 
 	if not promptParent then
@@ -303,23 +390,28 @@ local function spawnRepairChore(
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.ActionText = "Repair"
-	prompt.ObjectText = metadata.ItemName or "Broken Item"
+	local itemName = if typeof(metadata.ItemName) == "string" and metadata.ItemName ~= ""
+		then metadata.ItemName
+		else "Broken Item"
+	prompt.ObjectText = itemName
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
 	prompt.GamepadKeyCode = Enum.KeyCode.ButtonX
-	prompt.HoldDuration = metadata.PromptHoldSeconds or RepairConfig.DefaultProfile.PromptHoldSeconds
+	local holdDuration = if typeof(metadata.PromptHoldSeconds) == "number"
+		then metadata.PromptHoldSeconds
+		else RepairConfig.DefaultProfile.PromptHoldSeconds
+	prompt.HoldDuration = holdDuration
 	prompt.MaxActivationDistance = 8 + severity * 2
 	prompt.RequiresLineOfSight = false
-	prompt.Style = Enum.ProximityPromptStyle.Custom
+	prompt.Style = Enum.ProximityPromptStyle.Default
+	prompt.Enabled = true
 	prompt.Parent = promptParent
-
-	MinimalPromptUI.Attach(prompt)
 
 	prompt.Triggered:Connect(function()
 		prompt.Enabled = false
 		local success, msg = ChorePackets.CompleteChore:Fire(payload.ChoreId)
 		if success then
 			SoundtrackManager.PlayChoreCompleted()
-			RepairVFX.PlayRepairComplete(model, metadata.WorldPosition)
+			RepairVFX.PlayRepairComplete(model, worldPosition)
 		else
 			prompt.Enabled = true
 			warn("Failed to repair:", msg)
@@ -371,7 +463,13 @@ local function onChoreRemoved(payload: { ChoreId: string, Reason: string })
 	end
 
 	local visual = record.Instance
+	local skipAnimation = payload.Reason == "PickedUp"
 	if visual and record.Type ~= "Repair" then
+		if skipAnimation then
+			visual:Destroy()
+			return
+		end
+
 		if visual:IsA("BasePart") then
 			local tween = TweenService:Create(visual, TweenInfo.new(0.3), { Transparency = 1 })
 			tween:Play()
@@ -436,6 +534,8 @@ end
 function ChoreController.Init()
 	ChorePackets.ChoreSpawned.OnClientEvent:Connect(onChoreSpawned)
 	ChorePackets.ChoreRemoved.OnClientEvent:Connect(onChoreRemoved)
+
+	-- Legacy trash carry/deposit flow removed. We keep RunService required because other chore visuals use it.
 end
 
 return ChoreController

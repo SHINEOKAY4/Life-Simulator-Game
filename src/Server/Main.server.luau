@@ -24,6 +24,8 @@ local UtilityService = require(ServicesFolder.UtilityService)
 local TemperatureService = require(ServicesFolder.TemperatureService)
 local WeatherService = require(ServicesFolder.WeatherService)
 local TrashManager = require(ModulesFolder.Chores.TrashManager)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
 
 ProgressionService.Init()
 ResidentService.Init()
@@ -54,6 +56,11 @@ local function OnPlayerAdded(player: Player)
 	print(PlayerSession.GetDataAwait(player))
 	BillingService.LoadPlayer(player)
 	TutorialService.OnPlayerAdded(player)
+	player:GetAttributeChangedSignal(BillingConstants.PowerOutageAttribute):Connect(function()
+		if player:GetAttribute("OwnedPlotIndex") ~= nil then
+			UtilityService.Recalculate(player)
+		end
+	end)
 	--PlayerSession.ClearData(player)
 	local character = player.Character or player.CharacterAdded:Wait()
 	for _, part in pairs(character:GetDescendants()) do

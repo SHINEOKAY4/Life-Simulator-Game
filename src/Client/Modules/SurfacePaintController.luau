@@ -11,6 +11,7 @@ local HttpService = game:GetService("HttpService")
 local PlacementPackets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local BuildPaletteUI = require(script.Parent.Parent.UserInterface.BuildPaletteUI)
+local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 
 local Player = Players.LocalPlayer
 local Mouse = Player:GetMouse()
@@ -130,38 +131,97 @@ local function getPlotContainer(): Instance?
 	return PlotStateStore.GetPlotContainer()
 end
 
+local function getPlotModel(): Model?
+	return PlotStateStore.GetPlotModel()
+end
+
+local function resolvePlacementEntryForModel(model: Model): ({ [string]: any }?, string)
+	local placementKey = model.Name
+	local entry = PlotStateStore.GetPlacementEntry(placementKey)
+	if entry then
+		return entry, placementKey
+	end
+
+	-- Fallback: sometimes the client snapshot indexes placements under a different key label.
+	-- Try to resolve by matching coordinates+facing+level (and prefer Wall/Floor-like entries).
+	local ok, cellX, cellZ, facing, typeLabel, level = pcall(function()
+		return PlacementKey.ParseWithType(placementKey)
+	end)
+	if not ok then
+		return nil, placementKey
+	end
+
+	local parsedLevel = level
+	local bestMatch: any = nil
+	PlotStateStore.IteratePlacements(function(_, record)
+		if typeof(record) ~= "table" then
+			return
+		end
+		if
+			record.cellX == cellX
+			and record.cellZ == cellZ
+			and record.facing == facing
+			and record.Level == parsedLevel
+		then
+			-- Prefer records that look like structural surfaces.
+			local keyType = tostring(record.PlacementKeyType or "")
+			if keyType == tostring(typeLabel) then
+				bestMatch = record
+				return false
+			end
+			if bestMatch == nil and (keyType == "Wall" or keyType == "Floor" or keyType == "Ceiling") then
+				bestMatch = record
+			end
+		end
+	end)
+
+	return bestMatch, placementKey
+end
+
 local function resolvePlacementModel(hitInstance: Instance?): Model?
 	if not hitInstance then
 		return nil
 	end
 	local container = getPlotContainer()
-	if not container then
+	local plotModel = getPlotModel()
+	if not container or not plotModel then
 		return nil
 	end
 	local model = hitInstance:FindFirstAncestorOfClass("Model")
-	while model and model.Parent ~= container do
+	while model do
 		local parent = model.Parent
-		if parent and parent:IsA("Model") then
+		-- Accept placements parented directly under Container
+		if parent == container then
+			return model
+		end
+		-- Some placements may be nested under submodels/folders but still live within the plot container.
+		if parent and container:IsAncestorOf(parent) then
+			return model
+		end
+		-- Stop once we've walked past the plot model boundary.
+		if parent == nil or parent == plotModel then
+			break
+		end
+		if parent:IsA("Model") then
 			model = parent
 		else
-			model = nil
+			break
 		end
-	end
-	if model and model.Parent == container then
-		return model
 	end
 	return nil
 end
 
 local function raycastPlot(): RaycastResult?
-	local container = getPlotContainer()
-	if not container then
+	local plotModel = getPlotModel()
+	if not plotModel then
 		return nil
 	end
 	local unitRay = Mouse.UnitRay
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { container }
+	-- Use the whole plot model so newly spawned placements are queryable immediately,
+	-- even if they are temporarily not direct children of Container.
+	params.FilterDescendantsInstances = { plotModel }
 	params.IgnoreWater = true
 	return Workspace:Raycast(unitRay.Origin, unitRay.Direction * RAYCAST_DISTANCE, params)
 end
@@ -450,7 +510,7 @@ local function sendPaintRequests(targetKeys: { string }, overrideSurfaceId: stri
 end
 
 local function collectPlacementsInArea(
-	level: number,
+	level: number?,
 	minCellX: number,
 	minCellZ: number,
 	maxCellX: number,
@@ -467,9 +527,11 @@ local function collectPlacementsInArea(
 		if placementTypeFilter and placementType ~= placementTypeFilter then
 			return
 		end
-		local placementLevel = record.Level or record.yLevel or PlotStateStore.GetDefaultLevel()
-		if placementLevel ~= level then
-			return
+		if level ~= nil then
+			local placementLevel = record.Level or record.yLevel or PlotStateStore.GetDefaultLevel()
+			if placementLevel ~= level then
+				return
+			end
 		end
 		local footprint = PlotStateStore.GetPlacementFootprint(key)
 		if not footprint then
@@ -534,8 +596,7 @@ local function buildTargetsForDragState(includeHoverFallback: boolean): { string
 		local maxCellX = math.max(dragState.startCellX, dragState.currentCellX)
 		local minCellZ = math.min(dragState.startCellZ, dragState.currentCellZ)
 		local maxCellZ = math.max(dragState.startCellZ, dragState.currentCellZ)
-		targets =
-			collectPlacementsInArea(dragState.level, minCellX, minCellZ, maxCellX, maxCellZ, dragState.placementType)
+		targets = collectPlacementsInArea(nil, minCellX, minCellZ, maxCellX, maxCellZ, dragState.placementType)
 	elseif dragState.startPlacementKey then
 		targets = { dragState.startPlacementKey }
 	elseif dragState.startModel and dragState.startModel.Name ~= "" then
@@ -639,10 +700,33 @@ local function updateHoverInfo()
 	local result = raycastPlot()
 	local model = result and resolvePlacementModel(result.Instance)
 	local info: HoverInfo? = nil
+	if isDebugEnabled() then
+		debugLog("Hover raycast", {
+			hit = if result and result.Instance then result.Instance:GetFullName() else nil,
+			hitClass = if result and result.Instance then result.Instance.ClassName else nil,
+			model = if model then model:GetFullName() else nil,
+			modelParent = if model and model.Parent then model.Parent:GetFullName() else nil,
+			plotModel = (function()
+				local pm = getPlotModel()
+				return if pm then pm:GetFullName() else nil
+			end)(),
+			container = (function()
+				local c = getPlotContainer()
+				return if c then c:GetFullName() else nil
+			end)(),
+		})
+	end
 	if model then
-		local placementKey = model.Name
+		local entry, placementKey = resolvePlacementEntryForModel(model)
 		if placementKey ~= "" then
-			local entry = PlotStateStore.GetPlacementEntry(placementKey)
+			if isDebugEnabled() then
+				debugLog("Hover candidate", {
+					placementKey = placementKey,
+					hasEntry = entry ~= nil,
+					entryType = if entry then tostring(entry.PlacementType or entry.Type) else nil,
+					attrType = tostring(model:GetAttribute("PlacementType")),
+				})
+			end
 			if entry then
 				local placementType =
 					tostring(entry.PlacementType or entry.Type or model:GetAttribute("PlacementType") or "CellObject")
@@ -662,6 +746,24 @@ local function updateHoverInfo()
 						level = levelValue,
 						cellX = cellXValue,
 						cellZ = cellZValue,
+					}
+				end
+			else
+				-- Last resort: if we can't find the entry yet (common right after placement),
+				-- derive enough info from the model name to at least allow hover/highlight.
+				local ok, cellX, cellZ, _facing, typeLabel, level = pcall(function()
+					return PlacementKey.ParseWithType(placementKey)
+				end)
+				local placementType = tostring(model:GetAttribute("PlacementType") or typeLabel or "")
+				if ok and (placementType == "Floor" or placementType == "Wall") then
+					info = {
+						model = model,
+						placementKey = placementKey,
+						entry = {},
+						placementType = placementType,
+						level = level,
+						cellX = cellX,
+						cellZ = cellZ,
 					}
 				end
 			end

@@ -12,6 +12,7 @@ local DataNormalization = require(script.Parent.DataNormalization)
 local PacketProcessor = {}
 
 type PlacedItemEntry = {
+	PlacementKey: string,
 	id: string,
 	cellX: number,
 	cellZ: number,
@@ -62,8 +63,15 @@ function PacketProcessor.NormalizePlacedItem(entry: any, defaultLevel: number): 
 	local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
 	local subSlotId = if metadata then metadata.SubSlotId or metadata.subSlotId else nil
 	local placementKeyType = PlacementBehavior.getPlacementKeyLabelForSubSlot(spec, subSlotId)
+	local placementKeyValue = entry.PlacementKey or entry.placementKey
+	local placementKey = if typeof(placementKeyValue) == "string" and placementKeyValue ~= ""
+		then placementKeyValue
+		-- IMPORTANT: the world model names for walls/floors use the placement-key label
+		-- (e.g. "Wall" / "Floor"), not the broader spec placement type.
+		else PlacementKey.ForPlacementType(entry.cellX, entry.cellZ, facing :: any, placementKeyType, levelValue)
 
 	return {
+		PlacementKey = placementKey,
 		id = entry.id,
 		cellX = entry.cellX,
 		cellZ = entry.cellZ,
@@ -78,6 +86,11 @@ function PacketProcessor.NormalizePlacedItem(entry: any, defaultLevel: number): 
 end
 
 function PacketProcessor.GeneratePlacementKey(item: PlacedItemEntry): string
+	-- Prefer the server-aligned placement key if available.
+	-- This matches model names used in the world (e.g. "0:2:1:North:Wall").
+	if typeof(item.PlacementKey) == "string" and item.PlacementKey ~= "" then
+		return item.PlacementKey
+	end
 	return PlacementKey.ForPlacementType(item.cellX, item.cellZ, item.facing :: any, item.PlacementKeyType, item.Level)
 end
 
@@ -114,7 +127,6 @@ function PacketProcessor.ApplyPlacementDelta(
 
 	local facing = delta.Item.Facing or "North"
 	local spec = ItemFinder.FindItemById(itemId)
-	local placementType = spec and (spec.PlacementType or spec.Type) or "CellObject"
 
 	local metadata = DataNormalization.NormalizeMetadata(delta.Item.Metadata)
 	local deltaSubSlotId = delta.Item.SubSlotId or delta.Item.subSlotId
@@ -145,6 +157,7 @@ function PacketProcessor.ApplyPlacementDelta(
 	local keyValue = delta.Item.PlacementKey or delta.Item.placementKey
 	local key = if typeof(keyValue) == "string" and keyValue ~= ""
 		then keyValue
+		-- Deltas often omit PlacementKey; build one that matches server model naming.
 		else PlacementKey.ForPlacementType(
 			delta.Item.CellX,
 			delta.Item.CellZ,
@@ -163,6 +176,7 @@ function PacketProcessor.ApplyPlacementDelta(
 	end
 
 	currentPlacedItems[key] = {
+		PlacementKey = key,
 		id = itemId,
 		cellX = delta.Item.CellX,
 		cellZ = delta.Item.CellZ,
@@ -171,7 +185,7 @@ function PacketProcessor.ApplyPlacementDelta(
 		DepthCells = depthCells,
 		Metadata = metadata,
 		Level = levelValue,
-		PlacementType = placementType,
+		PlacementType = spec and (spec.PlacementType or spec.Type) or "CellObject",
 		PlacementKeyType = placementKeyType,
 	}
 

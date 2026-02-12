@@ -163,7 +163,12 @@ local function animateBillboard(billboard: BillboardGui, amountLabel: TextLabel)
 	fadeTween:Play()
 end
 
-function ExperienceVFX.PlayExperienceGain(amount: number?, _reason: string?)
+function ExperienceVFX.PlayExperienceGain(amount: number?, reason: string?)
+	-- Skip particle effects for chore completion (garbage pickup)
+	if reason == "ChoreCompleted" then
+		return
+	end
+	
 	local position = resolveWorldPosition()
 	local anchor = createAnchor(position)
 	local billboard, amountLabel = createTextBillboard(anchor, amount)

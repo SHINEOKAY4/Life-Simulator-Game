@@ -18,22 +18,7 @@ preloadPacketModules(NetworkFolder)
 
 local LocalPlayer = Players.LocalPlayer
 local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-local ActiveQueryFolder = PlayerGui:WaitForChild("ActiveQuery")
-
-local function ensureActiveQueryBool(name: string, defaultValue: boolean): BoolValue
-	local existing = ActiveQueryFolder:FindFirstChild(name)
-	if existing and existing:IsA("BoolValue") then
-		return existing
-	end
-	local value = Instance.new("BoolValue")
-	value.Name = name
-	value.Value = defaultValue
-	value.Parent = ActiveQueryFolder
-	return value
-end
-
-ensureActiveQueryBool("CutawayVisible", false)
+-- Cutaway system removed
 
 local ModulesFolder = script.Parent.Modules
 
@@ -60,7 +45,6 @@ local ChoreController = require(ModulesFolder.ChoreController)
 local TipsController = require(ModulesFolder.TipsController)
 local ReviewController = require(ModulesFolder.ReviewController)
 local UtilityVisuals = require(ModulesFolder.UtilityVisuals)
-local CutawayController = require(ModulesFolder.CutawayController)
 local SelectionController = require(ModulesFolder.SelectionController)
 local WireController = require(ModulesFolder.WireController)
 local EnvironmentHUDController = require(ModulesFolder.EnvironmentHUDController)
@@ -115,7 +99,6 @@ ResidentNameBillboard.Init()
 PlotSelector.Init()
 MailboxInteractionController.Init()
 UtilityVisuals.Init()
-CutawayController.Init()
 SelectionController.Init()
 WireController.Init()
 EnvironmentHUDController.Init()

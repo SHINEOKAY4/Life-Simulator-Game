@@ -3,6 +3,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
 local ChorePackets = require(ReplicatedStorage.Network.ChorePackets)
@@ -46,6 +47,22 @@ type CompletionHandler = (player: Player, record: ChoreRecord, root: BasePart?) 
 type RepairBridgePayload = RepairManager.RepairChorePayload
 
 local ActiveChores: { [string]: ChoreRecord } = {}
+
+local TRASH_DISPOSAL_ITEM_IDS = {
+	TrashBin = true,
+}
+
+local TRASH_CONTAINER_ITEM_IDS = {
+	TrashCan = true,
+}
+
+local TRASH_RECEPTACLE_ITEM_IDS = {}
+for itemId in pairs(TRASH_DISPOSAL_ITEM_IDS) do
+	TRASH_RECEPTACLE_ITEM_IDS[itemId] = true
+end
+for itemId in pairs(TRASH_CONTAINER_ITEM_IDS) do
+	TRASH_RECEPTACLE_ITEM_IDS[itemId] = true
+end
 
 local MESS_REWARD = 15
 local MESS_LIFETIME = 300 -- 5 minutes
@@ -268,6 +285,10 @@ end
 
 function ChoreService.Init()
 	ChorePackets.CompleteChore.OnServerInvoke = completeChore
+
+	Players.PlayerRemoving:Connect(function(player)
+		player:SetAttribute("CarryingTrashId", nil)
+	end)
 
 	RepairManager.Configure({
 		SpawnRepairChore = function(player, payload)

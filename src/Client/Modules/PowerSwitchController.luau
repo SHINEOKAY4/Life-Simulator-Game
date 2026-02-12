@@ -6,7 +6,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlotStateStore = require(script.Parent.Parent.ClientStores.PlotStateStore)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
-local MinimalPromptUI = require(script.Parent.MinimalPromptUI)
 
 local PowerSwitchController = {}
 
@@ -54,10 +53,8 @@ local function setupPrompt(model: Model, key: string)
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
 	prompt.MaxActivationDistance = 10
 	prompt.RequiresLineOfSight = false
-	prompt.Style = Enum.ProximityPromptStyle.Custom
+	prompt.Style = Enum.ProximityPromptStyle.Default
 	prompt.Parent = model
-
-	MinimalPromptUI.Attach(prompt)
 
 	prompt.Triggered:Connect(function()
 		local entry = PlotStateStore.GetPlacementEntry(key)
@@ -94,8 +91,11 @@ local function onPlacementAdded(key: string, entry: any)
 		return
 	end
 
-	-- Check if it's a consumer (RequiresPower)
-	if spec.RequiresPower then
+	local tags = spec.Tags
+	local isLight = typeof(tags) == "table" and table.find(tags, "Light") ~= nil
+
+	-- Check if it's a non-light consumer
+	if spec.RequiresPower and not isLight then
 		-- Find the model
 		local model = PlotStateStore.ResolvePlacementInstance(key)
 		if model and model:IsA("Model") then
