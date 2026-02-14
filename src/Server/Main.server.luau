@@ -9,6 +9,7 @@ local ModulesFolder = ServerFolder.Modules
 
 local PlayerSession = require(ServicesFolder.PlayerSession)
 local ProgressionService = require(ServicesFolder.ProgressionService)
+local AchievementService = require(ServicesFolder.AchievementService)
 local PlotService = require(ServicesFolder.PlotService)
 local BuildService = require(ServicesFolder.BuildService)
 local ResidentService = require(ServicesFolder.ResidentService)
@@ -29,6 +30,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local BillingConstants = require(ReplicatedStorage.Shared.Definitions.BillingConstants)
 
 ProgressionService.Init()
+AchievementService.Init()
 ResidentService.Init()
 BillingService.Init()
 WorldEventService.Init()

@@ -11,6 +11,7 @@ local HttpService = game:GetService("HttpService")
 local ProgressionConfig = require(ReplicatedStorage.Shared.Configurations.ProgressionConfig)
 local TenantHelpPackets = require(ReplicatedStorage.Network.TenantHelpPackets)
 local ProgressionService = require(ServerScriptService.Server.Services.ProgressionService)
+local AchievementService = require(ServerScriptService.Server.Services.AchievementService)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 
 local TenantHelpService = {}
@@ -250,6 +251,7 @@ local function handleHelpInteraction(player: Player, requestId: string): (boolea
 		end
 	end
 	ProgressionService.RecordTenantHelped(player)
+	AchievementService.RecordTenantHelpCompleted(player)
 	state.NextHelpUnix = now + HELP_REQUEST_INTERVAL_MIN
 
 	return true, string.format("%s appreciated the help!", request.TenantName)

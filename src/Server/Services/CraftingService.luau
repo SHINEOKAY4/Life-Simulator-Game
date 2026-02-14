@@ -16,6 +16,7 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local InventoryService = require(ServerScriptService.Server.Services.InventoryService)
 local ProgressionService = require(ServerScriptService.Server.Services.ProgressionService)
+local AchievementService = require(ServerScriptService.Server.Services.AchievementService)
 
 export type SkillRequirement = {
 	SkillId: string,
@@ -586,6 +587,7 @@ local function completeCraftingJob(job: CraftingJob)
 	end
 
 	CraftingService.CraftCompleted:Fire(job.Player, recipe.Id, recipe.Output.ItemId, recipe.Output.Quantity)
+	AchievementService.RecordCraftCompleted(job.Player)
 	CraftingPackets.CraftCompleted:FireClient(job.Player, {
 		JobId = job.JobId,
 		RecipeId = recipe.Id,

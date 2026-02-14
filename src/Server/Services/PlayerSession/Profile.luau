@@ -64,6 +64,12 @@ local Profile = {
 	ReviewState = {
 		Reviews = {},
 	},
+	AchievementState = {
+		Version = 1,
+		Stats = {},
+		Unlocked = {},
+		Claimed = {},
+	},
 }
 
 return Profile

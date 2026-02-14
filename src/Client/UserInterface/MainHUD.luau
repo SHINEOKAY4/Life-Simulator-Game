@@ -13,6 +13,7 @@ local SoundtrackManager = require(script.Parent.Parent.Modules.SoundtrackManager
 local ReviewsUI = require(script.Parent.ReviewsUI)
 local ProfileUI = require(script.Parent.ProfileUI)
 local BillUI = require(script.Parent.BillUI)
+local AchievementUI = require(script.Parent.AchievementUI)
 local PlotExpansion = require(script.Parent.Parent.Modules.PlotExpansion)
 
 local Player = Players.LocalPlayer
@@ -57,6 +58,18 @@ local BuildButton = BottomRight:WaitForChild("BuildButton") :: TextButton
 local ProfileButton = BottomRight:WaitForChild("ProfileButton") :: TextButton
 local ReviewsButton = BottomRight:WaitForChild("ReviewsButton") :: TextButton
 local BillsButton = BottomRight:WaitForChild("BillsButton") :: TextButton
+local AchievementsButton = (function(): TextButton
+	local existing = BottomRight:FindFirstChild("AchievementsButton")
+	if existing and existing:IsA("TextButton") then
+		return existing
+	end
+	local button = ReviewsButton:Clone()
+	button.Name = "AchievementsButton"
+	button.Text = "Achievements"
+	button.LayoutOrder = BillsButton.LayoutOrder + 1
+	button.Parent = BottomRight
+	return button
+end)()
 local NotifierSymbol = BillsButton:FindFirstChild("NotifierSymbol") :: ImageLabel? -- Notifier for bill due
 local ProgressionBar = MainHUDGui:WaitForChild("ProgressionBar") :: Frame
 local ProgressionForeground = ProgressionBar:WaitForChild("Foreground") :: Frame
@@ -561,6 +574,10 @@ function MainHUD.Init()
 		ReviewsUI.Toggle()
 	end)
 
+	AchievementsButton.Activated:Connect(function()
+		AchievementUI.Toggle()
+	end)
+
 	PlotBuilderEnabled.Changed:Connect(function()
 		if PlotBuilderEnabled.Value then
 			MainHUD.Hide()
@@ -625,7 +642,7 @@ function MainHUD.Init()
 		Player:GetAttributeChangedSignal(attributeName):Connect(updateProgressionDisplay)
 	end
 
-	for _, button in ipairs({ BuildButton, ReviewsButton, ProfileButton, BillsButton }) do
+	for _, button in ipairs({ BuildButton, ReviewsButton, ProfileButton, BillsButton, AchievementsButton }) do
 		configureButtonVisuals(button)
 	end
 
