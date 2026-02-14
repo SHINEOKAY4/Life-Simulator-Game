@@ -52,6 +52,10 @@ local Profile = {
 		OutageActive = false,
 	},
 	InventoryState = {},
+	CraftingState = {
+		Skills = {},
+		StarterResourcesGranted = false,
+	},
 	TutorialState = {
 		IsCompleted = false,
 		Step = 0,

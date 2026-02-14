@@ -1,10 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import fg from "fast-glob";
 import Parser from "tree-sitter";
 import Luau from "tree-sitter-luau";
 
-const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const docsRoot = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(docsRoot, "..");
 const srcRoot = path.join(repoRoot, "src");
@@ -458,4 +459,4 @@ async function buildDocumentation() {
 }
 
 await buildDocumentation();
-console.log("Generated docs in docs/content/generated");
+console.log(`Generated docs in ${path.relative(repoRoot, outputRoot).replaceAll(path.sep, "/")}`);

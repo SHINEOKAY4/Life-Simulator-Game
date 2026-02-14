@@ -1,0 +1,177 @@
+--!strict
+
+export type CraftingItemDefinition = {
+	defId: string,
+	itemType: "Equipment" | "Consumable",
+	maxStack: number,
+	canDelete: boolean,
+	metadata: { [string]: any }?,
+}
+
+local CraftingItems = {}
+
+CraftingItems.Definitions = {
+	WoodLog = {
+		defId = "WoodLog",
+		itemType = "Consumable",
+		maxStack = 200,
+		canDelete = true,
+		metadata = { Name = "Wood Log", Category = "Material" },
+	},
+	StoneChunk = {
+		defId = "StoneChunk",
+		itemType = "Consumable",
+		maxStack = 200,
+		canDelete = true,
+		metadata = { Name = "Stone Chunk", Category = "Material" },
+	},
+	Fiber = {
+		defId = "Fiber",
+		itemType = "Consumable",
+		maxStack = 200,
+		canDelete = true,
+		metadata = { Name = "Fiber", Category = "Material" },
+	},
+	IronOre = {
+		defId = "IronOre",
+		itemType = "Consumable",
+		maxStack = 200,
+		canDelete = true,
+		metadata = { Name = "Iron Ore", Category = "Material" },
+	},
+	IronIngot = {
+		defId = "IronIngot",
+		itemType = "Consumable",
+		maxStack = 100,
+		canDelete = true,
+		metadata = { Name = "Iron Ingot", Category = "Refined" },
+	},
+	Coal = {
+		defId = "Coal",
+		itemType = "Consumable",
+		maxStack = 200,
+		canDelete = true,
+		metadata = { Name = "Coal", Category = "Material" },
+	},
+	Water = {
+		defId = "Water",
+		itemType = "Consumable",
+		maxStack = 100,
+		canDelete = true,
+		metadata = { Name = "Water", Category = "Ingredient" },
+	},
+	RawMeat = {
+		defId = "RawMeat",
+		itemType = "Consumable",
+		maxStack = 100,
+		canDelete = true,
+		metadata = { Name = "Raw Meat", Category = "Ingredient" },
+	},
+	Wheat = {
+		defId = "Wheat",
+		itemType = "Consumable",
+		maxStack = 200,
+		canDelete = true,
+		metadata = { Name = "Wheat", Category = "Ingredient" },
+	},
+	Herb = {
+		defId = "Herb",
+		itemType = "Consumable",
+		maxStack = 200,
+		canDelete = true,
+		metadata = { Name = "Herb", Category = "Ingredient" },
+	},
+	Plank = {
+		defId = "Plank",
+		itemType = "Consumable",
+		maxStack = 200,
+		canDelete = true,
+		metadata = { Name = "Plank", Category = "Refined" },
+	},
+	Nails = {
+		defId = "Nails",
+		itemType = "Consumable",
+		maxStack = 400,
+		canDelete = true,
+		metadata = { Name = "Nails", Category = "Refined" },
+	},
+	Cloth = {
+		defId = "Cloth",
+		itemType = "Consumable",
+		maxStack = 120,
+		canDelete = true,
+		metadata = { Name = "Cloth", Category = "Refined" },
+	},
+	StoneAxe = {
+		defId = "StoneAxe",
+		itemType = "Equipment",
+		maxStack = 1,
+		canDelete = true,
+		metadata = { Name = "Stone Axe", Category = "Tool" },
+	},
+	WoodenSpear = {
+		defId = "WoodenSpear",
+		itemType = "Equipment",
+		maxStack = 1,
+		canDelete = true,
+		metadata = { Name = "Wooden Spear", Category = "Weapon" },
+	},
+	IronSword = {
+		defId = "IronSword",
+		itemType = "Equipment",
+		maxStack = 1,
+		canDelete = true,
+		metadata = { Name = "Iron Sword", Category = "Weapon" },
+	},
+	FishingRod = {
+		defId = "FishingRod",
+		itemType = "Equipment",
+		maxStack = 1,
+		canDelete = true,
+		metadata = { Name = "Fishing Rod", Category = "Tool" },
+	},
+	Torch = {
+		defId = "Torch",
+		itemType = "Consumable",
+		maxStack = 25,
+		canDelete = true,
+		metadata = { Name = "Torch", Category = "Utility" },
+	},
+	BreadLoaf = {
+		defId = "BreadLoaf",
+		itemType = "Consumable",
+		maxStack = 30,
+		canDelete = true,
+		metadata = { Name = "Bread Loaf", Category = "Food" },
+	},
+	CookedStew = {
+		defId = "CookedStew",
+		itemType = "Consumable",
+		maxStack = 20,
+		canDelete = true,
+		metadata = { Name = "Cooked Stew", Category = "Food" },
+	},
+	HealthPoultice = {
+		defId = "HealthPoultice",
+		itemType = "Consumable",
+		maxStack = 30,
+		canDelete = true,
+		metadata = { Name = "Health Poultice", Category = "Medicine" },
+	},
+	WoodenChair = {
+		defId = "WoodenChair",
+		itemType = "Consumable",
+		maxStack = 20,
+		canDelete = true,
+		metadata = { Name = "Wooden Chair", Category = "Furniture" },
+	},
+	WoodenTable = {
+		defId = "WoodenTable",
+		itemType = "Consumable",
+		maxStack = 20,
+		canDelete = true,
+		metadata = { Name = "Wooden Table", Category = "Furniture" },
+	},
+} :: { [string]: CraftingItemDefinition }
+
+return CraftingItems
