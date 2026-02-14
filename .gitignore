@@ -4,3 +4,9 @@
 # Roblox Studio lock files
 /*.rbxlx.lock
 /*.rbxl.lock
+
+# Docs tooling outputs
+/docs/node_modules/
+/docs/.docusaurus/
+/docs/build/
+/docs/content/generated/

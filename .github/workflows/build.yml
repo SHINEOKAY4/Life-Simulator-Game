@@ -1,0 +1,71 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Lua and Luarocks
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4 luarocks
+      - name: Install busted
+        run: luarocks --lua-version=5.4 install busted
+      - name: Run test suite
+        run: ./run_tests.sh
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Aftman
+        uses: LPGhatguy/aftman@v0.3.0
+      - name: Build with Rojo
+        run: rojo build default.project.json -o Life-Simulator.rbxl
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Life-Simulator
+          path: Life-Simulator.rbxl
+
+  docs:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - name: Install docs dependencies
+        run: npm ci --prefix docs
+      - name: Build docs
+        run: npm run build --prefix docs
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/build
+
+  deploy-docs:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: docs
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

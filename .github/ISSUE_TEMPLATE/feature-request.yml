@@ -1,0 +1,42 @@
+name: Feature Request
+description: Suggest a new feature or enhancement
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest a feature!
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solution
+      description: Describe the solution you'd like
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions you've considered
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation
+      description: How might this be implemented?
+      placeholder: |
+        - Server: Add `XService`
+        - Client: Create `XController`
+        - Network: Define `XPackets`
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other information
