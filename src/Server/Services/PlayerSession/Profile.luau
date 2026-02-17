@@ -64,6 +64,11 @@ local Profile = {
 	ReviewState = {
 		Reviews = {},
 	},
+	ReputationState = {
+		ReputationScore = 50,
+		HighestTierUnlocked = 2,
+		LifetimeRewards = 0,
+	},
 	AchievementState = {
 		Version = 1,
 		Stats = {},

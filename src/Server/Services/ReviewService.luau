@@ -13,6 +13,7 @@ local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local PlotService = require(ServerScriptService.Server.Services.PlotService)
 local ChoreService = require(ServerScriptService.Server.Services.ChoreService)
 local WeatherService = require(ServerScriptService.Server.Services.WeatherService)
+local ReputationService = require(ServerScriptService.Server.Services.ReputationService)
 
 local ReviewService = {}
 
@@ -137,6 +138,8 @@ function ReviewService.RecordTenantReview(player: Player, lease: { [string]: any
 			Review = review,
 		})
 	end
+
+	ReputationService.ProcessReviewOutcome(player, review.Rating, reason)
 end
 
 function ReviewService.GetReviews(player: Player)
