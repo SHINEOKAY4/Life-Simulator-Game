@@ -937,6 +937,31 @@ describe("SeasonalEventService", function()
 			assert.equals("4", result.Details[1].Id)
 		end)
 
+		it("distributes multiple pending milestone rewards in one batch", function()
+			local seasons = { "Spring", "Summer", "Autumn", "Winter" }
+			for i = 1, 9 do
+				currentTime = currentTime + (i * 1000)
+				local idx = ((i - 1) % 4) + 1
+				SeasonalEventService.TransitionSeason("player1", seasons[idx])
+			end
+
+			local result, err = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(err)
+			assert.equals(0, result.ChallengesDistributed)
+			assert.equals(2, result.MilestonesDistributed)
+			assert.equals(1500, result.TotalCashDistributed) -- 500 + 1000
+			assert.equals(370, result.TotalExperienceDistributed) -- 120 + 250
+			assert.equals(2, #result.Details)
+
+			local seen = {}
+			for _, detail in ipairs(result.Details) do
+				assert.equals("milestone", detail.Type)
+				seen[detail.Id] = true
+			end
+			assert.is_true(seen["4"])
+			assert.is_true(seen["8"])
+		end)
+
 		it("distributes both challenge and milestone rewards", function()
 			local seasons = { "Spring", "Summer", "Autumn", "Winter" }
 			for i = 1, 5 do
