@@ -13,8 +13,11 @@ end
 
 local IS_ROBLOX = hasRobloxRuntime()
 local Players = nil
+local SeasonalEventPackets = nil
 if IS_ROBLOX then
 	Players = game:GetService("Players")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	SeasonalEventPackets = require(ReplicatedStorage.Network.SeasonalEventPackets)
 end
 
 -- ============ Inline definitions for test mode ============
@@ -179,6 +182,50 @@ local trackedTestPlayersByKey = {}
 local notificationSink = nil
 local weatherServiceRef = nil
 local weatherInitToken = 0
+
+local function pushSeasonTransition(player, result)
+	if not IS_ROBLOX or not SeasonalEventPackets then
+		return
+	end
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+	if type(result) ~= "table" then
+		return
+	end
+
+	SeasonalEventPackets.SeasonTransitioned:FireClient(player, {
+		PreviousSeason = tostring(result.PreviousSeason or ""),
+		NewSeason = tostring(result.NewSeason or ""),
+		SeasonName = tostring(result.SeasonName or ""),
+		SeasonsCompleted = math.max(0, math.floor(tonumber(result.SeasonsCompleted) or 0)),
+		WasTransition = result.WasTransition == true,
+	})
+end
+
+local function pushChallengeCompleted(player, challenge)
+	if not IS_ROBLOX or not SeasonalEventPackets then
+		return
+	end
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+	if type(challenge) ~= "table" then
+		return
+	end
+
+	SeasonalEventPackets.ChallengeCompleted:FireClient(player, {
+		Id = tostring(challenge.Id or ""),
+		Name = tostring(challenge.Name or ""),
+		Description = tostring(challenge.Description or ""),
+		StatKey = tostring(challenge.StatKey or ""),
+		CurrentValue = math.max(0, math.floor(tonumber(challenge.CurrentValue) or 0)),
+		TargetValue = math.max(0, math.floor(tonumber(challenge.TargetValue) or 0)),
+		Completed = challenge.Completed == true,
+		RewardCash = math.max(0, math.floor(tonumber(challenge.RewardCash) or 0)),
+		RewardExperience = math.max(0, math.floor(tonumber(challenge.RewardExperience) or 0)),
+	})
+end
 
 local function ensureStateShape(state)
 	if type(state.CurrentSeason) ~= "string" then
@@ -360,6 +407,8 @@ function SeasonalEventService.TransitionSeason(player, seasonId)
 		})
 	end
 
+	pushSeasonTransition(player, result)
+
 	return result, nil
 end
 
@@ -424,6 +473,18 @@ function SeasonalEventService.RecordProgress(player, statKey, amount)
 					Source = "SeasonalEventService",
 					ChallengeId = challenge.Id,
 					Season = state.CurrentSeason,
+				})
+
+				pushChallengeCompleted(player, {
+					Id = challenge.Id,
+					Name = challenge.Name,
+					Description = challenge.Description,
+					StatKey = challenge.StatKey,
+					CurrentValue = math.min(progress, challenge.TargetValue),
+					TargetValue = challenge.TargetValue,
+					Completed = true,
+					RewardCash = challenge.RewardCash,
+					RewardExperience = challenge.RewardExperience,
 				})
 			end
 		end
@@ -665,6 +726,12 @@ end
 -- ============ Init (Roblox/Test wiring) ============
 
 function SeasonalEventService.Init(weatherService)
+	if IS_ROBLOX and SeasonalEventPackets then
+		SeasonalEventPackets.GetSeasonStatus.OnServerInvoke = function(player)
+			return SeasonalEventService.GetStatus(player)
+		end
+	end
+
 	weatherInitToken = weatherInitToken + 1
 	local initToken = weatherInitToken
 
