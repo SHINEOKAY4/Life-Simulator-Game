@@ -38,6 +38,7 @@ local SeasonStatusSchema = {
 	TotalCashDistributed = Packet.NumberU32,
 	TotalExperienceDistributed = Packet.NumberU32,
 	SeasonStartTime = Packet.NumberU32,
+	ClaimedMilestonesCount = Packet.NumberU16,
 }
 
 local TransitionSchema = {

@@ -567,6 +567,11 @@ function SeasonalEventService.GetStatus(player)
 		})
 	end
 
+	local claimedMilestonesCount = 0
+	for _ in pairs(state.ClaimedMilestones) do
+		claimedMilestonesCount = claimedMilestonesCount + 1
+	end
+
 	return {
 		CurrentSeason = state.CurrentSeason,
 		SeasonName = seasonDef.Name,
@@ -580,6 +585,7 @@ function SeasonalEventService.GetStatus(player)
 		TotalCashDistributed = state.TotalCashDistributed,
 		TotalExperienceDistributed = state.TotalExperienceDistributed,
 		SeasonStartTime = state.SeasonStartTime,
+		ClaimedMilestonesCount = claimedMilestonesCount,
 	}
 end
 

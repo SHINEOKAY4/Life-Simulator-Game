@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local SeasonalEventPackets = require(ReplicatedStorage.Network.SeasonalEventPackets)
+local SeasonalEventDefinitions = require(ReplicatedStorage.Shared.Definitions.SeasonalEventDefinitions)
 local Notification = require(script.Parent.Notification)
 
 local SeasonalEventUI = {}
@@ -142,10 +143,14 @@ local function renderStatus(status: { [string]: any })
 	local seasonId = tostring(status.CurrentSeason or "Spring")
 	seasonTitleLabel.Text = seasonName
 	seasonDescriptionLabel.Text = tostring(status.SeasonDescription or "")
+	local claimedMilestones = math.max(0, math.floor(tonumber(status.ClaimedMilestonesCount) or 0))
+	local totalMilestones = #SeasonalEventDefinitions.Milestones
 	seasonProgressLabel.Text = string.format(
-		"Seasons Completed: %d | Challenges Completed: %d",
+		"Seasons Completed: %d | Challenges Completed: %d | Milestones Claimed: %d / %d",
 		math.max(0, math.floor(tonumber(status.SeasonsCompleted) or 0)),
-		math.max(0, math.floor(tonumber(status.TotalChallengesCompleted) or 0))
+		math.max(0, math.floor(tonumber(status.TotalChallengesCompleted) or 0)),
+		claimedMilestones,
+		totalMilestones
 	)
 	applySeasonColor(seasonId)
 
