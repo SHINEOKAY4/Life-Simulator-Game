@@ -1144,6 +1144,35 @@ describe("SeasonalEventService", function()
 			assert.equals(1, #pending.Challenges)
 			assert.equals("spring_builder", pending.Challenges[1].Id)
 		end)
+
+		it("single ClaimMilestoneReward does not leave partial state on failure", function()
+			SeasonalEventService._SetRewardExecutor(function()
+				return false, "MilestoneExecFail"
+			end)
+
+			-- Complete 4 seasons to earn the "First Year" milestone (SeasonsCompleted = 4)
+			local seasons = { "Spring", "Summer", "Autumn", "Winter" }
+			for i = 1, 5 do
+				currentTime = currentTime + (i * 1000)
+				local idx = ((i - 1) % 4) + 1
+				SeasonalEventService.TransitionSeason("player1", seasons[idx])
+			end
+
+			-- Milestone is pending; attempt to claim it with a failing executor
+			local result, err = SeasonalEventService.ClaimMilestoneReward("player1", 4)
+			assert.is_nil(result)
+			assert.equals("DistributionFailed", err)
+
+			-- Verify no partial state: milestone still appears as pending
+			local pending = SeasonalEventService.GetPendingRewards("player1")
+			assert.equals(1, #pending.Milestones)
+			assert.equals(4, pending.Milestones[1].SeasonsRequired)
+
+			-- Verify totals are unchanged
+			local status = SeasonalEventService.GetStatus("player1")
+			assert.equals(0, status.TotalCashDistributed)
+			assert.equals(0, status.TotalExperienceDistributed)
+		end)
 	end)
 
 	-- ========== GetPendingRewards ==========
