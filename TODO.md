@@ -1,6 +1,6 @@
 # TODO - Life-Simulator-Game
 
-Last updated: 2026-02-14
+Last updated: 2026-02-18
 
 ## Completed Infrastructure
 
@@ -28,6 +28,13 @@ Last updated: 2026-02-14
 
 ## Completed Features
 
+- [x] Seasonal Event System (Iteration 1)
+  - `src/Shared/Definitions/SeasonalEventDefinitions.luau` -- 4 seasons with challenges, buffs, milestones
+  - `src/Server/Services/SeasonalEventService.luau` -- season transitions, challenge tracking, buff multipliers
+  - `src/Network/SeasonalEventPackets.luau` -- client-server packets
+  - `Tests/Specs/SeasonalEventSpec.lua` -- 54 behavioral tests
+  - `Profile.luau` updated with `SeasonalEventState`
+  - Integrates with WeatherConfig season cycle and notification system
 - [x] Daily Reward System (Iteration 1)
   - `src/Shared/Definitions/DailyRewardDefinitions.luau` -- 7-day reward cycle with milestones
   - `src/Server/Services/DailyRewardService.luau` -- streak tracking, cooldown, claim logic
@@ -38,6 +45,11 @@ Last updated: 2026-02-14
 
 ## Next Work (Product/Code Depth)
 
+- [ ] Seasonal Event System follow-ups
+  - [ ] Wire SeasonalEventService into WeatherService for automatic season transitions
+  - [ ] Build client-side SeasonalEventUI (season banner, challenge tracker, buff display)
+  - [ ] Add seasonal achievements to AchievementDefinitions
+  - [ ] Integrate seasonal buffs into ProgressionService (XP multiplier) and BillingService (cash multiplier)
 - [ ] Daily Reward System follow-ups
   - [ ] Build client-side DailyRewardUI (claim button, streak calendar, countdown timer)
   - [ ] Wire DailyRewardService into ProgressionService for XP grants

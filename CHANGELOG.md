@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Seasonal Event System with per-season challenges, buffs, milestones, and notification integration:
+  - `SeasonalEventService` with season transitions, challenge tracking, buff multipliers, and milestone rewards
+  - `SeasonalEventDefinitions` with 4 seasons (Spring/Summer/Autumn/Winter), 8 challenges, and 3 milestone tiers
+  - `SeasonalEventPackets` for client-server communication
+  - `SeasonalEventSpec` with 54 behavioral tests covering transitions, challenges, buffs, milestones, notifications, multi-player isolation, and edge cases
+  - `SeasonalEventState` added to player Profile schema
 - Daily Reward System with streak tracking, 7-day escalating reward cycle, and milestone bonuses:
   - `DailyRewardService` with 20-hour cooldown, 48-hour grace period, and notification integration
   - `DailyRewardDefinitions` with 7-day reward cycle and 3 milestone tiers (7, 14, 30 days)

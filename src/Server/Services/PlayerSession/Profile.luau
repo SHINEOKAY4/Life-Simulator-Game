@@ -84,6 +84,17 @@ local Profile = {
 		TotalExperienceEarned = 0,
 		MilestonesClaimed = {},
 	},
+	SeasonalEventState = {
+		CurrentSeason = "Spring",
+		SeasonStartTime = 0,
+		SeasonsCompleted = 0,
+		ChallengeProgress = {},
+		CompletedChallenges = {},
+		ClaimedMilestones = {},
+		TotalChallengesCompleted = 0,
+		TotalSeasonalCashEarned = 0,
+		TotalSeasonalExperienceEarned = 0,
+	},
 }
 
 return Profile
