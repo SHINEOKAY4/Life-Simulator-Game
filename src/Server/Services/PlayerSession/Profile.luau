@@ -75,6 +75,15 @@ local Profile = {
 		Unlocked = {},
 		Claimed = {},
 	},
+	DailyRewardState = {
+		CurrentStreak = 0,
+		LongestStreak = 0,
+		LastClaimTime = 0,
+		TotalClaimed = 0,
+		TotalCashEarned = 0,
+		TotalExperienceEarned = 0,
+		MilestonesClaimed = {},
+	},
 }
 
 return Profile

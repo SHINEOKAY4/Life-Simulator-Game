@@ -26,10 +26,26 @@ Last updated: 2026-02-14
 - [x] `busted Tests/Specs/*.lua` passes
 - [x] `npm run build --prefix docs` passes
 
+## Completed Features
+
+- [x] Daily Reward System (Iteration 1)
+  - `src/Shared/Definitions/DailyRewardDefinitions.luau` -- 7-day reward cycle with milestones
+  - `src/Server/Services/DailyRewardService.luau` -- streak tracking, cooldown, claim logic
+  - `src/Network/DailyRewardPackets.luau` -- client-server packets
+  - `Tests/Specs/DailyRewardSpec.lua` -- 27 behavioral tests
+  - `Profile.luau` updated with `DailyRewardState`
+  - First real consumer of `NotificationService`
+
 ## Next Work (Product/Code Depth)
 
+- [ ] Daily Reward System follow-ups
+  - [ ] Build client-side DailyRewardUI (claim button, streak calendar, countdown timer)
+  - [ ] Wire DailyRewardService into ProgressionService for XP grants
+  - [ ] Add Daily Reward achievements to AchievementDefinitions
+  - [ ] Add daily challenge variant (rotating objectives using QuestService)
 - [ ] Replace stub-heavy tests with behavior tests against production service logic
   - Focus first on `PlotService` and `TenantService` edge cases
+- [ ] Integrate NotificationService into AchievementService, BillingService, TradeService
 - [ ] Add CI lint step for Luau source (`selene`)
 - [ ] Expand public docs with gameplay/system overviews and contributor setup guidance
 - [ ] Enable release process that updates `CHANGELOG.md` from merged PR metadata
