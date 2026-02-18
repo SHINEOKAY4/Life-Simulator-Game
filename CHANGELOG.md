@@ -34,3 +34,8 @@ All notable changes to this project are documented in this file.
 
 - `.gitignore` now excludes Docusaurus build/dependency outputs in `docs/`.
 - Docs generation script hardened to emit MDX-safe API docs.
+- Seasonal rewards documentation now includes claim flow, pending reward semantics, and batch rollback behavior (`docs/content/SeasonalEvents.md`).
+- Seasonal rewards tests expanded with additional edge cases:
+  - Milestone count normalization on claim input
+  - Milestone-only batch distribution path
+  - Pending milestone exclusion after claim

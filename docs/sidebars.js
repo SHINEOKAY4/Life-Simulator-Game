@@ -1,6 +1,7 @@
 const sidebars = {
   docsSidebar: [
     "intro",
+    "SeasonalEvents",
     {
       type: "category",
       label: "Architecture",

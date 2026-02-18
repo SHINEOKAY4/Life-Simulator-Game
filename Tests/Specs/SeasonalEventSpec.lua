@@ -835,6 +835,16 @@ describe("SeasonalEventService", function()
 			assert.equals("InvalidMilestoneCount", err)
 		end)
 
+		it("rounds milestone count to nearest integer before lookup", function()
+			completeSeasons("player1", 4)
+
+			local result, err = SeasonalEventService.ClaimMilestoneReward("player1", 3.6)
+			assert.is_nil(err)
+			assert.is_not_nil(result)
+			assert.equals(4, result.SeasonsRequired)
+			assert.equals("First Year", result.MilestoneLabel)
+		end)
+
 		it("does not distribute when executor fails", function()
 			completeSeasons("player1", 4)
 
@@ -906,6 +916,25 @@ describe("SeasonalEventService", function()
 			assert.equals(1, result.ChallengesDistributed) -- only spring_green
 			assert.equals(200, result.TotalCashDistributed)
 			assert.equals(50, result.TotalExperienceDistributed)
+		end)
+
+		it("distributes milestone-only rewards when no challenge rewards are pending", function()
+			local seasons = { "Spring", "Summer", "Autumn", "Winter" }
+			for i = 1, 5 do
+				currentTime = currentTime + (i * 1000)
+				local idx = ((i - 1) % 4) + 1
+				SeasonalEventService.TransitionSeason("player1", seasons[idx])
+			end
+
+			local result, err = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(err)
+			assert.equals(0, result.ChallengesDistributed)
+			assert.equals(1, result.MilestonesDistributed)
+			assert.equals(500, result.TotalCashDistributed)
+			assert.equals(120, result.TotalExperienceDistributed)
+			assert.equals(1, #result.Details)
+			assert.equals("milestone", result.Details[1].Type)
+			assert.equals("4", result.Details[1].Id)
 		end)
 
 		it("distributes both challenge and milestone rewards", function()
@@ -1162,6 +1191,24 @@ describe("SeasonalEventService", function()
 			assert.equals(1, #pending.Milestones)
 			assert.equals(4, pending.Milestones[1].SeasonsRequired)
 			assert.equals(500, pending.Milestones[1].BonusCash)
+		end)
+
+		it("excludes milestone rewards once they are claimed", function()
+			local seasons = { "Spring", "Summer", "Autumn", "Winter" }
+			for i = 1, 5 do
+				currentTime = currentTime + (i * 1000)
+				local idx = ((i - 1) % 4) + 1
+				SeasonalEventService.TransitionSeason("player1", seasons[idx])
+			end
+
+			local result, err = SeasonalEventService.ClaimMilestoneReward("player1", 4)
+			assert.is_nil(err)
+			assert.is_not_nil(result)
+
+			local pending = SeasonalEventService.GetPendingRewards("player1")
+			assert.equals(0, #pending.Milestones)
+			assert.equals(0, pending.TotalPendingCash)
+			assert.equals(0, pending.TotalPendingExperience)
 		end)
 
 		it("returns nil for nil player", function()

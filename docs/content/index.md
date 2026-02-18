@@ -11,3 +11,7 @@ This site is generated directly from source code under `src/` on each CI run.
 - API reference is generated from Luau module signatures, exported types, and public methods.
 
 Use the sidebar to navigate generated pages.
+
+Manual references:
+
+- [Seasonal Events Rewards](./SeasonalEvents)
