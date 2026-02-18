@@ -619,4 +619,641 @@ describe("SeasonalEventService", function()
 			assert.equals(0, #SeasonalEventService._testNotifications)
 		end)
 	end)
+
+	-- ========== ClaimChallengeReward ==========
+
+	describe("ClaimChallengeReward", function()
+		it("claims reward for a completed challenge", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			local result, err = SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+			assert.is_nil(err)
+			assert.is_not_nil(result)
+			assert.equals("spring_builder", result.ChallengeId)
+			assert.equals("Spring Construction", result.ChallengeName)
+			assert.equals(300, result.CashDistributed)
+			assert.equals(75, result.ExperienceDistributed)
+		end)
+
+		it("rejects claiming reward for incomplete challenge", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 5)
+
+			local result, err = SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+			assert.is_nil(result)
+			assert.equals("ChallengeNotCompleted", err)
+		end)
+
+		it("rejects duplicate claim for same challenge", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			local result1 = SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+			assert.is_not_nil(result1)
+
+			local result2, err = SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+			assert.is_nil(result2)
+			assert.equals("RewardAlreadyClaimed", err)
+		end)
+
+		it("rejects challenge not in current season", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+
+			local result, err = SeasonalEventService.ClaimChallengeReward("player1", "summer_landlord")
+			assert.is_nil(result)
+			assert.equals("ChallengeNotInSeason", err)
+		end)
+
+		it("rejects nil player", function()
+			local result, err = SeasonalEventService.ClaimChallengeReward(nil, "spring_builder")
+			assert.is_nil(result)
+			assert.equals("InvalidPlayer", err)
+		end)
+
+		it("rejects empty challenge ID", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			local result, err = SeasonalEventService.ClaimChallengeReward("player1", "")
+			assert.is_nil(result)
+			assert.equals("InvalidChallengeId", err)
+		end)
+
+		it("rejects non-string challenge ID", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			local result, err = SeasonalEventService.ClaimChallengeReward("player1", 42)
+			assert.is_nil(result)
+			assert.equals("InvalidChallengeId", err)
+		end)
+
+		it("tracks distributed totals after claim", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+
+			local status = SeasonalEventService.GetStatus("player1")
+			assert.equals(300, status.TotalCashDistributed)
+			assert.equals(75, status.TotalExperienceDistributed)
+		end)
+
+		it("accumulates distributed totals across multiple claims", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.RecordProgress("player1", "SeasonalChoresCompleted", 8)
+			SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+			SeasonalEventService.ClaimChallengeReward("player1", "spring_green")
+
+			local status = SeasonalEventService.GetStatus("player1")
+			assert.equals(500, status.TotalCashDistributed)  -- 300 + 200
+			assert.equals(125, status.TotalExperienceDistributed) -- 75 + 50
+		end)
+
+		it("does not distribute when executor fails", function()
+			SeasonalEventService._SetRewardExecutor(function()
+				return false, "ServiceUnavailable"
+			end)
+
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			local result, err = SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+			assert.is_nil(result)
+			assert.equals("DistributionFailed", err)
+
+			-- Verify reward was NOT marked as claimed
+			local status = SeasonalEventService.GetStatus("player1")
+			assert.equals(0, status.TotalCashDistributed)
+			assert.equals(0, status.TotalExperienceDistributed)
+
+			-- Should still be claimable after failure
+			SeasonalEventService._SetRewardExecutor(nil) -- restore default
+			local result2, err2 = SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+			assert.is_nil(err2)
+			assert.is_not_nil(result2)
+			assert.equals(300, result2.CashDistributed)
+		end)
+
+		it("sends notification on successful claim", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService._testNotifications = {}
+
+			SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+
+			local notifs = SeasonalEventService._testNotifications
+			assert.equals(1, #notifs)
+			assert.equals("Reward Claimed!", notifs[1].Title)
+			assert.truthy(string.find(notifs[1].Body, "Spring Construction"))
+			assert.truthy(string.find(notifs[1].Body, "distributed"))
+		end)
+
+		it("shows RewardClaimed in status for claimed challenges", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+
+			local status = SeasonalEventService.GetStatus("player1")
+			local found = false
+			for _, challenge in ipairs(status.Challenges) do
+				if challenge.Id == "spring_builder" then
+					assert.is_true(challenge.RewardClaimed)
+					found = true
+				end
+			end
+			assert.is_true(found)
+		end)
+
+		it("shows RewardClaimed as false for unclaimed challenges", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			local status = SeasonalEventService.GetStatus("player1")
+			for _, challenge in ipairs(status.Challenges) do
+				if challenge.Id == "spring_builder" then
+					assert.is_false(challenge.RewardClaimed)
+				end
+			end
+		end)
+	end)
+
+	-- ========== ClaimMilestoneReward ==========
+
+	describe("ClaimMilestoneReward", function()
+		local function completeSeasons(playerId, count)
+			local seasons = { "Spring", "Summer", "Autumn", "Winter" }
+			for i = 1, count + 1 do
+				currentTime = currentTime + (i * 1000)
+				local idx = ((i - 1) % 4) + 1
+				SeasonalEventService.TransitionSeason(playerId, seasons[idx])
+			end
+		end
+
+		it("claims milestone reward after reaching threshold", function()
+			completeSeasons("player1", 4)
+
+			local result, err = SeasonalEventService.ClaimMilestoneReward("player1", 4)
+			assert.is_nil(err)
+			assert.is_not_nil(result)
+			assert.equals("First Year", result.MilestoneLabel)
+			assert.equals(500, result.CashDistributed)
+			assert.equals(120, result.ExperienceDistributed)
+		end)
+
+		it("rejects milestone not yet reached", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+
+			local result, err = SeasonalEventService.ClaimMilestoneReward("player1", 4)
+			assert.is_nil(result)
+			assert.equals("MilestoneNotReached", err)
+		end)
+
+		it("rejects duplicate milestone claim", function()
+			completeSeasons("player1", 4)
+			SeasonalEventService.ClaimMilestoneReward("player1", 4)
+
+			local result, err = SeasonalEventService.ClaimMilestoneReward("player1", 4)
+			assert.is_nil(result)
+			assert.equals("RewardAlreadyClaimed", err)
+		end)
+
+		it("rejects non-existent milestone", function()
+			completeSeasons("player1", 4)
+
+			local result, err = SeasonalEventService.ClaimMilestoneReward("player1", 5)
+			assert.is_nil(result)
+			assert.equals("MilestoneNotFound", err)
+		end)
+
+		it("rejects nil player", function()
+			local result, err = SeasonalEventService.ClaimMilestoneReward(nil, 4)
+			assert.is_nil(result)
+			assert.equals("InvalidPlayer", err)
+		end)
+
+		it("rejects non-number count", function()
+			local result, err = SeasonalEventService.ClaimMilestoneReward("player1", "four")
+			assert.is_nil(result)
+			assert.equals("InvalidMilestoneCount", err)
+		end)
+
+		it("does not distribute when executor fails", function()
+			completeSeasons("player1", 4)
+
+			SeasonalEventService._SetRewardExecutor(function()
+				return false, "ServiceUnavailable"
+			end)
+
+			local result, err = SeasonalEventService.ClaimMilestoneReward("player1", 4)
+			assert.is_nil(result)
+			assert.equals("DistributionFailed", err)
+
+			-- Should still be claimable after fixing executor
+			SeasonalEventService._SetRewardExecutor(nil)
+			local result2, err2 = SeasonalEventService.ClaimMilestoneReward("player1", 4)
+			assert.is_nil(err2)
+			assert.equals(500, result2.CashDistributed)
+		end)
+
+		it("sends notification on successful milestone claim", function()
+			completeSeasons("player1", 4)
+			SeasonalEventService._testNotifications = {}
+
+			SeasonalEventService.ClaimMilestoneReward("player1", 4)
+
+			local notifs = SeasonalEventService._testNotifications
+			assert.equals(1, #notifs)
+			assert.equals("Milestone Reward!", notifs[1].Title)
+			assert.truthy(string.find(notifs[1].Body, "First Year"))
+		end)
+	end)
+
+	-- ========== DistributeSeasonRewards ==========
+
+	describe("DistributeSeasonRewards", function()
+		it("distributes all pending challenge rewards in batch", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.RecordProgress("player1", "SeasonalChoresCompleted", 8)
+
+			local result, err = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(err)
+			assert.is_not_nil(result)
+			assert.equals(2, result.ChallengesDistributed)
+			assert.equals(0, result.MilestonesDistributed)
+			assert.equals(500, result.TotalCashDistributed) -- 300 + 200
+			assert.equals(125, result.TotalExperienceDistributed) -- 75 + 50
+			assert.equals(2, #result.Details)
+		end)
+
+		it("returns empty result when no pending rewards", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+
+			local result, err = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(err)
+			assert.equals(0, result.ChallengesDistributed)
+			assert.equals(0, result.MilestonesDistributed)
+			assert.equals(0, result.TotalCashDistributed)
+		end)
+
+		it("does not re-distribute already claimed rewards", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+			SeasonalEventService.RecordProgress("player1", "SeasonalChoresCompleted", 8)
+
+			local result, err = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(err)
+			assert.equals(1, result.ChallengesDistributed) -- only spring_green
+			assert.equals(200, result.TotalCashDistributed)
+			assert.equals(50, result.TotalExperienceDistributed)
+		end)
+
+		it("distributes both challenge and milestone rewards", function()
+			local seasons = { "Spring", "Summer", "Autumn", "Winter" }
+			for i = 1, 5 do
+				currentTime = currentTime + (i * 1000)
+				local idx = ((i - 1) % 4) + 1
+				SeasonalEventService.TransitionSeason("player1", seasons[idx])
+			end
+			-- player1 now has 4 SeasonsCompleted and is in Spring
+			-- Milestone "First Year" (4) should be pending
+			-- Complete both Spring challenges
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.RecordProgress("player1", "SeasonalChoresCompleted", 8)
+
+			local result, err = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(err)
+			assert.equals(2, result.ChallengesDistributed)
+			assert.equals(1, result.MilestonesDistributed)
+			-- 300 + 200 (challenges) + 500 (milestone) = 1000
+			assert.equals(1000, result.TotalCashDistributed)
+			-- 75 + 50 (challenges) + 120 (milestone) = 245
+			assert.equals(245, result.TotalExperienceDistributed)
+		end)
+
+		it("rejects nil player", function()
+			local result, err = SeasonalEventService.DistributeSeasonRewards(nil)
+			assert.is_nil(result)
+			assert.equals("InvalidPlayer", err)
+		end)
+
+		it("sends summary notification on successful batch distribution", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService._testNotifications = {}
+
+			SeasonalEventService.DistributeSeasonRewards("player1")
+
+			local notifs = SeasonalEventService._testNotifications
+			assert.equals(1, #notifs)
+			assert.equals("Rewards Distributed!", notifs[1].Title)
+			assert.truthy(string.find(notifs[1].Body, "1 reward"))
+		end)
+
+		it("includes detail entries for each distributed reward", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.RecordProgress("player1", "SeasonalChoresCompleted", 8)
+
+			local result = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.equals(2, #result.Details)
+
+			local ids = {}
+			for _, d in ipairs(result.Details) do
+				ids[d.Id] = true
+				assert.equals("challenge", d.Type)
+				assert.is_true(d.CashDistributed > 0)
+				assert.is_true(d.ExperienceDistributed > 0)
+			end
+			assert.is_true(ids["spring_builder"])
+			assert.is_true(ids["spring_green"])
+		end)
+	end)
+
+	-- ========== Rollback on Failure ==========
+
+	describe("Rollback on failure", function()
+		it("rolls back all rewards when second challenge distribution fails", function()
+			local callCount = 0
+			SeasonalEventService._SetRewardExecutor(function(playerId, cash, xp, source)
+				callCount = callCount + 1
+				-- Fail on the second reward distribution (not rollback calls)
+				if callCount == 2 and cash > 0 then
+					return false, "ServiceUnavailable"
+				end
+				return true, nil
+			end)
+
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.RecordProgress("player1", "SeasonalChoresCompleted", 8)
+
+			local result, err = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(result)
+			assert.equals("DistributionFailed", err)
+
+			-- Verify state was rolled back - no rewards should be claimed
+			local status = SeasonalEventService.GetStatus("player1")
+			assert.equals(0, status.TotalCashDistributed)
+			assert.equals(0, status.TotalExperienceDistributed)
+
+			-- Both challenges should still show as unclaimed
+			for _, challenge in ipairs(status.Challenges) do
+				assert.is_false(challenge.RewardClaimed)
+			end
+		end)
+
+		it("rewards remain claimable after rollback", function()
+			local shouldFail = true
+			SeasonalEventService._SetRewardExecutor(function(playerId, cash, xp, source)
+				if shouldFail and cash > 0 then
+					return false, "ServiceUnavailable"
+				end
+				return true, nil
+			end)
+
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			local result1, err1 = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(result1)
+			assert.equals("DistributionFailed", err1)
+
+			-- Fix the executor and retry
+			shouldFail = false
+			local result2, err2 = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(err2)
+			assert.is_not_nil(result2)
+			assert.equals(1, result2.ChallengesDistributed)
+			assert.equals(300, result2.TotalCashDistributed)
+		end)
+
+		it("rollback reverses all granted rewards in reverse order", function()
+			local executorLog = {}
+			local callCount = 0
+			SeasonalEventService._SetRewardExecutor(function(playerId, cash, xp, source)
+				callCount = callCount + 1
+				table.insert(executorLog, {
+					playerId = playerId,
+					cash = cash,
+					xp = xp,
+					source = source,
+				})
+				-- Fail on the second forward distribution
+				if callCount == 2 and cash > 0 then
+					return false, "Unavailable"
+				end
+				return true, nil
+			end)
+
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.RecordProgress("player1", "SeasonalChoresCompleted", 8)
+
+			SeasonalEventService.DistributeSeasonRewards("player1")
+
+			-- Verify rollback was called with negative amounts
+			local foundRollback = false
+			for _, entry in ipairs(executorLog) do
+				if entry.cash < 0 then
+					foundRollback = true
+					-- Rollback of first challenge (spring_builder = 300 cash, 75 xp)
+					assert.equals(-300, entry.cash)
+					assert.equals(-75, entry.xp)
+					assert.truthy(string.find(entry.source, "Rollback:"))
+				end
+			end
+			assert.is_true(foundRollback)
+		end)
+
+		it("rollback handles milestone failure after challenge success", function()
+			local seasons = { "Spring", "Summer", "Autumn", "Winter" }
+			for i = 1, 5 do
+				currentTime = currentTime + (i * 1000)
+				local idx = ((i - 1) % 4) + 1
+				SeasonalEventService.TransitionSeason("player1", seasons[idx])
+			end
+			-- 4 seasons completed, milestone pending
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			local forwardCount = 0
+			SeasonalEventService._SetRewardExecutor(function(playerId, cash, xp, source)
+				if cash > 0 then
+					forwardCount = forwardCount + 1
+				end
+				-- Let challenge reward succeed, fail on milestone
+				if forwardCount == 2 and cash > 0 then
+					return false, "MilestoneDistFailed"
+				end
+				return true, nil
+			end)
+
+			local result, err = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(result)
+			assert.equals("DistributionFailed", err)
+
+			-- Verify full rollback: challenge reward should also be rolled back
+			local status = SeasonalEventService.GetStatus("player1")
+			assert.equals(0, status.TotalCashDistributed)
+			assert.equals(0, status.TotalExperienceDistributed)
+		end)
+
+		it("single ClaimChallengeReward does not leave partial state on failure", function()
+			SeasonalEventService._SetRewardExecutor(function()
+				return false, "Fail"
+			end)
+
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			local result, err = SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+			assert.is_nil(result)
+			assert.equals("DistributionFailed", err)
+
+			-- Verify no partial state
+			local pending = SeasonalEventService.GetPendingRewards("player1")
+			assert.equals(1, #pending.Challenges)
+			assert.equals("spring_builder", pending.Challenges[1].Id)
+		end)
+	end)
+
+	-- ========== GetPendingRewards ==========
+
+	describe("GetPendingRewards", function()
+		it("returns pending challenge rewards", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			local pending = SeasonalEventService.GetPendingRewards("player1")
+			assert.is_not_nil(pending)
+			assert.equals(1, #pending.Challenges)
+			assert.equals("spring_builder", pending.Challenges[1].Id)
+			assert.equals(300, pending.TotalPendingCash)
+			assert.equals(75, pending.TotalPendingExperience)
+		end)
+
+		it("returns empty when all rewards claimed", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+
+			local pending = SeasonalEventService.GetPendingRewards("player1")
+			assert.equals(0, #pending.Challenges)
+			assert.equals(0, pending.TotalPendingCash)
+		end)
+
+		it("returns empty when no challenges completed", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+
+			local pending = SeasonalEventService.GetPendingRewards("player1")
+			assert.equals(0, #pending.Challenges)
+			assert.equals(0, #pending.Milestones)
+		end)
+
+		it("returns pending milestone rewards", function()
+			local seasons = { "Spring", "Summer", "Autumn", "Winter" }
+			for i = 1, 5 do
+				currentTime = currentTime + (i * 1000)
+				local idx = ((i - 1) % 4) + 1
+				SeasonalEventService.TransitionSeason("player1", seasons[idx])
+			end
+
+			local pending = SeasonalEventService.GetPendingRewards("player1")
+			assert.equals(1, #pending.Milestones)
+			assert.equals(4, pending.Milestones[1].SeasonsRequired)
+			assert.equals(500, pending.Milestones[1].BonusCash)
+		end)
+
+		it("returns nil for nil player", function()
+			local pending = SeasonalEventService.GetPendingRewards(nil)
+			assert.is_nil(pending)
+		end)
+
+		it("combines challenge and milestone pending totals", function()
+			local seasons = { "Spring", "Summer", "Autumn", "Winter" }
+			for i = 1, 5 do
+				currentTime = currentTime + (i * 1000)
+				local idx = ((i - 1) % 4) + 1
+				SeasonalEventService.TransitionSeason("player1", seasons[idx])
+			end
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			local pending = SeasonalEventService.GetPendingRewards("player1")
+			-- spring_builder (300 cash) + First Year milestone (500 cash)
+			assert.equals(800, pending.TotalPendingCash)
+			-- spring_builder (75 xp) + First Year milestone (120 xp)
+			assert.equals(195, pending.TotalPendingExperience)
+		end)
+	end)
+
+	-- ========== Multi-player reward isolation ==========
+
+	describe("Multi-player reward isolation", function()
+		it("distributes rewards independently per player", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.TransitionSeason("player2", "Spring")
+
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.RecordProgress("player2", "SeasonalBuildPlacements", 20)
+
+			SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+
+			-- player1 claimed, player2 has not
+			local pending1 = SeasonalEventService.GetPendingRewards("player1")
+			local pending2 = SeasonalEventService.GetPendingRewards("player2")
+
+			assert.equals(0, #pending1.Challenges)
+			assert.equals(1, #pending2.Challenges)
+		end)
+	end)
+
+	-- ========== _SetRewardExecutor ==========
+
+	describe("_SetRewardExecutor", function()
+		it("accepts a custom executor function", function()
+			local called = false
+			SeasonalEventService._SetRewardExecutor(function(playerId, cash, xp, source)
+				called = true
+				assert.equals("player1", playerId)
+				assert.equals(300, cash)
+				assert.equals(75, xp)
+				assert.truthy(string.find(source, "SeasonalChallenge"))
+				return true, nil
+			end)
+
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+
+			assert.is_true(called)
+		end)
+
+		it("resets to default executor when called with nil", function()
+			SeasonalEventService._SetRewardExecutor(function()
+				return false, "Always fails"
+			end)
+			SeasonalEventService._SetRewardExecutor(nil)
+
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			local result, err = SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+			assert.is_not_nil(result) -- default executor succeeds
+		end)
+
+		it("is cleared by _ResetForTests", function()
+			SeasonalEventService._SetRewardExecutor(function()
+				return false, "Always fails"
+			end)
+
+			SeasonalEventService._ResetForTests()
+			SeasonalEventService._SetClock(function() return currentTime end)
+
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			local result, err = SeasonalEventService.ClaimChallengeReward("player1", "spring_builder")
+			assert.is_not_nil(result) -- default executor succeeds
+		end)
+	end)
 end)

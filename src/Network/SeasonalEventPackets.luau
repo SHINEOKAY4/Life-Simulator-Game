@@ -35,6 +35,8 @@ local SeasonStatusSchema = {
 	TotalChallengesCompleted = Packet.NumberU16,
 	TotalSeasonalCashEarned = Packet.NumberU32,
 	TotalSeasonalExperienceEarned = Packet.NumberU32,
+	TotalCashDistributed = Packet.NumberU32,
+	TotalExperienceDistributed = Packet.NumberU32,
 	SeasonStartTime = Packet.NumberU32,
 }
 
@@ -46,8 +48,19 @@ local TransitionSchema = {
 	WasTransition = Packet.Boolean8,
 }
 
+local RewardClaimResultSchema = {
+	Success = Packet.Boolean8,
+	CashDistributed = Packet.NumberU32,
+	ExperienceDistributed = Packet.NumberU32,
+	RewardName = Packet.String,
+	ErrorMessage = Packet.String,
+}
+
 SeasonalEventPackets.GetSeasonStatus = Packet("GetSeasonStatus"):Response(SeasonStatusSchema)
 SeasonalEventPackets.SeasonTransitioned = Packet("SeasonTransitioned", TransitionSchema)
 SeasonalEventPackets.ChallengeCompleted = Packet("ChallengeCompleted", ChallengeStatusSchema)
+SeasonalEventPackets.ClaimChallengeReward = Packet("ClaimChallengeReward"):Response(RewardClaimResultSchema)
+SeasonalEventPackets.ClaimMilestoneReward = Packet("ClaimMilestoneReward"):Response(RewardClaimResultSchema)
+SeasonalEventPackets.DistributeAllRewards = Packet("DistributeAllRewards"):Response(RewardClaimResultSchema)
 
 return SeasonalEventPackets

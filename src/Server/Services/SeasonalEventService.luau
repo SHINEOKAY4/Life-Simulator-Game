@@ -227,6 +227,20 @@ local function pushChallengeCompleted(player, challenge)
 	})
 end
 
+-- Injectable reward executor (swapped in tests to simulate failures)
+local rewardExecutor = nil
+
+local function defaultRewardExecutor(playerId, cashAmount, xpAmount, source)
+	-- In Roblox this would call CurrencyService.Add / ProgressionService.AwardExperience.
+	-- Returns true on success, false + error on failure.
+	return true, nil
+end
+
+local function executeReward(playerId, cashAmount, xpAmount, source)
+	local executor = rewardExecutor or defaultRewardExecutor
+	return executor(playerId, cashAmount, xpAmount, source)
+end
+
 local function ensureStateShape(state)
 	if type(state.CurrentSeason) ~= "string" then
 		state.CurrentSeason = "Spring"
@@ -250,6 +264,12 @@ local function ensureStateShape(state)
 	if type(state.ClaimedMilestones) ~= "table" then
 		state.ClaimedMilestones = {}
 	end
+	if type(state.ClaimedChallengeRewards) ~= "table" then
+		state.ClaimedChallengeRewards = {}
+	end
+	if type(state.ClaimedMilestoneRewards) ~= "table" then
+		state.ClaimedMilestoneRewards = {}
+	end
 	if type(state.TotalChallengesCompleted) ~= "number" then
 		state.TotalChallengesCompleted = 0
 	end
@@ -264,6 +284,16 @@ local function ensureStateShape(state)
 		state.TotalSeasonalExperienceEarned = 0
 	end
 	state.TotalSeasonalExperienceEarned = math.max(math.floor(state.TotalSeasonalExperienceEarned + 0.5), 0)
+
+	if type(state.TotalCashDistributed) ~= "number" then
+		state.TotalCashDistributed = 0
+	end
+	state.TotalCashDistributed = math.max(math.floor(state.TotalCashDistributed + 0.5), 0)
+
+	if type(state.TotalExperienceDistributed) ~= "number" then
+		state.TotalExperienceDistributed = 0
+	end
+	state.TotalExperienceDistributed = math.max(math.floor(state.TotalExperienceDistributed + 0.5), 0)
 end
 
 local function ensureTestState(playerId)
@@ -277,9 +307,13 @@ local function ensureTestState(playerId)
 			ChallengeProgress = {},
 			CompletedChallenges = {},
 			ClaimedMilestones = {},
+			ClaimedChallengeRewards = {},
+			ClaimedMilestoneRewards = {},
 			TotalChallengesCompleted = 0,
 			TotalSeasonalCashEarned = 0,
 			TotalSeasonalExperienceEarned = 0,
+			TotalCashDistributed = 0,
+			TotalExperienceDistributed = 0,
 		}
 		testStateByPlayerId[key] = state
 	end
@@ -518,6 +552,7 @@ function SeasonalEventService.GetStatus(player)
 	for _, challenge in ipairs(seasonDef.Challenges) do
 		local progress = state.ChallengeProgress[challenge.StatKey] or 0
 		local completed = state.CompletedChallenges[challenge.Id] == true
+		local rewardClaimed = state.ClaimedChallengeRewards[challenge.Id] == true
 		table.insert(challengeStatus, {
 			Id = challenge.Id,
 			Name = challenge.Name,
@@ -526,6 +561,7 @@ function SeasonalEventService.GetStatus(player)
 			CurrentValue = progress,
 			TargetValue = challenge.TargetValue,
 			Completed = completed,
+			RewardClaimed = rewardClaimed,
 			RewardCash = challenge.RewardCash,
 			RewardExperience = challenge.RewardExperience,
 		})
@@ -541,6 +577,8 @@ function SeasonalEventService.GetStatus(player)
 		TotalChallengesCompleted = state.TotalChallengesCompleted,
 		TotalSeasonalCashEarned = state.TotalSeasonalCashEarned,
 		TotalSeasonalExperienceEarned = state.TotalSeasonalExperienceEarned,
+		TotalCashDistributed = state.TotalCashDistributed,
+		TotalExperienceDistributed = state.TotalExperienceDistributed,
 		SeasonStartTime = state.SeasonStartTime,
 	}
 end
@@ -688,6 +726,412 @@ function SeasonalEventService.GetMilestoneForCount(count)
 	return getMilestoneForCount(count)
 end
 
+--[=[
+	Claim the reward for a completed seasonal challenge. Validates that the
+	challenge exists, belongs to the current season, is completed, and hasn't
+	already had its reward claimed. Distributes cash and XP via the reward
+	executor, rolling back state on failure.
+
+	@param player any -- Player identifier
+	@param challengeId string -- Challenge identifier to claim
+	@return table? -- Claim result, or nil on failure
+	@return string? -- Error string on failure
+]=]
+function SeasonalEventService.ClaimChallengeReward(player, challengeId)
+	if player == nil then
+		return nil, "InvalidPlayer"
+	end
+	if type(challengeId) ~= "string" or #challengeId == 0 then
+		return nil, "InvalidChallengeId"
+	end
+
+	local state = getStateForPlayer(player)
+	if not state then
+		return nil, "PlayerNotFound"
+	end
+
+	-- Validate the challenge exists and belongs to the current season
+	local seasonDef = getSeasonDef(state.CurrentSeason)
+	if not seasonDef then
+		return nil, "InvalidSeason"
+	end
+
+	local challengeDef = nil
+	for _, challenge in ipairs(seasonDef.Challenges) do
+		if challenge.Id == challengeId then
+			challengeDef = challenge
+			break
+		end
+	end
+
+	if not challengeDef then
+		return nil, "ChallengeNotInSeason"
+	end
+
+	-- Validate the challenge is completed
+	if not state.CompletedChallenges[challengeId] then
+		return nil, "ChallengeNotCompleted"
+	end
+
+	-- Validate the reward hasn't already been claimed
+	if state.ClaimedChallengeRewards[challengeId] then
+		return nil, "RewardAlreadyClaimed"
+	end
+
+	local cashReward = challengeDef.RewardCash
+	local xpReward = challengeDef.RewardExperience
+
+	-- Execute the reward distribution
+	local ok, execErr = executeReward(player, cashReward, xpReward, "SeasonalChallenge:" .. challengeId)
+	if not ok then
+		-- Distribution failed: do NOT mark as claimed, state is unchanged
+		return nil, "DistributionFailed"
+	end
+
+	-- Mark as claimed and update distributed totals
+	state.ClaimedChallengeRewards[challengeId] = true
+	state.TotalCashDistributed = state.TotalCashDistributed + cashReward
+	state.TotalExperienceDistributed = state.TotalExperienceDistributed + xpReward
+
+	-- Send notification
+	sendNotification(player, "Reward Claimed!", string.format(
+		"%s: +$%d, +%d XP distributed",
+		challengeDef.Name, cashReward, xpReward
+	), {
+		Source = "SeasonalEventService",
+		ChallengeId = challengeId,
+		Season = state.CurrentSeason,
+		Type = "RewardClaimed",
+	})
+
+	return {
+		ChallengeId = challengeId,
+		ChallengeName = challengeDef.Name,
+		CashDistributed = cashReward,
+		ExperienceDistributed = xpReward,
+		TotalCashDistributed = state.TotalCashDistributed,
+		TotalExperienceDistributed = state.TotalExperienceDistributed,
+	}, nil
+end
+
+--[=[
+	Claim a seasonal milestone reward. Validates that the milestone exists,
+	has been reached, and hasn't already had its reward claimed.
+
+	@param player any -- Player identifier
+	@param seasonsCompleted number -- The milestone threshold to claim (e.g. 4, 8, 20)
+	@return table? -- Claim result, or nil on failure
+	@return string? -- Error string on failure
+]=]
+function SeasonalEventService.ClaimMilestoneReward(player, seasonsCompleted)
+	if player == nil then
+		return nil, "InvalidPlayer"
+	end
+	if type(seasonsCompleted) ~= "number" then
+		return nil, "InvalidMilestoneCount"
+	end
+	seasonsCompleted = math.floor(seasonsCompleted + 0.5)
+
+	local state = getStateForPlayer(player)
+	if not state then
+		return nil, "PlayerNotFound"
+	end
+
+	-- Validate the milestone exists
+	local milestone = getMilestoneForCount(seasonsCompleted)
+	if not milestone then
+		return nil, "MilestoneNotFound"
+	end
+
+	-- Validate the player has reached this milestone
+	if state.SeasonsCompleted < seasonsCompleted then
+		return nil, "MilestoneNotReached"
+	end
+
+	-- Validate the milestone hasn't been claimed (as reward)
+	local milestoneKey = tostring(seasonsCompleted)
+	if state.ClaimedMilestoneRewards[milestoneKey] then
+		return nil, "RewardAlreadyClaimed"
+	end
+
+	local cashReward = milestone.BonusCash
+	local xpReward = milestone.BonusExperience
+
+	-- Execute the reward distribution
+	local ok, execErr = executeReward(player, cashReward, xpReward, "SeasonalMilestone:" .. milestoneKey)
+	if not ok then
+		return nil, "DistributionFailed"
+	end
+
+	-- Mark as claimed and update distributed totals
+	state.ClaimedMilestoneRewards[milestoneKey] = true
+	state.TotalCashDistributed = state.TotalCashDistributed + cashReward
+	state.TotalExperienceDistributed = state.TotalExperienceDistributed + xpReward
+
+	-- Send notification
+	sendNotification(player, "Milestone Reward!", string.format(
+		"%s: +$%d, +%d XP distributed",
+		milestone.Label, cashReward, xpReward
+	), {
+		Source = "SeasonalEventService",
+		Milestone = milestoneKey,
+		Type = "MilestoneRewardClaimed",
+	})
+
+	return {
+		MilestoneLabel = milestone.Label,
+		SeasonsRequired = seasonsCompleted,
+		CashDistributed = cashReward,
+		ExperienceDistributed = xpReward,
+		TotalCashDistributed = state.TotalCashDistributed,
+		TotalExperienceDistributed = state.TotalExperienceDistributed,
+	}, nil
+end
+
+--[=[
+	Distribute all pending (unclaimed) rewards for a player in a single batch.
+	This includes completed-but-unclaimed challenge rewards and reached-but-
+	unclaimed milestone rewards. Uses all-or-nothing semantics: if any single
+	reward distribution fails, all previously distributed rewards in this batch
+	are rolled back and the function returns an error.
+
+	@param player any -- Player identifier
+	@return table? -- Distribution summary, or nil on failure
+	@return string? -- Error string on failure
+]=]
+function SeasonalEventService.DistributeSeasonRewards(player)
+	if player == nil then
+		return nil, "InvalidPlayer"
+	end
+
+	local state = getStateForPlayer(player)
+	if not state then
+		return nil, "PlayerNotFound"
+	end
+
+	local seasonDef = getSeasonDef(state.CurrentSeason)
+	if not seasonDef then
+		return nil, "InvalidSeason"
+	end
+
+	-- Collect all pending challenge rewards
+	local pendingChallenges = {}
+	for _, challenge in ipairs(seasonDef.Challenges) do
+		if state.CompletedChallenges[challenge.Id] and not state.ClaimedChallengeRewards[challenge.Id] then
+			table.insert(pendingChallenges, challenge)
+		end
+	end
+
+	-- Collect all pending milestone rewards
+	local pendingMilestones = {}
+	for _, milestone in ipairs(MILESTONES) do
+		local key = tostring(milestone.SeasonsCompleted)
+		if state.SeasonsCompleted >= milestone.SeasonsCompleted
+			and state.ClaimedMilestones[key]
+			and not state.ClaimedMilestoneRewards[key] then
+			table.insert(pendingMilestones, milestone)
+		end
+	end
+
+	-- Nothing to distribute
+	if #pendingChallenges == 0 and #pendingMilestones == 0 then
+		return {
+			ChallengesDistributed = 0,
+			MilestonesDistributed = 0,
+			TotalCashDistributed = 0,
+			TotalExperienceDistributed = 0,
+			Details = {},
+		}, nil
+	end
+
+	-- Distribute rewards one by one, tracking what was granted for rollback
+	local distributed = {} -- { { type, id, cash, xp } }
+	local totalCash = 0
+	local totalXP = 0
+
+	-- Distribute challenge rewards
+	for _, challenge in ipairs(pendingChallenges) do
+		local ok, execErr = executeReward(
+			player, challenge.RewardCash, challenge.RewardExperience,
+			"SeasonalChallenge:" .. challenge.Id
+		)
+		if not ok then
+			-- Rollback all previously distributed rewards in this batch
+			for i = #distributed, 1, -1 do
+				local entry = distributed[i]
+				-- Reverse the reward: execute a negative grant (via reversal executor)
+				executeReward(player, -entry.cash, -entry.xp, "Rollback:" .. entry.id)
+				-- Unmark as claimed
+				if entry.rewardType == "challenge" then
+					state.ClaimedChallengeRewards[entry.id] = nil
+				elseif entry.rewardType == "milestone" then
+					state.ClaimedMilestoneRewards[entry.id] = nil
+				end
+				state.TotalCashDistributed = state.TotalCashDistributed - entry.cash
+				state.TotalExperienceDistributed = state.TotalExperienceDistributed - entry.xp
+			end
+			return nil, "DistributionFailed"
+		end
+
+		state.ClaimedChallengeRewards[challenge.Id] = true
+		state.TotalCashDistributed = state.TotalCashDistributed + challenge.RewardCash
+		state.TotalExperienceDistributed = state.TotalExperienceDistributed + challenge.RewardExperience
+		totalCash = totalCash + challenge.RewardCash
+		totalXP = totalXP + challenge.RewardExperience
+		table.insert(distributed, {
+			rewardType = "challenge",
+			id = challenge.Id,
+			name = challenge.Name,
+			cash = challenge.RewardCash,
+			xp = challenge.RewardExperience,
+		})
+	end
+
+	-- Distribute milestone rewards
+	for _, milestone in ipairs(pendingMilestones) do
+		local key = tostring(milestone.SeasonsCompleted)
+		local ok, execErr = executeReward(
+			player, milestone.BonusCash, milestone.BonusExperience,
+			"SeasonalMilestone:" .. key
+		)
+		if not ok then
+			-- Rollback all previously distributed rewards in this batch
+			for i = #distributed, 1, -1 do
+				local entry = distributed[i]
+				executeReward(player, -entry.cash, -entry.xp, "Rollback:" .. entry.id)
+				if entry.rewardType == "challenge" then
+					state.ClaimedChallengeRewards[entry.id] = nil
+				elseif entry.rewardType == "milestone" then
+					state.ClaimedMilestoneRewards[entry.id] = nil
+				end
+				state.TotalCashDistributed = state.TotalCashDistributed - entry.cash
+				state.TotalExperienceDistributed = state.TotalExperienceDistributed - entry.xp
+			end
+			return nil, "DistributionFailed"
+		end
+
+		state.ClaimedMilestoneRewards[key] = true
+		state.TotalCashDistributed = state.TotalCashDistributed + milestone.BonusCash
+		state.TotalExperienceDistributed = state.TotalExperienceDistributed + milestone.BonusExperience
+		totalCash = totalCash + milestone.BonusCash
+		totalXP = totalXP + milestone.BonusExperience
+		table.insert(distributed, {
+			rewardType = "milestone",
+			id = key,
+			name = milestone.Label,
+			cash = milestone.BonusCash,
+			xp = milestone.BonusExperience,
+		})
+	end
+
+	-- Build details list
+	local details = {}
+	for _, entry in ipairs(distributed) do
+		table.insert(details, {
+			Type = entry.rewardType,
+			Id = entry.id,
+			Name = entry.name,
+			CashDistributed = entry.cash,
+			ExperienceDistributed = entry.xp,
+		})
+	end
+
+	-- Send summary notification
+	local challengeCount = 0
+	local milestoneCount = 0
+	for _, entry in ipairs(distributed) do
+		if entry.rewardType == "challenge" then
+			challengeCount = challengeCount + 1
+		else
+			milestoneCount = milestoneCount + 1
+		end
+	end
+
+	sendNotification(player, "Rewards Distributed!", string.format(
+		"%d reward(s) distributed: +$%d, +%d XP",
+		#distributed, totalCash, totalXP
+	), {
+		Source = "SeasonalEventService",
+		Type = "BatchDistribution",
+		ChallengesDistributed = challengeCount,
+		MilestonesDistributed = milestoneCount,
+	})
+
+	return {
+		ChallengesDistributed = challengeCount,
+		MilestonesDistributed = milestoneCount,
+		TotalCashDistributed = totalCash,
+		TotalExperienceDistributed = totalXP,
+		Details = details,
+	}, nil
+end
+
+--[=[
+	Get the list of pending (unclaimed) rewards for a player.
+
+	@param player any -- Player identifier
+	@return table? -- Pending rewards summary, or nil
+]=]
+function SeasonalEventService.GetPendingRewards(player)
+	if player == nil then
+		return nil
+	end
+
+	local state = getStateForPlayer(player)
+	if not state then
+		return nil
+	end
+
+	local seasonDef = getSeasonDef(state.CurrentSeason)
+	if not seasonDef then
+		return nil
+	end
+
+	local pendingChallenges = {}
+	for _, challenge in ipairs(seasonDef.Challenges) do
+		if state.CompletedChallenges[challenge.Id] and not state.ClaimedChallengeRewards[challenge.Id] then
+			table.insert(pendingChallenges, {
+				Id = challenge.Id,
+				Name = challenge.Name,
+				RewardCash = challenge.RewardCash,
+				RewardExperience = challenge.RewardExperience,
+			})
+		end
+	end
+
+	local pendingMilestones = {}
+	for _, milestone in ipairs(MILESTONES) do
+		local key = tostring(milestone.SeasonsCompleted)
+		if state.SeasonsCompleted >= milestone.SeasonsCompleted
+			and state.ClaimedMilestones[key]
+			and not state.ClaimedMilestoneRewards[key] then
+			table.insert(pendingMilestones, {
+				SeasonsRequired = milestone.SeasonsCompleted,
+				Label = milestone.Label,
+				BonusCash = milestone.BonusCash,
+				BonusExperience = milestone.BonusExperience,
+			})
+		end
+	end
+
+	return {
+		Challenges = pendingChallenges,
+		Milestones = pendingMilestones,
+		TotalPendingCash = (function()
+			local total = 0
+			for _, c in ipairs(pendingChallenges) do total = total + c.RewardCash end
+			for _, m in ipairs(pendingMilestones) do total = total + m.BonusCash end
+			return total
+		end)(),
+		TotalPendingExperience = (function()
+			local total = 0
+			for _, c in ipairs(pendingChallenges) do total = total + c.RewardExperience end
+			for _, m in ipairs(pendingMilestones) do total = total + m.BonusExperience end
+			return total
+		end)(),
+	}
+end
+
 local function getActivePlayers()
 	if IS_ROBLOX and Players then
 		return Players:GetPlayers()
@@ -729,6 +1173,68 @@ function SeasonalEventService.Init(weatherService)
 	if IS_ROBLOX and SeasonalEventPackets then
 		SeasonalEventPackets.GetSeasonStatus.OnServerInvoke = function(player)
 			return SeasonalEventService.GetStatus(player)
+		end
+
+		SeasonalEventPackets.ClaimChallengeReward.OnServerInvoke = function(player, data)
+			local challengeId = data and data.ChallengeId or ""
+			local result, err = SeasonalEventService.ClaimChallengeReward(player, challengeId)
+			if not result then
+				return {
+					Success = false,
+					CashDistributed = 0,
+					ExperienceDistributed = 0,
+					RewardName = "",
+					ErrorMessage = err or "Unknown",
+				}
+			end
+			return {
+				Success = true,
+				CashDistributed = result.CashDistributed,
+				ExperienceDistributed = result.ExperienceDistributed,
+				RewardName = result.ChallengeName,
+				ErrorMessage = "",
+			}
+		end
+
+		SeasonalEventPackets.ClaimMilestoneReward.OnServerInvoke = function(player, data)
+			local seasonsCompleted = data and data.SeasonsCompleted or 0
+			local result, err = SeasonalEventService.ClaimMilestoneReward(player, seasonsCompleted)
+			if not result then
+				return {
+					Success = false,
+					CashDistributed = 0,
+					ExperienceDistributed = 0,
+					RewardName = "",
+					ErrorMessage = err or "Unknown",
+				}
+			end
+			return {
+				Success = true,
+				CashDistributed = result.CashDistributed,
+				ExperienceDistributed = result.ExperienceDistributed,
+				RewardName = result.MilestoneLabel,
+				ErrorMessage = "",
+			}
+		end
+
+		SeasonalEventPackets.DistributeAllRewards.OnServerInvoke = function(player)
+			local result, err = SeasonalEventService.DistributeSeasonRewards(player)
+			if not result then
+				return {
+					Success = false,
+					CashDistributed = 0,
+					ExperienceDistributed = 0,
+					RewardName = "",
+					ErrorMessage = err or "Unknown",
+				}
+			end
+			return {
+				Success = true,
+				CashDistributed = result.TotalCashDistributed,
+				ExperienceDistributed = result.TotalExperienceDistributed,
+				RewardName = string.format("%d rewards", result.ChallengesDistributed + result.MilestonesDistributed),
+				ErrorMessage = "",
+			}
 		end
 	end
 
@@ -801,6 +1307,7 @@ function SeasonalEventService._ResetForTests()
 	SeasonalEventService._testNotifications = {}
 	weatherServiceRef = nil
 	weatherInitToken = weatherInitToken + 1
+	rewardExecutor = nil
 end
 
 function SeasonalEventService._SetClock(fn)
@@ -816,6 +1323,14 @@ function SeasonalEventService._SetNotificationSink(fn)
 		notificationSink = fn
 	else
 		notificationSink = nil
+	end
+end
+
+function SeasonalEventService._SetRewardExecutor(fn)
+	if type(fn) == "function" then
+		rewardExecutor = fn
+	else
+		rewardExecutor = nil
 	end
 end
 
