@@ -57,6 +57,12 @@ local TRUST_TIERS = {
 	{ Min = 75, Name = "Elite", RewardMultiplier = 1.20, UnlockReward = 250 },
 }
 
+local INTERACTION_RULES = {
+	GreetResident = { MinTrustLevel = "Unknown", SuccessDelta = 2, FailureDelta = -1, NeutralDelta = 0 },
+	TradeNegotiation = { MinTrustLevel = "Familiar", SuccessDelta = 4, FailureDelta = -3, NeutralDelta = 0 },
+	ConflictMediation = { MinTrustLevel = "Trusted", SuccessDelta = 6, FailureDelta = -5, NeutralDelta = 0 },
+}
+
 local testStateByPlayerId = {}
 
 local function getTierIndex(score)
@@ -85,6 +91,16 @@ local function ensureStateShape(state)
 		state.LifetimeRewards = 0
 	end
 	state.LifetimeRewards = math.max(math.floor(state.LifetimeRewards + 0.5), 0)
+end
+
+local function getTierIndexByName(name)
+	local target = tostring(name or "")
+	for index, tier in ipairs(TRUST_TIERS) do
+		if tier.Name == target then
+			return index
+		end
+	end
+	return 1
 end
 
 local function ensureTestState(playerId)
@@ -314,6 +330,91 @@ function ReputationService.ProcessReviewOutcome(player, rating, reason)
 	end
 
 	return ReputationService.AdjustReputation(player, delta, "TenantReview")
+end
+
+function ReputationService.CanPerformInteraction(player, interactionType)
+	local state = getStateForPlayer(player)
+	if not state then
+		return false, nil
+	end
+
+	local rule = INTERACTION_RULES[interactionType]
+	if not rule then
+		return false, {
+			Reason = "UnknownInteraction",
+		}
+	end
+
+	local currentTierIndex = getTierIndex(state.ReputationScore)
+	local requiredTierIndex = getTierIndexByName(rule.MinTrustLevel)
+	local allowed = currentTierIndex >= requiredTierIndex
+	return allowed, {
+		CurrentTrustLevel = TRUST_TIERS[currentTierIndex].Name,
+		RequiredTrustLevel = TRUST_TIERS[requiredTierIndex].Name,
+	}
+end
+
+function ReputationService.ProcessInteraction(player, interactionType, outcome, reason)
+	local state = getStateForPlayer(player)
+	if not state then
+		return nil, "PlayerNotFound"
+	end
+
+	local rule = INTERACTION_RULES[interactionType]
+	if not rule then
+		return nil, "UnknownInteraction"
+	end
+
+	local allowed, gate = ReputationService.CanPerformInteraction(player, interactionType)
+	if not allowed then
+		return {
+			Applied = false,
+			Reason = "TrustTooLow",
+			InteractionType = interactionType,
+			RequiredTrustLevel = gate.RequiredTrustLevel,
+			CurrentTrustLevel = gate.CurrentTrustLevel,
+			ScoreDelta = 0,
+		}, nil
+	end
+
+	local normalizedOutcome = string.lower(tostring(outcome or "neutral"))
+	local delta = rule.NeutralDelta or 0
+	if normalizedOutcome == "success" then
+		local multiplier = TRUST_TIERS[getTierIndex(state.ReputationScore)].RewardMultiplier
+		delta = math.floor((rule.SuccessDelta or 0) * multiplier + 0.5)
+	elseif normalizedOutcome == "failure" then
+		delta = rule.FailureDelta or 0
+	end
+
+	if delta == 0 then
+		return {
+			Applied = false,
+			Reason = "NoChange",
+			InteractionType = interactionType,
+			RequiredTrustLevel = gate.RequiredTrustLevel,
+			CurrentTrustLevel = gate.CurrentTrustLevel,
+			ScoreDelta = 0,
+		}, nil
+	end
+
+	local updateReason = reason
+	if updateReason == nil then
+		updateReason = string.format("Interaction:%s:%s", interactionType, normalizedOutcome)
+	end
+	local result = ReputationService.AdjustReputation(player, delta, updateReason)
+	if not result then
+		return nil, "AdjustFailed"
+	end
+
+	return {
+		Applied = true,
+		InteractionType = interactionType,
+		RequiredTrustLevel = gate.RequiredTrustLevel,
+		CurrentTrustLevel = result.TrustLevel,
+		ScoreDelta = result.ScoreDelta,
+		NewScore = result.NewScore,
+		RewardEarned = result.RewardEarned,
+	}, nil
 end
 
 function ReputationService.Init()

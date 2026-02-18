@@ -56,4 +56,41 @@ describe("ReputationService", function()
 		assert.equals(64, data.Snapshot.ReputationScore)
 		assert.equals("Trusted", data.Snapshot.TrustLevel)
 	end)
+
+	it("gates interactions by required trust level", function()
+		ReputationService.AdjustReputation("lowTrust", -35, "seed") -- 15 => Unknown
+		local canTrade, gate = ReputationService.CanPerformInteraction("lowTrust", "TradeNegotiation")
+
+		assert.is_false(canTrade)
+		assert.is_not_nil(gate)
+		assert.equals("Unknown", gate.CurrentTrustLevel)
+		assert.equals("Familiar", gate.RequiredTrustLevel)
+	end)
+
+	it("applies multiplier-adjusted reputation gain for successful interactions", function()
+		local result, err = ReputationService.ProcessInteraction("socialPlayer", "ConflictMediation", "Success")
+		assert.is_nil(err)
+		assert.is_not_nil(result)
+		assert.is_true(result.Applied)
+		assert.equals(7, result.ScoreDelta) -- 6 * 1.10 rounded = 7 at Trusted
+		assert.equals(57, result.NewScore)
+	end)
+
+	it("returns trust gate payload when interaction is blocked", function()
+		ReputationService.AdjustReputation("blockedPlayer", -40, "seed") -- 10 => Unknown
+		local result, err = ReputationService.ProcessInteraction("blockedPlayer", "ConflictMediation", "Success")
+		assert.is_nil(err)
+		assert.is_not_nil(result)
+		assert.is_false(result.Applied)
+		assert.equals("TrustTooLow", result.Reason)
+		assert.equals("Trusted", result.RequiredTrustLevel)
+		assert.equals("Unknown", result.CurrentTrustLevel)
+		assert.equals(0, result.ScoreDelta)
+	end)
+
+	it("returns error for unknown interaction type", function()
+		local result, err = ReputationService.ProcessInteraction("playerX", "UnknownType", "Success")
+		assert.is_nil(result)
+		assert.equals("UnknownInteraction", err)
+	end)
 end)
