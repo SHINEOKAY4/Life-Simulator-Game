@@ -488,6 +488,63 @@ describe("SeasonalEventService", function()
 		end)
 	end)
 
+	-- ========== Weather Integration ==========
+
+	describe("Weather integration", function()
+		it("transitions all tracked players when weather season changes", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.TransitionSeason("player2", "Spring")
+
+			local transitioned, err = SeasonalEventService.HandleWeatherSeasonChanged("Summer")
+			assert.is_nil(err)
+			assert.equals(2, transitioned)
+
+			local p1 = SeasonalEventService.GetStatus("player1")
+			local p2 = SeasonalEventService.GetStatus("player2")
+			assert.equals("Summer", p1.CurrentSeason)
+			assert.equals("Summer", p2.CurrentSeason)
+			assert.equals(1, p1.SeasonsCompleted)
+			assert.equals(1, p2.SeasonsCompleted)
+		end)
+
+		it("ignores repeated weather season values without incrementing completed seasons", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			local transitioned, err = SeasonalEventService.HandleWeatherSeasonChanged("Spring")
+			assert.is_nil(err)
+			assert.equals(1, transitioned)
+
+			local status = SeasonalEventService.GetStatus("player1")
+			assert.equals("Spring", status.CurrentSeason)
+			assert.equals(0, status.SeasonsCompleted)
+		end)
+
+		it("subscribes to weather service updates in Init and auto-transitions", function()
+			local listenerName
+			local weatherCallback
+			local mockWeatherService = {
+				GetState = function()
+					return { Season = "Spring" }
+				end,
+				SubscribeSeasonChanged = function(name, callback)
+					listenerName = name
+					weatherCallback = callback
+				end,
+			}
+
+			SeasonalEventService.Init(mockWeatherService)
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+
+			assert.equals("SeasonalEventService", listenerName)
+			assert.is_not_nil(weatherCallback)
+
+			weatherCallback("Autumn")
+
+			local status = SeasonalEventService.GetStatus("player1")
+			assert.equals("Autumn", status.CurrentSeason)
+			assert.equals(1, status.SeasonsCompleted)
+		end)
+	end)
+
 	-- ========== Edge Cases ==========
 
 	describe("Edge cases", function()

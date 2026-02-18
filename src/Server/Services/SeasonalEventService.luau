@@ -12,6 +12,10 @@ local function hasRobloxRuntime()
 end
 
 local IS_ROBLOX = hasRobloxRuntime()
+local Players = nil
+if IS_ROBLOX then
+	Players = game:GetService("Players")
+end
 
 -- ============ Inline definitions for test mode ============
 
@@ -169,9 +173,12 @@ end
 
 -- Internal state per player (keyed by playerId string) for test mode
 local testStateByPlayerId = {}
+local trackedTestPlayersByKey = {}
 
 -- Notification sink (injectable for tests)
 local notificationSink = nil
+local weatherServiceRef = nil
+local weatherInitToken = 0
 
 local function ensureStateShape(state)
 	if type(state.CurrentSeason) ~= "string" then
@@ -236,6 +243,9 @@ end
 local function getStateForPlayer(player)
 	if player == nil then
 		return nil
+	end
+	if not IS_ROBLOX then
+		trackedTestPlayersByKey[tostring(player)] = player
 	end
 	return ensureTestState(player)
 end
@@ -617,20 +627,113 @@ function SeasonalEventService.GetMilestoneForCount(count)
 	return getMilestoneForCount(count)
 end
 
--- ============ Init (Roblox) ============
+local function getActivePlayers()
+	if IS_ROBLOX and Players then
+		return Players:GetPlayers()
+	end
 
-function SeasonalEventService.Init()
-	if not IS_ROBLOX then
+	local players = {}
+	for _, player in pairs(trackedTestPlayersByKey) do
+		table.insert(players, player)
+	end
+	return players
+end
+
+--[=[
+	Apply a weather-driven season change to all active players.
+
+	@param seasonId string -- Weather season ID
+	@return number -- Number of transitioned players
+	@return string? -- Error string when season is invalid
+]=]
+function SeasonalEventService.HandleWeatherSeasonChanged(seasonId)
+	if not getSeasonDef(seasonId) then
+		return 0, "InvalidSeason"
+	end
+
+	local transitioned = 0
+	for _, player in ipairs(getActivePlayers()) do
+		local result = SeasonalEventService.TransitionSeason(player, seasonId)
+		if result then
+			transitioned = transitioned + 1
+		end
+	end
+
+	return transitioned, nil
+end
+
+-- ============ Init (Roblox/Test wiring) ============
+
+function SeasonalEventService.Init(weatherService)
+	weatherInitToken = weatherInitToken + 1
+	local initToken = weatherInitToken
+
+	weatherServiceRef = weatherService
+	if not weatherServiceRef and IS_ROBLOX then
+		local ok, resolvedWeatherService = pcall(function()
+			local ServerScriptService = game:GetService("ServerScriptService")
+			return require(ServerScriptService.Server.Services.WeatherService)
+		end)
+		if ok then
+			weatherServiceRef = resolvedWeatherService
+		end
+	end
+
+	if not weatherServiceRef then
 		return
 	end
-	-- Roblox-specific packet registration would go here
+
+	local weatherState = nil
+	if type(weatherServiceRef.GetState) == "function" then
+		local ok, state = pcall(weatherServiceRef.GetState)
+		if ok and type(state) == "table" then
+			weatherState = state
+		end
+	end
+	if weatherState and type(weatherState.Season) == "string" then
+		SeasonalEventService.HandleWeatherSeasonChanged(weatherState.Season)
+	end
+
+	if type(weatherServiceRef.SubscribeSeasonChanged) == "function" then
+		weatherServiceRef.SubscribeSeasonChanged("SeasonalEventService", function(newSeason)
+			-- Ignore stale callbacks if Init is called again.
+			if initToken ~= weatherInitToken then
+				return
+			end
+			if type(newSeason) ~= "string" then
+				return
+			end
+			SeasonalEventService.HandleWeatherSeasonChanged(newSeason)
+		end)
+	end
+
+	if IS_ROBLOX and Players then
+		Players.PlayerAdded:Connect(function(player)
+			task.defer(function()
+				if initToken ~= weatherInitToken then
+					return
+				end
+				local currentSeason = "Spring"
+				if type(weatherServiceRef.GetState) == "function" then
+					local ok, state = pcall(weatherServiceRef.GetState)
+					if ok and type(state) == "table" and type(state.Season) == "string" then
+						currentSeason = state.Season
+					end
+				end
+				SeasonalEventService.TransitionSeason(player, currentSeason)
+			end)
+		end)
+	end
 end
 
 -- ============ Test Hooks ============
 
 function SeasonalEventService._ResetForTests()
 	testStateByPlayerId = {}
+	trackedTestPlayersByKey = {}
 	SeasonalEventService._testNotifications = {}
+	weatherServiceRef = nil
+	weatherInitToken = weatherInitToken + 1
 end
 
 function SeasonalEventService._SetClock(fn)
