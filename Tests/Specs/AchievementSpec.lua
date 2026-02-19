@@ -48,6 +48,48 @@ describe("AchievementService", function()
 		end)
 	end)
 
+	describe("GetUnlockedAndInProgress", function()
+		it("returns nil for nil player", function()
+			local result = AchievementService.GetUnlockedAndInProgress(nil)
+			assert.is_nil(result)
+		end)
+
+		it("returns empty lists for a new player", function()
+			local result = AchievementService.GetUnlockedAndInProgress(player)
+			assert.is_not_nil(result)
+			assert.equals(0, result.UnlockedCount)
+			assert.equals(0, result.InProgressCount)
+			assert.equals(0, #result.Unlocked)
+			assert.equals(0, #result.InProgress)
+		end)
+
+		it("separates unlocked achievements from in-progress achievements", function()
+			AchievementService.RecordBuildPlaced(player, 25) -- unlocks builder_novice, progresses builder_pro
+			AchievementService.RecordChoreCompleted(player) -- progresses chores_starter only
+
+			local result = AchievementService.GetUnlockedAndInProgress(player)
+			assert.equals(1, result.UnlockedCount)
+			assert.equals(3, result.InProgressCount)
+
+			local unlockedIds = {}
+			for _, row in ipairs(result.Unlocked) do
+				unlockedIds[row.Id] = true
+			end
+			assert.is_true(unlockedIds["builder_novice"])
+
+			local inProgressIds = {}
+			for _, row in ipairs(result.InProgress) do
+				inProgressIds[row.Id] = true
+				assert.is_false(row.IsUnlocked)
+				assert.is_true(row.ProgressValue > 0)
+			end
+			assert.is_true(inProgressIds["builder_pro"])
+			assert.is_true(inProgressIds["chores_starter"])
+			assert.is_true(inProgressIds["chores_veteran"])
+			assert.is_nil(inProgressIds["builder_novice"])
+		end)
+	end)
+
 	-- ========== Stat recording ==========
 
 	describe("RecordBuildPlaced", function()

@@ -264,6 +264,26 @@ local function buildSnapshotFromState(state)
 	}
 end
 
+local function buildAchievementRow(state, definition)
+	local current, progress, target, isUnlocked, isClaimed = definitionProgress(state, definition)
+	return {
+		Id = definition.Id,
+		Name = definition.Name,
+		Description = definition.Description,
+		Category = definition.Category,
+		StatKey = definition.StatKey,
+		CurrentValue = current,
+		ProgressValue = progress,
+		TargetValue = target,
+		IsUnlocked = isUnlocked,
+		IsClaimed = isClaimed,
+		SortOrder = definition.SortOrder,
+		Rewards = definition.Rewards or {},
+		UnlockedAt = state.Unlocked[definition.Id] or 0,
+		ClaimedAt = state.Claimed[definition.Id] or 0,
+	}
+end
+
 -- ============ Test-mode state management ============
 
 local testProfiles = {}
@@ -390,6 +410,32 @@ function AchievementService.GetSnapshot(player)
 		return nil
 	end
 	return buildSnapshotFromState(state)
+end
+
+function AchievementService.GetUnlockedAndInProgress(player)
+	local state = getStateForPlayer(player, false)
+	if not state then
+		return nil
+	end
+
+	local unlocked = {}
+	local inProgress = {}
+
+	for _, definition in ipairs(getDefinitionsList()) do
+		local row = buildAchievementRow(state, definition)
+		if row.IsUnlocked then
+			unlocked[#unlocked + 1] = row
+		elseif row.ProgressValue > 0 then
+			inProgress[#inProgress + 1] = row
+		end
+	end
+
+	return {
+		Unlocked = unlocked,
+		InProgress = inProgress,
+		UnlockedCount = #unlocked,
+		InProgressCount = #inProgress,
+	}
 end
 
 function AchievementService.RecordBuildPlaced(player, quantity)
