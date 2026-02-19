@@ -282,6 +282,106 @@ describe("AchievementService", function()
 		end)
 	end)
 
+	-- ========== GetPlayerAchievements ==========
+
+	describe("GetPlayerAchievements", function()
+		it("returns nil for nil player", function()
+			local result = AchievementService.GetPlayerAchievements(nil)
+			assert.is_nil(result)
+		end)
+
+		it("returns all achievement IDs with zero progress for a new player", function()
+			local result = AchievementService.GetPlayerAchievements(player)
+			assert.is_not_nil(result)
+			assert.is_table(result)
+
+			local expectedIds = {
+				"builder_novice", "builder_pro",
+				"chores_starter", "chores_veteran",
+				"tenant_help_first", "tenant_help_expert",
+				"crafting_novice", "crafting_expert",
+				"level_5", "level_12",
+			}
+			for _, id in ipairs(expectedIds) do
+				assert.equals(0, result[id], "expected 0 progress for " .. id)
+			end
+		end)
+
+		it("returns exactly 10 entries matching the defined achievements", function()
+			local result = AchievementService.GetPlayerAchievements(player)
+			local count = 0
+			for _ in pairs(result) do
+				count = count + 1
+			end
+			assert.equals(10, count)
+		end)
+
+		it("returns mixed progress values after partial activity", function()
+			AchievementService.RecordBuildPlaced(player, 10)
+			AchievementService.RecordChoreCompleted(player)
+			AchievementService.RecordChoreCompleted(player)
+			AchievementService.RecordChoreCompleted(player)
+			AchievementService.RecordLevelReached(player, 3)
+
+			local result = AchievementService.GetPlayerAchievements(player)
+			assert.is_not_nil(result)
+
+			-- Building: 10 placements, both below targets
+			assert.equals(10, result["builder_novice"])
+			assert.equals(10, result["builder_pro"])
+
+			-- Chores: 3 completed; targets are 10 and 50
+			assert.equals(3, result["chores_starter"])
+			assert.equals(3, result["chores_veteran"])
+
+			-- Tenant help: no activity
+			assert.equals(0, result["tenant_help_first"])
+			assert.equals(0, result["tenant_help_expert"])
+
+			-- Crafting: no activity
+			assert.equals(0, result["crafting_novice"])
+			assert.equals(0, result["crafting_expert"])
+
+			-- Level: reached 3; targets are 5 and 12
+			assert.equals(3, result["level_5"])
+			assert.equals(3, result["level_12"])
+		end)
+
+		it("clamps progress at target for unlocked achievements", function()
+			AchievementService.RecordBuildPlaced(player, 200) -- unlocks both building achievements
+			local result = AchievementService.GetPlayerAchievements(player)
+
+			assert.equals(25, result["builder_novice"])  -- clamped to target 25
+			assert.equals(150, result["builder_pro"])     -- clamped to target 150
+		end)
+
+		it("returns correct progress after claiming achievements", function()
+			AchievementService.RecordBuildPlaced(player, 25)
+			AchievementService.ClaimAchievement(player, "builder_novice")
+			local result = AchievementService.GetPlayerAchievements(player)
+
+			-- Claimed achievement still reports its target progress
+			assert.equals(25, result["builder_novice"])
+			-- Unclaimed/in-progress still has correct value
+			assert.equals(25, result["builder_pro"])
+		end)
+
+		it("returns independent results per player", function()
+			local player2 = { UserId = 77, Name = "Player2" }
+			AchievementService.RecordBuildPlaced(player, 15)
+			AchievementService.RecordChoreCompleted(player2)
+
+			local r1 = AchievementService.GetPlayerAchievements(player)
+			local r2 = AchievementService.GetPlayerAchievements(player2)
+
+			assert.equals(15, r1["builder_novice"])
+			assert.equals(0, r1["chores_starter"])
+
+			assert.equals(0, r2["builder_novice"])
+			assert.equals(1, r2["chores_starter"])
+		end)
+	end)
+
 	-- ========== Stat recording ==========
 
 	describe("RecordBuildPlaced", function()

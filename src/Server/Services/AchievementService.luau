@@ -482,6 +482,23 @@ function AchievementService.GetAchievementProgress(player, achievementId)
 	return progress
 end
 
+--- Returns a dictionary mapping every achievement ID to its clamped progress
+--- value for the given player, or nil if the player has no profile.
+--- Example: { builder_novice = 10, builder_pro = 10, chores_starter = 0, ... }
+function AchievementService.GetPlayerAchievements(player)
+	local state = getStateForPlayer(player, false)
+	if not state then
+		return nil
+	end
+
+	local result = {}
+	for _, definition in ipairs(getDefinitionsList()) do
+		local _, progress = definitionProgress(state, definition)
+		result[definition.Id] = progress
+	end
+	return result
+end
+
 function AchievementService.RecordBuildPlaced(player, quantity)
 	local increment
 	if type(quantity) == "number" and quantity > 0 then
