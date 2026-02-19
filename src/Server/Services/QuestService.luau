@@ -129,6 +129,28 @@ local function ensureQuestExists(questId)
     return QuestCatalog[questId]
 end
 
+local function evaluateQuestCompletion(state, quest)
+    local allDone = true
+    for _, o in ipairs(quest.objectives) do
+        local progress = state.Progress[o.id] or 0
+        local target = o.target
+        if o.kind == "Place" or o.kind == "Talk" or o.kind == "Visit" then
+            -- treat target as a threshold 1-based; progress increments with each trigger
+            if type(target) == "number" then
+                if progress < target then allDone = false end
+            elseif type(target) == "string" then
+                if progress < 1 then allDone = false end
+            end
+        elseif type(target) == "number" then
+            if progress < target then allDone = false end
+        else
+            allDone = false
+        end
+        if not allDone then break end
+    end
+    return allDone
+end
+
 -- Public API
 function QuestService.Init()
     loadCatalogIfNeeded()
@@ -221,24 +243,7 @@ function QuestService.ProgressObjective(player, questId, objectiveId, delta)
     state.Progress[objectiveId] = (state.Progress[objectiveId] or 0) + delta
 
     -- Check each objective completion against its target
-    local allDone = true
-    for _, o in ipairs(quest.objectives) do
-        local progress = state.Progress[o.id] or 0
-        local target = o.target
-        if o.kind == "Place" or o.kind == "Talk" or o.kind == "Visit" then
-            -- treat target as a threshold 1-based; progress increments with each trigger
-            if type(target) == "number" then
-                if progress < target then allDone = false end
-            elseif type(target) == "string" then
-                if progress < 1 then allDone = false end
-            end
-        elseif type(target) == "number" then
-            if progress < target then allDone = false end
-        else
-            allDone = false
-        end
-        if not allDone then break end
-    end
+    local allDone = evaluateQuestCompletion(state, quest)
 
     -- If all objectives are completed, auto-complete if configured or mark completed
     if allDone then
@@ -266,7 +271,13 @@ function QuestService.ReportItemCollected(player, questId, itemDefId, qty)
     -- find any Collect objective for this itemDefId
     local progressed = false
     for _, o in ipairs(quest.objectives) do
-        if o.kind == "Collect" and o.target == itemDefId then
+        local target = o.target
+        local matchesCollectTarget = o.kind == "Collect" and (
+            type(target) == "number" -- generic count-based collect objective
+            or target == itemDefId -- explicit item id target
+            or (type(target) == "table" and target.DefId == itemDefId)
+        )
+        if matchesCollectTarget then
             state.Progress[o.id] = (state.Progress[o.id] or 0) + (qty or 1)
             progressed = true
         end
@@ -274,9 +285,19 @@ function QuestService.ReportItemCollected(player, questId, itemDefId, qty)
     if not progressed then
         return false, "NoMatchingObjective"
     end
-    -- Re-run completion check
-    return QuestService.ProgressObjective(player, questId, quest.objectives[1].id, 0) -- trigger completion check without extra progress
-        or true, nil
+
+    if evaluateQuestCompletion(state, quest) then
+        state.State = "completed"
+        if quest.AutoClaim == true then
+            QuestService.ClaimQuest(player, questId)
+        end
+    end
+
+    local key = _getPlayerKey(player)
+    local pstore = PlayerQuests[tonumber(key) or key] or {}
+    pstore[questId] = state
+    PlayerQuests[tonumber(key) or key] = pstore
+    return true
 end
 
 -- Place/Talk/Visit helpers: callers can signal a trigger by objective id
