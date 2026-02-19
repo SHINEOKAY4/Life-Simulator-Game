@@ -463,6 +463,31 @@ function AchievementService.GetAchievementMetadata(achievementId)
 	}
 end
 
+--- Returns a list of static achievement definition metadata entries for a
+--- category. Returns an empty list for invalid/unknown categories.
+function AchievementService.GetAchievementsByCategory(category)
+	if type(category) ~= "string" or category == "" then
+		return {}
+	end
+
+	local results = {}
+	for _, definition in ipairs(getDefinitionsList()) do
+		if definition.Category == category then
+			results[#results + 1] = {
+				Id = definition.Id,
+				Name = definition.Name,
+				Description = definition.Description,
+				Category = definition.Category,
+				StatKey = definition.StatKey,
+				TargetValue = definition.TargetValue,
+				SortOrder = definition.SortOrder,
+				Rewards = definition.Rewards or {},
+			}
+		end
+	end
+	return results
+end
+
 function AchievementService.GetAchievementProgress(player, achievementId)
 	if type(achievementId) ~= "string" or achievementId == "" then
 		return nil

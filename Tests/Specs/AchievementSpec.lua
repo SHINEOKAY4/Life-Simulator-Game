@@ -183,6 +183,97 @@ describe("AchievementService", function()
 		end)
 	end)
 
+	-- ========== GetAchievementsByCategory ==========
+
+	describe("GetAchievementsByCategory", function()
+		it("returns both building achievements for Building category", function()
+			local results = AchievementService.GetAchievementsByCategory("Building")
+			assert.equals(2, #results)
+			assert.equals("builder_novice", results[1].Id)
+			assert.equals("builder_pro", results[2].Id)
+			for _, row in ipairs(results) do
+				assert.equals("Building", row.Category)
+			end
+		end)
+
+		it("returns both household achievements for Household category", function()
+			local results = AchievementService.GetAchievementsByCategory("Household")
+			assert.equals(2, #results)
+			assert.equals("chores_starter", results[1].Id)
+			assert.equals("chores_veteran", results[2].Id)
+			for _, row in ipairs(results) do
+				assert.equals("Household", row.Category)
+			end
+		end)
+
+		it("returns both tenant achievements for Tenants category", function()
+			local results = AchievementService.GetAchievementsByCategory("Tenants")
+			assert.equals(2, #results)
+			assert.equals("tenant_help_first", results[1].Id)
+			assert.equals("tenant_help_expert", results[2].Id)
+			for _, row in ipairs(results) do
+				assert.equals("Tenants", row.Category)
+			end
+		end)
+
+		it("returns both crafting achievements for Crafting category", function()
+			local results = AchievementService.GetAchievementsByCategory("Crafting")
+			assert.equals(2, #results)
+			assert.equals("crafting_novice", results[1].Id)
+			assert.equals("crafting_expert", results[2].Id)
+			for _, row in ipairs(results) do
+				assert.equals("Crafting", row.Category)
+			end
+		end)
+
+		it("returns both progression achievements for Progression category", function()
+			local results = AchievementService.GetAchievementsByCategory("Progression")
+			assert.equals(2, #results)
+			assert.equals("level_5", results[1].Id)
+			assert.equals("level_12", results[2].Id)
+			for _, row in ipairs(results) do
+				assert.equals("Progression", row.Category)
+			end
+		end)
+
+		it("returns empty list for unknown category", function()
+			local results = AchievementService.GetAchievementsByCategory("UnknownCategory")
+			assert.is_table(results)
+			assert.equals(0, #results)
+		end)
+
+		it("returns empty list for case-mismatched category", function()
+			local results = AchievementService.GetAchievementsByCategory("building")
+			assert.is_table(results)
+			assert.equals(0, #results)
+		end)
+
+		it("returns empty list for empty category string", function()
+			local results = AchievementService.GetAchievementsByCategory("")
+			assert.is_table(results)
+			assert.equals(0, #results)
+		end)
+
+		it("returns empty list for nil category", function()
+			local results = AchievementService.GetAchievementsByCategory(nil)
+			assert.is_table(results)
+			assert.equals(0, #results)
+		end)
+
+		it("returns empty list for non-string category", function()
+			local results = AchievementService.GetAchievementsByCategory(123)
+			assert.is_table(results)
+			assert.equals(0, #results)
+		end)
+
+		it("returns fresh tables (no shared references)", function()
+			local a = AchievementService.GetAchievementsByCategory("Building")
+			local b = AchievementService.GetAchievementsByCategory("Building")
+			assert.are_not.equal(a, b)
+			assert.are_not.equal(a[1], b[1])
+		end)
+	end)
+
 	-- ========== GetAchievementProgress ==========
 
 	describe("GetAchievementProgress", function()
