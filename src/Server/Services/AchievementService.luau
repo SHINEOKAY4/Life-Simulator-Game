@@ -438,6 +438,31 @@ function AchievementService.GetUnlockedAndInProgress(player)
 	}
 end
 
+--- Returns the static definition metadata for the given achievement, or nil
+--- if the ID is invalid or unknown.  The returned table contains:
+---   Id, Name, Description, Category, StatKey, TargetValue, SortOrder, Rewards
+function AchievementService.GetAchievementMetadata(achievementId)
+	if type(achievementId) ~= "string" or achievementId == "" then
+		return nil
+	end
+
+	local definition = getDefinitionById(achievementId)
+	if not definition then
+		return nil
+	end
+
+	return {
+		Id = definition.Id,
+		Name = definition.Name,
+		Description = definition.Description,
+		Category = definition.Category,
+		StatKey = definition.StatKey,
+		TargetValue = definition.TargetValue,
+		SortOrder = definition.SortOrder,
+		Rewards = definition.Rewards or {},
+	}
+end
+
 function AchievementService.GetAchievementProgress(player, achievementId)
 	if type(achievementId) ~= "string" or achievementId == "" then
 		return nil

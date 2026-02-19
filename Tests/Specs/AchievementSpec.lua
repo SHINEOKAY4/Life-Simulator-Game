@@ -90,6 +90,99 @@ describe("AchievementService", function()
 		end)
 	end)
 
+	-- ========== GetAchievementMetadata ==========
+
+	describe("GetAchievementMetadata", function()
+		it("returns the full definition for a valid achievement id", function()
+			local meta = AchievementService.GetAchievementMetadata("builder_novice")
+			assert.is_not_nil(meta)
+			assert.equals("builder_novice", meta.Id)
+			assert.equals("Blueprint Beginner", meta.Name)
+			assert.equals("Place 25 objects in build mode.", meta.Description)
+			assert.equals("Building", meta.Category)
+			assert.equals("BuildPlacements", meta.StatKey)
+			assert.equals(25, meta.TargetValue)
+			assert.equals(10, meta.SortOrder)
+			assert.is_not_nil(meta.Rewards)
+			assert.equals(150, meta.Rewards.Cash)
+			assert.equals(40, meta.Rewards.Experience)
+		end)
+
+		it("returns metadata for every known achievement id", function()
+			local ids = {
+				"builder_novice", "builder_pro",
+				"chores_starter", "chores_veteran",
+				"tenant_help_first", "tenant_help_expert",
+				"crafting_novice", "crafting_expert",
+				"level_5", "level_12",
+			}
+			for _, id in ipairs(ids) do
+				local meta = AchievementService.GetAchievementMetadata(id)
+				assert.is_not_nil(meta, "expected metadata for " .. id)
+				assert.equals(id, meta.Id)
+				assert.is_string(meta.Name)
+				assert.is_string(meta.Description)
+				assert.is_string(meta.Category)
+				assert.is_string(meta.StatKey)
+				assert.is_number(meta.TargetValue)
+				assert.is_number(meta.SortOrder)
+				assert.is_table(meta.Rewards)
+			end
+		end)
+
+		it("returns nil for a non-existent achievement id", function()
+			local meta = AchievementService.GetAchievementMetadata("totally_fake_id")
+			assert.is_nil(meta)
+		end)
+
+		it("returns nil for an empty string id", function()
+			local meta = AchievementService.GetAchievementMetadata("")
+			assert.is_nil(meta)
+		end)
+
+		it("returns nil for a nil id", function()
+			local meta = AchievementService.GetAchievementMetadata(nil)
+			assert.is_nil(meta)
+		end)
+
+		it("returns nil for a numeric id", function()
+			local meta = AchievementService.GetAchievementMetadata(42)
+			assert.is_nil(meta)
+		end)
+
+		it("returns nil for a boolean id", function()
+			local meta = AchievementService.GetAchievementMetadata(true)
+			assert.is_nil(meta)
+		end)
+
+		it("returns nil for a table id", function()
+			local meta = AchievementService.GetAchievementMetadata({})
+			assert.is_nil(meta)
+		end)
+
+		it("returns a fresh table each call (not a shared reference)", function()
+			local meta1 = AchievementService.GetAchievementMetadata("builder_novice")
+			local meta2 = AchievementService.GetAchievementMetadata("builder_novice")
+			assert.is_not_nil(meta1)
+			assert.is_not_nil(meta2)
+			assert.are_not.equal(meta1, meta2) -- different table references
+			assert.equals(meta1.Id, meta2.Id)
+		end)
+
+		it("does not include player-specific state in the result", function()
+			-- Record some progress first
+			AchievementService.RecordBuildPlaced(player, 10)
+			local meta = AchievementService.GetAchievementMetadata("builder_novice")
+			-- Metadata should be purely static definition data
+			assert.is_nil(meta.CurrentValue)
+			assert.is_nil(meta.ProgressValue)
+			assert.is_nil(meta.IsUnlocked)
+			assert.is_nil(meta.IsClaimed)
+			assert.is_nil(meta.UnlockedAt)
+			assert.is_nil(meta.ClaimedAt)
+		end)
+	end)
+
 	-- ========== GetAchievementProgress ==========
 
 	describe("GetAchievementProgress", function()
