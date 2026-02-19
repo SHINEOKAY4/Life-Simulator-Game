@@ -256,6 +256,8 @@ function DailyRewardService.GetStatus(player)
 		TotalExperienceEarned = state.TotalExperienceEarned,
 		CanClaim = status.CanClaim,
 		SecondsUntilClaim = status.SecondsUntilClaim,
+		ClaimCooldownSeconds = CLAIM_COOLDOWN_SECONDS,
+		StreakGraceSeconds = STREAK_GRACE_SECONDS,
 		NextReward = nextReward,
 		NextStreak = nextStreak,
 		PendingMilestone = (milestone and not milestoneAlreadyClaimed) and milestone or nil,

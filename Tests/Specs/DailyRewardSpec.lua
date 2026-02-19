@@ -337,6 +337,12 @@ describe("DailyRewardService", function()
 		assert.equals("First Full Week", status.PendingMilestone.Label)
 	end)
 
+	it("includes cooldown and grace constants in status", function()
+		local status = DailyRewardService.GetStatus("player1")
+		assert.equals(COOLDOWN, status.ClaimCooldownSeconds)
+		assert.equals(GRACE, status.StreakGraceSeconds)
+	end)
+
 	it("does not report already-claimed milestone as pending", function()
 		-- Claim through day 7 to earn the milestone
 		for day = 1, 7 do
