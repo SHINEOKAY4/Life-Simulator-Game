@@ -90,6 +90,85 @@ describe("AchievementService", function()
 		end)
 	end)
 
+	-- ========== GetAchievementProgress ==========
+
+	describe("GetAchievementProgress", function()
+		it("returns nil for nil player", function()
+			local progress = AchievementService.GetAchievementProgress(nil, "builder_novice")
+			assert.is_nil(progress)
+		end)
+
+		it("returns nil for a non-existent achievement id", function()
+			local progress = AchievementService.GetAchievementProgress(player, "nonexistent_achievement")
+			assert.is_nil(progress)
+		end)
+
+		it("returns nil for empty string achievement id", function()
+			local progress = AchievementService.GetAchievementProgress(player, "")
+			assert.is_nil(progress)
+		end)
+
+		it("returns nil for non-string achievement id", function()
+			local progress = AchievementService.GetAchievementProgress(player, 123)
+			assert.is_nil(progress)
+		end)
+
+		it("returns 0 for a new player with no progress on an achievement", function()
+			local progress = AchievementService.GetAchievementProgress(player, "builder_novice")
+			assert.equals(0, progress)
+		end)
+
+		it("returns partial progress for an in-progress achievement", function()
+			AchievementService.RecordBuildPlaced(player, 10)
+			local progress = AchievementService.GetAchievementProgress(player, "builder_novice")
+			assert.equals(10, progress)
+		end)
+
+		it("returns the target value for a fully unlocked achievement", function()
+			AchievementService.RecordBuildPlaced(player, 25)
+			local progress = AchievementService.GetAchievementProgress(player, "builder_novice")
+			assert.equals(25, progress)
+		end)
+
+		it("clamps progress to target value when stat exceeds threshold", function()
+			AchievementService.RecordBuildPlaced(player, 200)
+			local progress = AchievementService.GetAchievementProgress(player, "builder_novice")
+			-- builder_novice target is 25; once unlocked stat snaps to target
+			assert.equals(25, progress)
+		end)
+
+		it("returns correct progress for a higher-tier in-progress achievement", function()
+			AchievementService.RecordBuildPlaced(player, 30)
+			-- builder_pro target is 150; 30 is partial progress
+			local progress = AchievementService.GetAchievementProgress(player, "builder_pro")
+			assert.equals(30, progress)
+		end)
+
+		it("returns correct progress for overwrite-max stat (level)", function()
+			AchievementService.RecordLevelReached(player, 3)
+			local progress = AchievementService.GetAchievementProgress(player, "level_5")
+			assert.equals(3, progress)
+		end)
+
+		it("returns target value for a claimed achievement", function()
+			AchievementService.RecordBuildPlaced(player, 25)
+			AchievementService.ClaimAchievement(player, "builder_novice")
+			local progress = AchievementService.GetAchievementProgress(player, "builder_novice")
+			assert.equals(25, progress)
+		end)
+
+		it("returns independent progress per player", function()
+			local player2 = { UserId = 99, Name = "OtherPlayer" }
+			AchievementService.RecordBuildPlaced(player, 15)
+			AchievementService.RecordBuildPlaced(player2, 5)
+
+			local p1 = AchievementService.GetAchievementProgress(player, "builder_novice")
+			local p2 = AchievementService.GetAchievementProgress(player2, "builder_novice")
+			assert.equals(15, p1)
+			assert.equals(5, p2)
+		end)
+	end)
+
 	-- ========== Stat recording ==========
 
 	describe("RecordBuildPlaced", function()

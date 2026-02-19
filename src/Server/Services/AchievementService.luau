@@ -438,6 +438,25 @@ function AchievementService.GetUnlockedAndInProgress(player)
 	}
 end
 
+function AchievementService.GetAchievementProgress(player, achievementId)
+	if type(achievementId) ~= "string" or achievementId == "" then
+		return nil
+	end
+
+	local definition = getDefinitionById(achievementId)
+	if not definition then
+		return nil
+	end
+
+	local state = getStateForPlayer(player, false)
+	if not state then
+		return nil
+	end
+
+	local current, progress, target, isUnlocked, isClaimed = definitionProgress(state, definition)
+	return progress
+end
+
 function AchievementService.RecordBuildPlaced(player, quantity)
 	local increment
 	if type(quantity) == "number" and quantity > 0 then
