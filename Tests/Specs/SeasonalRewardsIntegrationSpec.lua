@@ -19,6 +19,36 @@ describe("Seasonal Rewards Integration", function()
 		SeasonalEventService._SetNotificationSink(nil)
 	end)
 
+	local function distributeForPlayerList(playerIds, connectedPlayers)
+		local summary = {
+			Processed = 0,
+			SkippedDisconnected = 0,
+			Errors = {},
+		}
+
+		if type(playerIds) ~= "table" then
+			return summary
+		end
+
+		for _, playerId in ipairs(playerIds) do
+			if connectedPlayers and not connectedPlayers[playerId] then
+				summary.SkippedDisconnected = summary.SkippedDisconnected + 1
+			else
+				local result, err = SeasonalEventService.DistributeSeasonRewards(playerId)
+				if result then
+					summary.Processed = summary.Processed + 1
+				else
+					table.insert(summary.Errors, {
+						PlayerId = playerId,
+						Error = err,
+					})
+				end
+			end
+		end
+
+		return summary
+	end
+
 	-- Season challenge data for verification
 	-- Spring: spring_builder (300/$75), spring_green (200/$50) = 500/$125
 	-- Summer: summer_landlord (350/$80), summer_crafter (250/$60) = 600/$140
@@ -295,6 +325,70 @@ describe("Seasonal Rewards Integration", function()
 			-- Player2 has no distributed rewards (rollback)
 			local pending2 = SeasonalEventService.GetPendingRewards("player2")
 			assert.equals(1, #pending2.Challenges)
+		end)
+	end)
+
+	describe("Reward distribution edge-case fixture", function()
+		it("handles empty player lists with no work", function()
+			local summary = distributeForPlayerList({}, {})
+			assert.equals(0, summary.Processed)
+			assert.equals(0, summary.SkippedDisconnected)
+			assert.equals(0, #summary.Errors)
+		end)
+
+		it("skips disconnected players while distributing connected players", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			SeasonalEventService.TransitionSeason("player2", "Spring")
+			SeasonalEventService.RecordProgress("player2", "SeasonalBuildPlacements", 20)
+
+			local summary = distributeForPlayerList({ "player1", "player2" }, {
+				player1 = true,
+				-- player2 intentionally omitted to model disconnection
+			})
+
+			assert.equals(1, summary.Processed)
+			assert.equals(1, summary.SkippedDisconnected)
+			assert.equals(0, #summary.Errors)
+
+			local pending1 = SeasonalEventService.GetPendingRewards("player1")
+			assert.equals(0, #pending1.Challenges)
+
+			local pending2 = SeasonalEventService.GetPendingRewards("player2")
+			assert.equals(1, #pending2.Challenges)
+			assert.equals("spring_builder", pending2.Challenges[1].Id)
+		end)
+
+		it("prevents concurrent distributions for the same player", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.RecordProgress("player1", "SeasonalChoresCompleted", 8)
+
+			local nestedResult = nil
+			local nestedErr = nil
+			local injected = false
+
+			SeasonalEventService._SetRewardExecutor(function(playerId, cash, xp, source)
+				if cash > 0 and not injected then
+					injected = true
+					nestedResult, nestedErr = SeasonalEventService.DistributeSeasonRewards(playerId)
+				end
+				return true, nil
+			end)
+
+			local outerResult, outerErr = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(outerErr)
+			assert.is_not_nil(outerResult)
+			assert.equals(500, outerResult.TotalCashDistributed)
+			assert.equals(125, outerResult.TotalExperienceDistributed)
+
+			assert.is_nil(nestedResult)
+			assert.equals("DistributionInProgress", nestedErr)
+
+			local status = SeasonalEventService.GetStatus("player1")
+			assert.equals(500, status.TotalCashDistributed)
+			assert.equals(125, status.TotalExperienceDistributed)
 		end)
 	end)
 

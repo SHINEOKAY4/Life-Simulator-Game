@@ -177,6 +177,7 @@ end
 -- Internal state per player (keyed by playerId string) for test mode
 local testStateByPlayerId = {}
 local trackedTestPlayersByKey = {}
+local activeDistributionsByPlayerKey = {}
 
 -- Notification sink (injectable for tests)
 local notificationSink = nil
@@ -910,14 +911,25 @@ function SeasonalEventService.DistributeSeasonRewards(player)
 		return nil, "InvalidPlayer"
 	end
 
+	local playerKey = tostring(player)
+	if activeDistributionsByPlayerKey[playerKey] then
+		return nil, "DistributionInProgress"
+	end
+	activeDistributionsByPlayerKey[playerKey] = true
+
+	local function finish(result, err)
+		activeDistributionsByPlayerKey[playerKey] = nil
+		return result, err
+	end
+
 	local state = getStateForPlayer(player)
 	if not state then
-		return nil, "PlayerNotFound"
+		return finish(nil, "PlayerNotFound")
 	end
 
 	local seasonDef = getSeasonDef(state.CurrentSeason)
 	if not seasonDef then
-		return nil, "InvalidSeason"
+		return finish(nil, "InvalidSeason")
 	end
 
 	-- Collect all pending challenge rewards
@@ -941,13 +953,13 @@ function SeasonalEventService.DistributeSeasonRewards(player)
 
 	-- Nothing to distribute
 	if #pendingChallenges == 0 and #pendingMilestones == 0 then
-		return {
+		return finish({
 			ChallengesDistributed = 0,
 			MilestonesDistributed = 0,
 			TotalCashDistributed = 0,
 			TotalExperienceDistributed = 0,
 			Details = {},
-		}, nil
+		}, nil)
 	end
 
 	-- Distribute rewards one by one, tracking what was granted for rollback
@@ -976,7 +988,7 @@ function SeasonalEventService.DistributeSeasonRewards(player)
 				state.TotalCashDistributed = state.TotalCashDistributed - entry.cash
 				state.TotalExperienceDistributed = state.TotalExperienceDistributed - entry.xp
 			end
-			return nil, "DistributionFailed"
+			return finish(nil, "DistributionFailed")
 		end
 
 		state.ClaimedChallengeRewards[challenge.Id] = true
@@ -1013,7 +1025,7 @@ function SeasonalEventService.DistributeSeasonRewards(player)
 				state.TotalCashDistributed = state.TotalCashDistributed - entry.cash
 				state.TotalExperienceDistributed = state.TotalExperienceDistributed - entry.xp
 			end
-			return nil, "DistributionFailed"
+			return finish(nil, "DistributionFailed")
 		end
 
 		state.ClaimedMilestoneRewards[key] = true
@@ -1063,13 +1075,13 @@ function SeasonalEventService.DistributeSeasonRewards(player)
 		MilestonesDistributed = milestoneCount,
 	})
 
-	return {
+	return finish({
 		ChallengesDistributed = challengeCount,
 		MilestonesDistributed = milestoneCount,
 		TotalCashDistributed = totalCash,
 		TotalExperienceDistributed = totalXP,
 		Details = details,
-	}, nil
+	}, nil)
 end
 
 --[=[
@@ -1310,6 +1322,7 @@ end
 function SeasonalEventService._ResetForTests()
 	testStateByPlayerId = {}
 	trackedTestPlayersByKey = {}
+	activeDistributionsByPlayerKey = {}
 	SeasonalEventService._testNotifications = {}
 	weatherServiceRef = nil
 	weatherInitToken = weatherInitToken + 1
