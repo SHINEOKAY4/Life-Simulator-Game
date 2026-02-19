@@ -6,12 +6,27 @@
 --  - rewards (currency, XP, items) and simple quest chains via prerequisites
 --  - quest states: locked, available, in_progress, completed, claimed
 --  - auto-completion hooks (when all objectives are satisfied)
+-- Works both in Roblox runtime and in Busted tests loaded via loadfile().
 
-local Players = game:GetService("Players")
+local function hasRobloxRuntime()
+    if type(game) ~= "userdata" and type(game) ~= "table" then
+        return false
+    end
+    return pcall(function()
+        return game:GetService("Players")
+    end)
+end
+
+local IS_ROBLOX = hasRobloxRuntime()
+local Players = nil
+
+if IS_ROBLOX then
+    Players = game:GetService("Players")
+end
 
 -- Local minimal config fallback if no global config is present.
 local QuestsConfig = nil
-do
+if IS_ROBLOX then
     local ok, cfg = pcall(function()
         return require(game:GetService("ReplicatedStorage").Shared.Configurations.QuestsConfig)
     end)
@@ -24,46 +39,25 @@ end
 
 local QuestService = {}
 
--- Types for better tooling (not strictly required at runtime)
-export type Objective = {
-    id: string,
-    kind: string, -- e.g. "Collect", "Place", "Talk", "Visit"
-    target: any,  -- number for quantitative goals, string for named targets
-    progress?: number,
-}
-
-export type QuestDefinition = {
-    id: string,
-    name?: string,
-    prerequisites?: { string }?, -- quest ids that must be completed before available
-    objectives: { Objective },
-    rewards?: {
-        Currency?: { Name: string, Amount: number }[],
-        XP?: number,
-        Items?: { DefId: string, Quantity: number }[],
-    },
-    AutoClaim?: boolean, -- if true, reward is granted and quest is marked claimed immediately on completion
-}
-
-export type QuestState = {
-    State: string, -- one of: "locked", "available", "in_progress", "completed", "claimed"
-    Progress: { [string]: number }, -- objectiveId -> progress
-}
-
-type PlayerQuestState = { [string]: QuestState }
+-- Type definitions (Luau export types not used to keep loadfile() compatibility)
+-- Objective: { id: string, kind: string, target: any, progress?: number }
+-- QuestDefinition: { id: string, name?: string, prerequisites?: {string},
+--   objectives: {Objective}, rewards?: { Currency?, XP?, Items? }, AutoClaim?: boolean }
+-- QuestState: { State: string, Progress: { [string]: number } }
+-- PlayerQuestState: { [string]: QuestState }
 
 -- Runtime storage (per player) for quick unit tests without DataStore integration
-local PlayerQuests: { [number]: PlayerQuestState } = {}
+local PlayerQuests = {} -- [playerKey] -> PlayerQuestState
 
-local function _getPlayerKey(player: any): string
+local function _getPlayerKey(player)
     return tostring(player and (player.UserId or player.Name) or "unknown")
 end
 
 -- The in-memory quest catalog (id -> QuestDefinition)
-local QuestCatalog: { [string]: QuestDefinition } = {}
+local QuestCatalog = {}
 
 -- Simple in-memory log of rewards granted per player per quest (for tests/QA)
-local RewardsLog: { [number]: { [string]: any } } = {}
+local RewardsLog = {}
 
 -- Build a small default catalog if no config is provided. This keeps tests deterministic.
 local function EnsureDefaultCatalog()
@@ -106,13 +100,13 @@ local function loadCatalogIfNeeded()
 end
 
 -- Helpers: get or create a player's quest state table
-local function HydratePlayer(player: any): { [string]: QuestState }
+local function HydratePlayer(player)
     local key = _getPlayerKey(player)
     if PlayerQuests[tonumber(key) or key] == nil then
         PlayerQuests[tonumber(key) or key] = {}
         -- initialize for all quests: locked unless prerequisites satisfied
         for id, def in pairs(QuestCatalog) do
-            local state: QuestState = { State = "locked", Progress = {} }
+            local state = { State = "locked", Progress = {} }
             -- prerequisites check
             if def.prerequisites == nil or #def.prerequisites == 0 then
                 state.State = "available"
@@ -125,12 +119,12 @@ local function HydratePlayer(player: any): { [string]: QuestState }
     return PlayerQuests[tonumber(key) or key]
 end
 
-local function getStateForQuest(player: any, questId: string): QuestState?
+local function getStateForQuest(player, questId)
     local st = HydratePlayer(player)[questId]
     return st
 end
 
-local function ensureQuestExists(questId: string): QuestDefinition?
+local function ensureQuestExists(questId)
     loadCatalogIfNeeded()
     return QuestCatalog[questId]
 end
@@ -148,7 +142,7 @@ function QuestService.Init()
 end
 
 -- Recompute all quest states for a player based on prerequisites and current completion
-function QuestService.RefreshPlayerStates(player: any)
+function QuestService.RefreshPlayerStates(player)
     if not player then return end
     local catalog = QuestCatalog
     local key = _getPlayerKey(player)
@@ -176,20 +170,20 @@ function QuestService.RefreshPlayerStates(player: any)
 end
 
 -- Get a player's current state table for all quests (for tests/diagnostics)
-function QuestService.GetPlayerQuests(player: any): { [string]: QuestState }?
+function QuestService.GetPlayerQuests(player)
     if not player then return nil end
     return HydratePlayer(player)
 end
 
 -- Get the rewards log for a player (for tests/QA)
-function QuestService.GetRewardsLog(player: any): { [string]: any }?
+function QuestService.GetRewardsLog(player)
     if not player then return nil end
     local key = _getPlayerKey(player)
     return RewardsLog[key] or {}
 end
 
 -- Start a quest if it is available
-function QuestService.StartQuest(player: any, questId: string): boolean, string?
+function QuestService.StartQuest(player, questId)
     local quest = ensureQuestExists(questId)
     if not quest then
         return false, "UnknownQuest"
@@ -214,7 +208,7 @@ function QuestService.StartQuest(player: any, questId: string): boolean, string?
 end
 
 -- Generic progress update for an objective by numeric delta
-function QuestService.ProgressObjective(player: any, questId: string, objectiveId: string, delta: number): boolean, string?
+function QuestService.ProgressObjective(player, questId, objectiveId, delta)
     if delta < 0 then delta = 0 end
     local quest = ensureQuestExists(questId)
     if not quest then return false, "UnknownQuest" end
@@ -264,7 +258,7 @@ function QuestService.ProgressObjective(player: any, questId: string, objectiveI
 end
 
 -- Report a produced item collection for an objective
-function QuestService.ReportItemCollected(player: any, questId: string, itemDefId: string, qty: number): boolean, string?
+function QuestService.ReportItemCollected(player, questId, itemDefId, qty)
     local quest = ensureQuestExists(questId)
     if not quest then return false, "UnknownQuest" end
     local state = getStateForQuest(player, questId)
@@ -286,20 +280,20 @@ function QuestService.ReportItemCollected(player: any, questId: string, itemDefI
 end
 
 -- Place/Talk/Visit helpers: callers can signal a trigger by objective id
-function QuestService.TriggerObjectiveEvent(player: any, questId: string, objectiveId: string): boolean, string?
+function QuestService.TriggerObjectiveEvent(player, questId, objectiveId)
     -- simply bump progress by 1 for the given objective
     return QuestService.ProgressObjective(player, questId, objectiveId, 1)
 end
 
 -- Claim rewards for a completed quest
-function QuestService.ClaimQuest(player: any, questId: string): boolean, string?
+function QuestService.ClaimQuest(player, questId)
     local quest = ensureQuestExists(questId)
     if not quest then return false, "UnknownQuest" end
     local state = getStateForQuest(player, questId)
     if not state or state.State ~= "completed" then return false, "NotCompletable" end
     -- Reward application is stubbed for testability: we log rewards instead of mutating
-    if quest.Rewards then
-        local rewards = quest.Rewards
+    if quest.rewards then
+        local rewards = quest.rewards
         local key = _getPlayerKey(player)
         RewardsLog[key] = RewardsLog[key] or {}
         RewardsLog[key][questId] = rewards
@@ -311,6 +305,13 @@ function QuestService.ClaimQuest(player: any, questId: string): boolean, string?
     pstore[questId] = state
     PlayerQuests[tonumber(key) or key] = pstore
     return true
+end
+
+-- Reset all runtime state for test isolation.
+function QuestService._ResetForTests()
+    PlayerQuests = {}
+    QuestCatalog = {}
+    RewardsLog = {}
 end
 
 return QuestService
