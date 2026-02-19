@@ -167,6 +167,26 @@ describe("AchievementService", function()
 			assert.equals(15, p1)
 			assert.equals(5, p2)
 		end)
+
+		it("tracks progress independently across multi-tier achievements sharing one stat", function()
+			AchievementService.RecordBuildPlaced(player, 25)
+
+			local noviceProgress = AchievementService.GetAchievementProgress(player, "builder_novice")
+			local proProgress = AchievementService.GetAchievementProgress(player, "builder_pro")
+
+			assert.equals(25, noviceProgress)
+			assert.equals(25, proProgress)
+		end)
+
+		it("clamps each multi-tier achievement at its own target", function()
+			AchievementService.RecordBuildPlaced(player, 500)
+
+			local noviceProgress = AchievementService.GetAchievementProgress(player, "builder_novice")
+			local proProgress = AchievementService.GetAchievementProgress(player, "builder_pro")
+
+			assert.equals(25, noviceProgress)
+			assert.equals(150, proProgress)
+		end)
 	end)
 
 	-- ========== Stat recording ==========
