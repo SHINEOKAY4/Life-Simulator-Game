@@ -1022,6 +1022,114 @@ describe("SeasonalEventService", function()
 			assert.is_true(ids["spring_builder"])
 			assert.is_true(ids["spring_green"])
 		end)
+
+		it("rejects re-entrant distribution for the same player", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			local nestedResult = nil
+			local nestedErr = nil
+			local reentrantAttempted = false
+
+			SeasonalEventService._SetRewardExecutor(function(playerId, cash, xp, source)
+				-- On the first forward call, attempt a re-entrant distribution
+				if not reentrantAttempted and cash > 0 then
+					reentrantAttempted = true
+					nestedResult, nestedErr = SeasonalEventService.DistributeSeasonRewards(playerId)
+				end
+				return true, nil
+			end)
+
+			local outerResult, outerErr = SeasonalEventService.DistributeSeasonRewards("player1")
+
+			-- Outer call succeeds normally
+			assert.is_nil(outerErr)
+			assert.is_not_nil(outerResult)
+			assert.equals(1, outerResult.ChallengesDistributed)
+			assert.equals(300, outerResult.TotalCashDistributed)
+
+			-- Nested re-entrant call was rejected by the concurrency guard
+			assert.is_true(reentrantAttempted)
+			assert.is_nil(nestedResult)
+			assert.equals("DistributionInProgress", nestedErr)
+		end)
+
+		it("allows distribution for a different player while one is in progress", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+			SeasonalEventService.TransitionSeason("player2", "Spring")
+			SeasonalEventService.RecordProgress("player2", "SeasonalBuildPlacements", 20)
+
+			local player2Result = nil
+			local player2Err = nil
+			local crossPlayerAttempted = false
+
+			SeasonalEventService._SetRewardExecutor(function(playerId, cash, xp, source)
+				-- During player1's distribution, try distributing for player2
+				if not crossPlayerAttempted and playerId == "player1" and cash > 0 then
+					crossPlayerAttempted = true
+					player2Result, player2Err = SeasonalEventService.DistributeSeasonRewards("player2")
+				end
+				return true, nil
+			end)
+
+			local player1Result, player1Err = SeasonalEventService.DistributeSeasonRewards("player1")
+
+			-- Both distributions should succeed (guard is per-player)
+			assert.is_true(crossPlayerAttempted)
+			assert.is_nil(player1Err)
+			assert.is_not_nil(player1Result)
+			assert.equals(300, player1Result.TotalCashDistributed)
+
+			assert.is_nil(player2Err)
+			assert.is_not_nil(player2Result)
+			assert.equals(300, player2Result.TotalCashDistributed)
+		end)
+
+		it("releases the guard after distribution completes so subsequent calls succeed", function()
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			-- First distribution claims the reward
+			local result1, err1 = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(err1)
+			assert.is_not_nil(result1)
+			assert.equals(1, result1.ChallengesDistributed)
+
+			-- Second call should NOT be blocked by the guard (it was released)
+			-- No pending rewards remain, but the call should succeed rather than
+			-- returning "DistributionInProgress"
+			local result2, err2 = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(err2)
+			assert.is_not_nil(result2)
+			assert.equals(0, result2.ChallengesDistributed)
+		end)
+
+		it("releases the guard even when distribution fails", function()
+			local shouldFail = true
+			SeasonalEventService._SetRewardExecutor(function(playerId, cash, xp, source)
+				if shouldFail and cash > 0 then
+					return false, "Unavailable"
+				end
+				return true, nil
+			end)
+
+			SeasonalEventService.TransitionSeason("player1", "Spring")
+			SeasonalEventService.RecordProgress("player1", "SeasonalBuildPlacements", 20)
+
+			-- First call fails
+			local result1, err1 = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(result1)
+			assert.equals("DistributionFailed", err1)
+
+			-- Guard should be released; second call must not return "DistributionInProgress"
+			shouldFail = false
+			local result2, err2 = SeasonalEventService.DistributeSeasonRewards("player1")
+			assert.is_nil(err2)
+			assert.is_not_nil(result2)
+			assert.equals(1, result2.ChallengesDistributed)
+			assert.equals(300, result2.TotalCashDistributed)
+		end)
 	end)
 
 	-- ========== Rollback on Failure ==========
