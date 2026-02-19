@@ -1,67 +1,202 @@
---!strict
 -- Server/Services/AchievementService.luau
 -- Tracks achievement progress, persistence, and claim rewards.
+-- Works both in Roblox runtime and in Busted tests loaded via loadfile().
 
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerScriptService = game:GetService("ServerScriptService")
-local Workspace = game:GetService("Workspace")
+local function hasRobloxRuntime()
+	if type(game) ~= "userdata" and type(game) ~= "table" then
+		return false
+	end
+	return pcall(function()
+		return game:GetService("Players")
+	end)
+end
 
-local AchievementDefinitions = require(ReplicatedStorage.Shared.Definitions.AchievementDefinitions)
-local AchievementPackets = require(ReplicatedStorage.Network.AchievementPackets)
-local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
-local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
+local IS_ROBLOX = hasRobloxRuntime()
+local Players = nil
+local ReplicatedStorage = nil
+local ServerScriptService = nil
+local AchievementDefinitions = nil
+local AchievementPackets = nil
+local PlayerSession = nil
+local CurrencyService = nil
 
-type AchievementDefinition = {
-	Id: string,
-	Name: string,
-	Description: string,
-	Category: string,
-	StatKey: string,
-	TargetValue: number,
-	SortOrder: number,
-	Rewards: { Cash: number?, Experience: number? }?,
+if IS_ROBLOX then
+	Players = game:GetService("Players")
+	ReplicatedStorage = game:GetService("ReplicatedStorage")
+	ServerScriptService = game:GetService("ServerScriptService")
+
+	AchievementDefinitions = require(ReplicatedStorage.Shared.Definitions.AchievementDefinitions)
+	AchievementPackets = require(ReplicatedStorage.Network.AchievementPackets)
+	PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
+	CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
+end
+
+-- ============ Inline definitions for test mode ============
+
+local INLINE_DEFINITIONS = {
+	{
+		Id = "builder_novice",
+		Name = "Blueprint Beginner",
+		Description = "Place 25 objects in build mode.",
+		Category = "Building",
+		StatKey = "BuildPlacements",
+		TargetValue = 25,
+		SortOrder = 10,
+		Rewards = { Cash = 150, Experience = 40 },
+	},
+	{
+		Id = "builder_pro",
+		Name = "Master Builder",
+		Description = "Place 150 objects in build mode.",
+		Category = "Building",
+		StatKey = "BuildPlacements",
+		TargetValue = 150,
+		SortOrder = 11,
+		Rewards = { Cash = 500, Experience = 120 },
+	},
+	{
+		Id = "chores_starter",
+		Name = "Clean Sweep",
+		Description = "Complete 10 chores.",
+		Category = "Household",
+		StatKey = "ChoresCompleted",
+		TargetValue = 10,
+		SortOrder = 20,
+		Rewards = { Cash = 225, Experience = 55 },
+	},
+	{
+		Id = "chores_veteran",
+		Name = "Caretaker",
+		Description = "Complete 50 chores.",
+		Category = "Household",
+		StatKey = "ChoresCompleted",
+		TargetValue = 50,
+		SortOrder = 21,
+		Rewards = { Cash = 800, Experience = 180 },
+	},
+	{
+		Id = "tenant_help_first",
+		Name = "Helping Hand",
+		Description = "Resolve 5 tenant help requests.",
+		Category = "Tenants",
+		StatKey = "TenantHelpsCompleted",
+		TargetValue = 5,
+		SortOrder = 30,
+		Rewards = { Cash = 250, Experience = 60 },
+	},
+	{
+		Id = "tenant_help_expert",
+		Name = "Beloved Landlord",
+		Description = "Resolve 30 tenant help requests.",
+		Category = "Tenants",
+		StatKey = "TenantHelpsCompleted",
+		TargetValue = 30,
+		SortOrder = 31,
+		Rewards = { Cash = 1200, Experience = 260 },
+	},
+	{
+		Id = "crafting_novice",
+		Name = "First Workshop",
+		Description = "Complete 5 crafting jobs.",
+		Category = "Crafting",
+		StatKey = "CraftingJobsCompleted",
+		TargetValue = 5,
+		SortOrder = 40,
+		Rewards = { Cash = 175, Experience = 70 },
+	},
+	{
+		Id = "crafting_expert",
+		Name = "Assembly Line",
+		Description = "Complete 40 crafting jobs.",
+		Category = "Crafting",
+		StatKey = "CraftingJobsCompleted",
+		TargetValue = 40,
+		SortOrder = 41,
+		Rewards = { Cash = 900, Experience = 280 },
+	},
+	{
+		Id = "level_5",
+		Name = "Up and Running",
+		Description = "Reach player level 5.",
+		Category = "Progression",
+		StatKey = "HighestLevelReached",
+		TargetValue = 5,
+		SortOrder = 50,
+		Rewards = { Cash = 350, Experience = 0 },
+	},
+	{
+		Id = "level_12",
+		Name = "Established Owner",
+		Description = "Reach player level 12.",
+		Category = "Progression",
+		StatKey = "HighestLevelReached",
+		TargetValue = 12,
+		SortOrder = 51,
+		Rewards = { Cash = 1400, Experience = 0 },
+	},
 }
 
-type AchievementState = {
-	Version: number,
-	Stats: { [string]: number },
-	Unlocked: { [string]: number },
-	Claimed: { [string]: number },
-}
+local function getDefinitionsList()
+	if IS_ROBLOX and AchievementDefinitions then
+		return AchievementDefinitions.List
+	end
+	return INLINE_DEFINITIONS
+end
+
+local inlineById = {}
+for _, def in ipairs(INLINE_DEFINITIONS) do
+	inlineById[def.Id] = def
+end
+
+local function getDefinitionById(achievementId)
+	if IS_ROBLOX and AchievementDefinitions then
+		return AchievementDefinitions.GetById(achievementId)
+	end
+	return inlineById[achievementId]
+end
+
+-- ============ Constants ============
 
 local CURRENT_VERSION = 1
 
+-- ============ Service ============
+
 local AchievementService = {}
 
-local function now(): number
-	return Workspace:GetServerTimeNow()
+-- Configurable clock for tests
+local clockFn = os.time
+
+local function now()
+	if IS_ROBLOX then
+		return game:GetService("Workspace"):GetServerTimeNow()
+	end
+	return clockFn()
 end
 
-local function asWholePositive(value: any): number
-	if typeof(value) ~= "number" or value ~= value or value < 0 then
+local function asWholePositive(value)
+	if type(value) ~= "number" or value ~= value or value < 0 then
 		return 0
 	end
 	return math.max(0, math.floor(value + 0.5))
 end
 
-local function ensureState(profile: { [string]: any }): AchievementState
+local function ensureState(profile)
 	local state = profile.AchievementState
-	if typeof(state) ~= "table" then
+	if type(state) ~= "table" then
 		state = {}
 		profile.AchievementState = state
 	end
 
-	if typeof(state.Version) ~= "number" then
+	if type(state.Version) ~= "number" then
 		state.Version = CURRENT_VERSION
 	end
-	if typeof(state.Stats) ~= "table" then
+	if type(state.Stats) ~= "table" then
 		state.Stats = {}
 	end
-	if typeof(state.Unlocked) ~= "table" then
+	if type(state.Unlocked) ~= "table" then
 		state.Unlocked = {}
 	end
-	if typeof(state.Claimed) ~= "table" then
+	if type(state.Claimed) ~= "table" then
 		state.Claimed = {}
 	end
 
@@ -75,10 +210,10 @@ local function ensureState(profile: { [string]: any }): AchievementState
 		state.Claimed[achievementId] = asWholePositive(value)
 	end
 
-	return state :: AchievementState
+	return state
 end
 
-local function definitionProgress(state: AchievementState, definition: AchievementDefinition)
+local function definitionProgress(state, definition)
 	local current = asWholePositive(state.Stats[definition.StatKey])
 	local target = math.max(1, asWholePositive(definition.TargetValue))
 	local progress = math.min(current, target)
@@ -87,18 +222,19 @@ local function definitionProgress(state: AchievementState, definition: Achieveme
 	return current, progress, target, isUnlocked, isClaimed
 end
 
-local function buildSnapshotFromState(state: AchievementState): { [string]: any }
-	local rows = table.create(#AchievementDefinitions.List)
+local function buildSnapshotFromState(state)
+	local list = getDefinitionsList()
+	local rows = {}
 	local unlockedCount = 0
 	local claimedCount = 0
 
-	for _, definition in ipairs(AchievementDefinitions.List) do
+	for _, definition in ipairs(list) do
 		local current, progress, target, isUnlocked, isClaimed = definitionProgress(state, definition)
 		if isUnlocked then
-			unlockedCount += 1
+			unlockedCount = unlockedCount + 1
 		end
 		if isClaimed then
-			claimedCount += 1
+			claimedCount = claimedCount + 1
 		end
 
 		rows[#rows + 1] = {
@@ -123,42 +259,87 @@ local function buildSnapshotFromState(state: AchievementState): { [string]: any 
 		Achievements = rows,
 		UnlockedCount = unlockedCount,
 		ClaimedCount = claimedCount,
-		TotalCount = #AchievementDefinitions.List,
+		TotalCount = #list,
 		Stats = state.Stats,
 	}
 end
 
-local function sendSnapshot(player: Player, state: AchievementState)
-	AchievementPackets.SnapshotUpdated:FireClient(player, buildSnapshotFromState(state))
+-- ============ Test-mode state management ============
+
+local testProfiles = {}
+
+local function sendSnapshot(player, state)
+	if IS_ROBLOX and AchievementPackets then
+		AchievementPackets.SnapshotUpdated:FireClient(player, buildSnapshotFromState(state))
+	end
+	-- In test mode, snapshots are ignored (callers inspect state directly)
 end
 
-local function getStateForPlayer(player: Player, shouldAwait: boolean): AchievementState?
-	local profile = if shouldAwait then PlayerSession.GetDataAwait(player) else PlayerSession.GetData(player)
-	if typeof(profile) ~= "table" then
+local function getStateForPlayer(player, shouldAwait)
+	if IS_ROBLOX then
+		local profile
+		if shouldAwait then
+			profile = PlayerSession.GetDataAwait(player)
+		else
+			profile = PlayerSession.GetData(player)
+		end
+		if type(profile) ~= "table" then
+			return nil
+		end
+		return ensureState(profile)
+	end
+
+	-- Test mode: use in-memory profiles keyed by UserId
+	if player == nil then
 		return nil
+	end
+	local key = tostring(player.UserId or player)
+	local profile = testProfiles[key]
+	if not profile then
+		profile = {}
+		testProfiles[key] = profile
 	end
 	return ensureState(profile)
 end
 
-local function getProgressionService()
-	local module = require(ServerScriptService.Server.Services.ProgressionService)
-	return module
+local function getProfileForPlayer(player)
+	if IS_ROBLOX then
+		return PlayerSession.GetData(player)
+	end
+	if player == nil then
+		return nil
+	end
+	local key = tostring(player.UserId or player)
+	local profile = testProfiles[key]
+	if not profile then
+		profile = {}
+		testProfiles[key] = profile
+	end
+	return profile
 end
 
-local function tryUnlockDefinition(
-	player: Player,
-	state: AchievementState,
-	definition: AchievementDefinition,
-	unlockedIds: { string }
-)
+local function getProgressionService()
+	if IS_ROBLOX then
+		local module = require(ServerScriptService.Server.Services.ProgressionService)
+		return module
+	end
+	-- Test mode stub: no-op
+	return {
+		AwardExperience = function() end,
+	}
+end
+
+local function tryUnlockDefinition(player, state, definition, unlockedIds)
 	local _, _, target, isUnlocked, _ = definitionProgress(state, definition)
 	if isUnlocked and state.Unlocked[definition.Id] == nil then
 		state.Unlocked[definition.Id] = now()
 		unlockedIds[#unlockedIds + 1] = definition.Id
-		AchievementPackets.AchievementUnlocked:FireClient(player, {
-			AchievementId = definition.Id,
-			UnlockedAt = state.Unlocked[definition.Id],
-		})
+		if IS_ROBLOX and AchievementPackets then
+			AchievementPackets.AchievementUnlocked:FireClient(player, {
+				AchievementId = definition.Id,
+				UnlockedAt = state.Unlocked[definition.Id],
+			})
+		end
 	end
 	-- Snap to target for cleaner displays once unlocked.
 	if isUnlocked then
@@ -169,7 +350,7 @@ local function tryUnlockDefinition(
 	end
 end
 
-local function applyStatDelta(player: Player, statKey: string, delta: number, overwriteMaxValue: boolean?)
+local function applyStatDelta(player, statKey, delta, overwriteMaxValue)
 	if delta == 0 then
 		return
 	end
@@ -191,8 +372,8 @@ local function applyStatDelta(player: Player, statKey: string, delta: number, ov
 
 	state.Stats[statKey] = newValue
 
-	local unlockedIds: { string } = {}
-	for _, definition in ipairs(AchievementDefinitions.List) do
+	local unlockedIds = {}
+	for _, definition in ipairs(getDefinitionsList()) do
 		if definition.StatKey == statKey then
 			tryUnlockDefinition(player, state, definition, unlockedIds)
 		end
@@ -201,7 +382,9 @@ local function applyStatDelta(player: Player, statKey: string, delta: number, ov
 	sendSnapshot(player, state)
 end
 
-function AchievementService.GetSnapshot(player: Player): { [string]: any }?
+-- ============ Public API ============
+
+function AchievementService.GetSnapshot(player)
 	local state = getStateForPlayer(player, false)
 	if not state then
 		return nil
@@ -209,39 +392,44 @@ function AchievementService.GetSnapshot(player: Player): { [string]: any }?
 	return buildSnapshotFromState(state)
 end
 
-function AchievementService.RecordBuildPlaced(player: Player, quantity: number?)
-	local increment = if typeof(quantity) == "number" and quantity > 0 then asWholePositive(quantity) else 1
+function AchievementService.RecordBuildPlaced(player, quantity)
+	local increment
+	if type(quantity) == "number" and quantity > 0 then
+		increment = asWholePositive(quantity)
+	else
+		increment = 1
+	end
 	applyStatDelta(player, "BuildPlacements", increment)
 end
 
-function AchievementService.RecordChoreCompleted(player: Player)
+function AchievementService.RecordChoreCompleted(player)
 	applyStatDelta(player, "ChoresCompleted", 1)
 end
 
-function AchievementService.RecordTenantHelpCompleted(player: Player)
+function AchievementService.RecordTenantHelpCompleted(player)
 	applyStatDelta(player, "TenantHelpsCompleted", 1)
 end
 
-function AchievementService.RecordCraftCompleted(player: Player)
+function AchievementService.RecordCraftCompleted(player)
 	applyStatDelta(player, "CraftingJobsCompleted", 1)
 end
 
-function AchievementService.RecordLevelReached(player: Player, level: number)
+function AchievementService.RecordLevelReached(player, level)
 	applyStatDelta(player, "HighestLevelReached", level, true)
 end
 
-local function claimAchievement(player: Player, achievementId: string): (boolean, string, any)
-	if typeof(achievementId) ~= "string" or achievementId == "" then
+function AchievementService.ClaimAchievement(player, achievementId)
+	if type(achievementId) ~= "string" or achievementId == "" then
 		return false, "Invalid achievement id.", nil
 	end
 
-	local definition = AchievementDefinitions.GetById(achievementId)
+	local definition = getDefinitionById(achievementId)
 	if not definition then
 		return false, "Achievement not found.", nil
 	end
 
-	local profile = PlayerSession.GetData(player)
-	if typeof(profile) ~= "table" then
+	local profile = getProfileForPlayer(player)
+	if type(profile) ~= "table" then
 		return false, "Profile unavailable.", nil
 	end
 	local state = ensureState(profile)
@@ -259,14 +447,24 @@ local function claimAchievement(player: Player, achievementId: string): (boolean
 	local rewardExperience = asWholePositive(rewards.Experience)
 
 	if rewardCash > 0 then
-		local currencyState = profile.CurrencyState
-		if typeof(currencyState) ~= "table" then
-			profile.CurrencyState = {}
-			currencyState = profile.CurrencyState
+		if IS_ROBLOX then
+			local currencyState = profile.CurrencyState
+			if type(currencyState) ~= "table" then
+				profile.CurrencyState = {}
+				currencyState = profile.CurrencyState
+			end
+			CurrencyService.Add(player, "Cash", rewardCash, currencyState, {
+				Source = "Achievement:" .. definition.Id,
+			})
+		else
+			-- Test mode: track cash in profile directly
+			local currencyState = profile.CurrencyState
+			if type(currencyState) ~= "table" then
+				profile.CurrencyState = {}
+				currencyState = profile.CurrencyState
+			end
+			currencyState.Cash = (currencyState.Cash or 0) + rewardCash
 		end
-		CurrencyService.Add(player, "Cash", rewardCash, currencyState, {
-			Source = "Achievement:" .. definition.Id,
-		})
 	end
 	if rewardExperience > 0 then
 		getProgressionService().AwardExperience(player, rewardExperience, "Achievement:" .. definition.Id)
@@ -282,7 +480,7 @@ local function claimAchievement(player: Player, achievementId: string): (boolean
 	}
 end
 
-local function handleGetSnapshot(player: Player): (boolean, string, any)
+local function handleGetSnapshot(player)
 	local state = getStateForPlayer(player, true)
 	if not state then
 		return false, "Profile unavailable.", nil
@@ -291,12 +489,16 @@ local function handleGetSnapshot(player: Player): (boolean, string, any)
 end
 
 function AchievementService.Init()
-	AchievementPackets.GetSnapshot.OnServerInvoke = function(player: Player)
+	if not IS_ROBLOX then
+		return
+	end
+
+	AchievementPackets.GetSnapshot.OnServerInvoke = function(player)
 		return handleGetSnapshot(player)
 	end
 
-	AchievementPackets.ClaimAchievement.OnServerInvoke = function(player: Player, achievementId: string)
-		return claimAchievement(player, achievementId)
+	AchievementPackets.ClaimAchievement.OnServerInvoke = function(player, achievementId)
+		return AchievementService.ClaimAchievement(player, achievementId)
 	end
 
 	Players.PlayerAdded:Connect(function(player)
@@ -308,7 +510,7 @@ function AchievementService.Init()
 			if state then
 				-- Ensure level-based achievements hydrate against current level.
 				local levelValue = player:GetAttribute("PlayerLevel")
-				if typeof(levelValue) == "number" then
+				if type(levelValue) == "number" then
 					applyStatDelta(player, "HighestLevelReached", levelValue, true)
 				else
 					sendSnapshot(player, state)
@@ -316,6 +518,29 @@ function AchievementService.Init()
 			end
 		end)
 	end)
+end
+
+-- ============ Test Hooks ============
+
+function AchievementService._ResetForTests()
+	testProfiles = {}
+	clockFn = os.time
+end
+
+function AchievementService._SetClock(fn)
+	if type(fn) == "function" then
+		clockFn = fn
+	else
+		clockFn = os.time
+	end
+end
+
+function AchievementService._GetTestProfile(player)
+	if player == nil then
+		return nil
+	end
+	local key = tostring(player.UserId or player)
+	return testProfiles[key]
 end
 
 return AchievementService
