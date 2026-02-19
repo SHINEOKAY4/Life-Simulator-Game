@@ -14,9 +14,14 @@ jobs:
       - name: Install Lua and Luarocks
         run: |
           sudo apt-get update
-          sudo apt-get install -y lua5.4 lua5.4-dev luarocks build-essential libreadline-dev
+          if apt-cache show lua5.1-dev >/dev/null 2>&1; then
+            LUA_DEV_PACKAGE=lua5.1-dev
+          else
+            LUA_DEV_PACKAGE=liblua5.1-0-dev
+          fi
+          sudo apt-get install -y lua5.1 "$LUA_DEV_PACKAGE" luarocks build-essential libreadline-dev unzip
       - name: Install busted
-        run: luarocks --lua-version=5.4 --tree="$HOME/.luarocks" install busted
+        run: luarocks --lua-version=5.1 --tree="$HOME/.luarocks" install busted
       - name: Run test suite
         run: ./run_tests.sh
 
