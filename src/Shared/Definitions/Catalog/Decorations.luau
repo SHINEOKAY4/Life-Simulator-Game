@@ -155,7 +155,7 @@ local Decorations = {
 			},
 			EffectSummary = {
 				"Brings a refreshing green vibe indoors.",
-				"Easy to care for and maintain.",
+				"Easy to care of and maintain.",
 			},
 		},
 
