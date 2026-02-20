@@ -446,6 +446,37 @@ describe("AchievementService", function()
 		end)
 	end)
 
+	-- ========== GetAchievementCompletionPercent ==========
+
+	describe("GetAchievementCompletionPercent", function()
+		it("returns nil for nil player", function()
+			local percent = AchievementService.GetAchievementCompletionPercent(nil, "builder_novice")
+			assert.is_nil(percent)
+		end)
+
+		it("returns nil for non-existent achievement id", function()
+			local percent = AchievementService.GetAchievementCompletionPercent(player, "not_real")
+			assert.is_nil(percent)
+		end)
+
+		it("returns 0 for a new player with no progress", function()
+			local percent = AchievementService.GetAchievementCompletionPercent(player, "builder_novice")
+			assert.equals(0, percent)
+		end)
+
+		it("returns rounded partial completion percent", function()
+			AchievementService.RecordBuildPlaced(player, 10)
+			local percent = AchievementService.GetAchievementCompletionPercent(player, "builder_novice")
+			assert.equals(40, percent) -- 10 / 25
+		end)
+
+		it("returns 100 when achievement is unlocked or over target", function()
+			AchievementService.RecordBuildPlaced(player, 200)
+			local percent = AchievementService.GetAchievementCompletionPercent(player, "builder_novice")
+			assert.equals(100, percent)
+		end)
+	end)
+
 	-- ========== GetPlayerAchievements ==========
 
 	describe("GetPlayerAchievements", function()
