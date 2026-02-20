@@ -31,7 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Aftman
-        uses: LPGhatguy/aftman@v0.3.0
+        run: |
+          curl -fsSL https://aftman.io/install.sh | sh
+      - name: Add Aftman to PATH
+        run: echo "$HOME/.aftman/bin" >> $GITHUB_PATH
       - name: Build with Rojo
         run: rojo build default.project.json -o Life-Simulator.rbxl
       - name: Upload artifact
