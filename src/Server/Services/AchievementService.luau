@@ -546,6 +546,72 @@ function AchievementService.GetPlayerAchievements(player)
 	return result
 end
 
+--- Returns a high-level summary of a player's achievement statistics.
+--- Includes overall completion percentage, total rewards earned/available,
+--- and a per-category breakdown.  Returns nil if the player has no profile.
+function AchievementService.GetStatsSummary(player)
+	local state = getStateForPlayer(player, false)
+	if not state then
+		return nil
+	end
+
+	local totalCount = 0
+	local unlockedCount = 0
+	local claimedCount = 0
+	local totalCashAvailable = 0
+	local totalXpAvailable = 0
+	local cashEarned = 0
+	local xpEarned = 0
+
+	-- category -> { Total, Unlocked, Claimed }
+	local categories = {}
+
+	for _, definition in ipairs(getDefinitionsList()) do
+		totalCount = totalCount + 1
+		local _, _, _, isUnlocked, isClaimed = definitionProgress(state, definition)
+		local rewards = definition.Rewards or {}
+		local rewardCash = asWholePositive(rewards.Cash)
+		local rewardXp = asWholePositive(rewards.Experience)
+
+		totalCashAvailable = totalCashAvailable + rewardCash
+		totalXpAvailable = totalXpAvailable + rewardXp
+
+		local cat = definition.Category or "Uncategorized"
+		if not categories[cat] then
+			categories[cat] = { Total = 0, Unlocked = 0, Claimed = 0 }
+		end
+		categories[cat].Total = categories[cat].Total + 1
+
+		if isUnlocked then
+			unlockedCount = unlockedCount + 1
+			categories[cat].Unlocked = categories[cat].Unlocked + 1
+		end
+		if isClaimed then
+			claimedCount = claimedCount + 1
+			cashEarned = cashEarned + rewardCash
+			xpEarned = xpEarned + rewardXp
+			categories[cat].Claimed = categories[cat].Claimed + 1
+		end
+	end
+
+	local completionPct = 0
+	if totalCount > 0 then
+		completionPct = math.floor((unlockedCount / totalCount) * 100 + 0.5)
+	end
+
+	return {
+		TotalCount = totalCount,
+		UnlockedCount = unlockedCount,
+		ClaimedCount = claimedCount,
+		CompletionPercent = completionPct,
+		TotalCashAvailable = totalCashAvailable,
+		TotalXpAvailable = totalXpAvailable,
+		CashEarned = cashEarned,
+		XpEarned = xpEarned,
+		Categories = categories,
+	}
+end
+
 function AchievementService.RecordBuildPlaced(player, quantity)
 	local increment
 	if type(quantity) == "number" and quantity > 0 then

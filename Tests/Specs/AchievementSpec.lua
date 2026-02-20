@@ -503,6 +503,151 @@ describe("AchievementService", function()
 		end)
 	end)
 
+	-- ========== GetStatsSummary ==========
+
+	describe("GetStatsSummary", function()
+		it("returns nil for nil player", function()
+			local summary = AchievementService.GetStatsSummary(nil)
+			assert.is_nil(summary)
+		end)
+
+		it("returns zero counts and 0% completion for a new player", function()
+			local summary = AchievementService.GetStatsSummary(player)
+			assert.is_not_nil(summary)
+			assert.equals(10, summary.TotalCount)
+			assert.equals(0, summary.UnlockedCount)
+			assert.equals(0, summary.ClaimedCount)
+			assert.equals(0, summary.CompletionPercent)
+			assert.equals(0, summary.CashEarned)
+			assert.equals(0, summary.XpEarned)
+		end)
+
+		it("reports correct total rewards available across all achievements", function()
+			local summary = AchievementService.GetStatsSummary(player)
+			-- Sum of all Cash rewards: 150+500+225+800+250+1200+175+900+350+1400 = 5950
+			assert.equals(5950, summary.TotalCashAvailable)
+			-- Sum of all XP rewards: 40+120+55+180+60+260+70+280+0+0 = 1065
+			assert.equals(1065, summary.TotalXpAvailable)
+		end)
+
+		it("reports correct completion percentage after unlocking achievements", function()
+			AchievementService.RecordBuildPlaced(player, 25)  -- unlocks builder_novice (1 of 10)
+			local summary = AchievementService.GetStatsSummary(player)
+			assert.equals(1, summary.UnlockedCount)
+			assert.equals(10, summary.CompletionPercent)  -- 1/10 = 10%
+		end)
+
+		it("rounds completion percentage to nearest integer", function()
+			-- Unlock 3 of 10 = 30%
+			AchievementService.RecordBuildPlaced(player, 150) -- 2 building achievements
+			AchievementService.RecordChoreCompleted(player)
+			for _ = 1, 9 do
+				AchievementService.RecordChoreCompleted(player)
+			end
+			-- Now chores_starter is also unlocked (10 chores)
+			local summary = AchievementService.GetStatsSummary(player)
+			assert.equals(3, summary.UnlockedCount)
+			assert.equals(30, summary.CompletionPercent)  -- 3/10 = 30%
+		end)
+
+		it("tracks earned rewards only from claimed achievements", function()
+			AchievementService.RecordBuildPlaced(player, 25)
+			-- Unlocked but not claimed: earned should still be 0
+			local beforeClaim = AchievementService.GetStatsSummary(player)
+			assert.equals(0, beforeClaim.CashEarned)
+			assert.equals(0, beforeClaim.XpEarned)
+
+			-- Claim the achievement
+			AchievementService.ClaimAchievement(player, "builder_novice")
+			local afterClaim = AchievementService.GetStatsSummary(player)
+			assert.equals(150, afterClaim.CashEarned)
+			assert.equals(40, afterClaim.XpEarned)
+			assert.equals(1, afterClaim.ClaimedCount)
+		end)
+
+		it("accumulates earned rewards across multiple claims", function()
+			AchievementService.RecordBuildPlaced(player, 150)
+			AchievementService.ClaimAchievement(player, "builder_novice")
+			AchievementService.ClaimAchievement(player, "builder_pro")
+
+			local summary = AchievementService.GetStatsSummary(player)
+			assert.equals(650, summary.CashEarned)   -- 150 + 500
+			assert.equals(160, summary.XpEarned)      -- 40 + 120
+			assert.equals(2, summary.ClaimedCount)
+		end)
+
+		it("includes per-category breakdown", function()
+			local summary = AchievementService.GetStatsSummary(player)
+			assert.is_table(summary.Categories)
+			assert.is_not_nil(summary.Categories["Building"])
+			assert.is_not_nil(summary.Categories["Household"])
+			assert.is_not_nil(summary.Categories["Tenants"])
+			assert.is_not_nil(summary.Categories["Crafting"])
+			assert.is_not_nil(summary.Categories["Progression"])
+		end)
+
+		it("reports correct category totals", function()
+			local summary = AchievementService.GetStatsSummary(player)
+			assert.equals(2, summary.Categories["Building"].Total)
+			assert.equals(2, summary.Categories["Household"].Total)
+			assert.equals(2, summary.Categories["Tenants"].Total)
+			assert.equals(2, summary.Categories["Crafting"].Total)
+			assert.equals(2, summary.Categories["Progression"].Total)
+		end)
+
+		it("reports correct category unlocked counts after activity", function()
+			AchievementService.RecordBuildPlaced(player, 150)  -- unlocks both building
+			AchievementService.RecordLevelReached(player, 5)   -- unlocks level_5 only
+
+			local summary = AchievementService.GetStatsSummary(player)
+			assert.equals(2, summary.Categories["Building"].Unlocked)
+			assert.equals(0, summary.Categories["Household"].Unlocked)
+			assert.equals(0, summary.Categories["Tenants"].Unlocked)
+			assert.equals(0, summary.Categories["Crafting"].Unlocked)
+			assert.equals(1, summary.Categories["Progression"].Unlocked)
+		end)
+
+		it("reports correct category claimed counts", function()
+			AchievementService.RecordBuildPlaced(player, 150)
+			AchievementService.ClaimAchievement(player, "builder_novice")
+
+			local summary = AchievementService.GetStatsSummary(player)
+			assert.equals(1, summary.Categories["Building"].Claimed)
+			assert.equals(0, summary.Categories["Household"].Claimed)
+		end)
+
+		it("reports 100% completion when all achievements unlocked", function()
+			-- Unlock all 10 achievements
+			AchievementService.RecordBuildPlaced(player, 150)         -- 2 building
+			for _ = 1, 50 do
+				AchievementService.RecordChoreCompleted(player)       -- 2 household
+			end
+			for _ = 1, 30 do
+				AchievementService.RecordTenantHelpCompleted(player)  -- 2 tenant
+			end
+			for _ = 1, 40 do
+				AchievementService.RecordCraftCompleted(player)       -- 2 crafting
+			end
+			AchievementService.RecordLevelReached(player, 12)         -- 2 progression
+
+			local summary = AchievementService.GetStatsSummary(player)
+			assert.equals(10, summary.UnlockedCount)
+			assert.equals(100, summary.CompletionPercent)
+		end)
+
+		it("returns independent summaries per player", function()
+			local player2 = { UserId = 42, Name = "Player2" }
+			AchievementService.RecordBuildPlaced(player, 25)  -- unlock 1 for player
+
+			local s1 = AchievementService.GetStatsSummary(player)
+			local s2 = AchievementService.GetStatsSummary(player2)
+			assert.equals(1, s1.UnlockedCount)
+			assert.equals(0, s2.UnlockedCount)
+			assert.equals(10, s1.CompletionPercent)
+			assert.equals(0, s2.CompletionPercent)
+		end)
+	end)
+
 	-- ========== Stat recording ==========
 
 	describe("RecordBuildPlaced", function()
