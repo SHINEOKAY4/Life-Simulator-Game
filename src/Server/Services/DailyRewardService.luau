@@ -16,6 +16,7 @@ local Players = nil
 local PlayerSession = nil
 local CurrencyService = nil
 local NotificationService = nil
+local AchievementService = nil
 local DailyRewardDefinitions = nil
 local DailyRewardPackets = nil
 
@@ -29,6 +30,7 @@ if IS_ROBLOX then
 	PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 	CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
 	NotificationService = require(ServerScriptService.Server.Services.NotificationService)
+	AchievementService = require(ServerScriptService.Server.Services.AchievementService)
 end
 
 -- ============ Inline definitions for test mode ============
@@ -358,6 +360,12 @@ function DailyRewardService.ClaimReward(player)
 		Experience = xpReward,
 	})
 
+	-- Record achievement progress
+	if AchievementService then
+		AchievementService.RecordDailyRewardClaimed(player)
+		AchievementService.RecordDailyRewardStreak(player, state.LongestStreak)
+	end
+
 	return result, nil
 end
 
@@ -416,6 +424,7 @@ end
 function DailyRewardService._ResetForTests()
 	testStateByPlayerId = {}
 	DailyRewardService._testNotifications = {}
+	AchievementService = nil
 end
 
 function DailyRewardService._SetClock(fn)
@@ -424,6 +433,10 @@ function DailyRewardService._SetClock(fn)
 	else
 		clockFn = os.time
 	end
+end
+
+function DailyRewardService._SetAchievementService(service)
+	AchievementService = service
 end
 
 function DailyRewardService._GetConstants()

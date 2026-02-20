@@ -117,6 +117,36 @@ local list: { AchievementDefinition } = {
 		SortOrder = 51,
 		Rewards = { Cash = 1400, Experience = 0 },
 	},
+	{
+		Id = "daily_first",
+		Name = "First Check-In",
+		Description = "Claim your first daily reward.",
+		Category = "Daily",
+		StatKey = "DailyRewardsClaimed",
+		TargetValue = 1,
+		SortOrder = 60,
+		Rewards = { Cash = 100, Experience = 25 },
+	},
+	{
+		Id = "daily_week",
+		Name = "Weekly Regular",
+		Description = "Claim 7 daily rewards.",
+		Category = "Daily",
+		StatKey = "DailyRewardsClaimed",
+		TargetValue = 7,
+		SortOrder = 61,
+		Rewards = { Cash = 400, Experience = 100 },
+	},
+	{
+		Id = "daily_streak_14",
+		Name = "Fortnight Streak",
+		Description = "Reach a 14-day daily reward streak.",
+		Category = "Daily",
+		StatKey = "DailyRewardLongestStreak",
+		TargetValue = 14,
+		SortOrder = 62,
+		Rewards = { Cash = 750, Experience = 200 },
+	},
 }
 
 local byId: { [string]: AchievementDefinition } = {}

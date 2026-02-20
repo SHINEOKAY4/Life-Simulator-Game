@@ -26,10 +26,10 @@ describe("AchievementService", function()
 		it("returns a snapshot with all definitions for a new player", function()
 			local snapshot = AchievementService.GetSnapshot(player)
 			assert.is_not_nil(snapshot)
-			assert.equals(10, snapshot.TotalCount)
+			assert.equals(13, snapshot.TotalCount)
 			assert.equals(0, snapshot.UnlockedCount)
 			assert.equals(0, snapshot.ClaimedCount)
-			assert.equals(10, #snapshot.Achievements)
+			assert.equals(13, #snapshot.Achievements)
 		end)
 
 		it("reports zero progress for a fresh player", function()
@@ -319,12 +319,13 @@ describe("AchievementService", function()
 	describe("GetAchievementCategories", function()
 		it("returns all known categories in definition order", function()
 			local categories = AchievementService.GetAchievementCategories()
-			assert.equals(5, #categories)
+			assert.equals(6, #categories)
 			assert.equals("Building", categories[1])
 			assert.equals("Household", categories[2])
 			assert.equals("Tenants", categories[3])
 			assert.equals("Crafting", categories[4])
 			assert.equals("Progression", categories[5])
+			assert.equals("Daily", categories[6])
 		end)
 
 		it("returns each category only once", function()
@@ -470,13 +471,13 @@ describe("AchievementService", function()
 			end
 		end)
 
-		it("returns exactly 10 entries matching the defined achievements", function()
+		it("returns exactly 13 entries matching the defined achievements", function()
 			local result = AchievementService.GetPlayerAchievements(player)
 			local count = 0
 			for _ in pairs(result) do
 				count = count + 1
 			end
-			assert.equals(10, count)
+			assert.equals(13, count)
 		end)
 
 		it("returns mixed progress values after partial activity", function()
@@ -556,7 +557,7 @@ describe("AchievementService", function()
 		it("returns zero counts and 0% completion for a new player", function()
 			local summary = AchievementService.GetStatsSummary(player)
 			assert.is_not_nil(summary)
-			assert.equals(10, summary.TotalCount)
+			assert.equals(13, summary.TotalCount)
 			assert.equals(0, summary.UnlockedCount)
 			assert.equals(0, summary.ClaimedCount)
 			assert.equals(0, summary.CompletionPercent)
@@ -566,21 +567,21 @@ describe("AchievementService", function()
 
 		it("reports correct total rewards available across all achievements", function()
 			local summary = AchievementService.GetStatsSummary(player)
-			-- Sum of all Cash rewards: 150+500+225+800+250+1200+175+900+350+1400 = 5950
-			assert.equals(5950, summary.TotalCashAvailable)
-			-- Sum of all XP rewards: 40+120+55+180+60+260+70+280+0+0 = 1065
-			assert.equals(1065, summary.TotalXpAvailable)
+			-- Sum of all Cash rewards: 150+500+225+800+250+1200+175+900+350+1400+100+400+750 = 7200
+			assert.equals(7200, summary.TotalCashAvailable)
+			-- Sum of all XP rewards: 40+120+55+180+60+260+70+280+0+0+25+100+200 = 1390
+			assert.equals(1390, summary.TotalXpAvailable)
 		end)
 
 		it("reports correct completion percentage after unlocking achievements", function()
-			AchievementService.RecordBuildPlaced(player, 25)  -- unlocks builder_novice (1 of 10)
+			AchievementService.RecordBuildPlaced(player, 25)  -- unlocks builder_novice (1 of 13)
 			local summary = AchievementService.GetStatsSummary(player)
 			assert.equals(1, summary.UnlockedCount)
-			assert.equals(10, summary.CompletionPercent)  -- 1/10 = 10%
+			assert.equals(8, summary.CompletionPercent)  -- 1/13 = 7.69% rounds to 8%
 		end)
 
 		it("rounds completion percentage to nearest integer", function()
-			-- Unlock 3 of 10 = 30%
+			-- Unlock 3 of 13
 			AchievementService.RecordBuildPlaced(player, 150) -- 2 building achievements
 			AchievementService.RecordChoreCompleted(player)
 			for _ = 1, 9 do
@@ -589,7 +590,7 @@ describe("AchievementService", function()
 			-- Now chores_starter is also unlocked (10 chores)
 			local summary = AchievementService.GetStatsSummary(player)
 			assert.equals(3, summary.UnlockedCount)
-			assert.equals(30, summary.CompletionPercent)  -- 3/10 = 30%
+			assert.equals(23, summary.CompletionPercent)  -- 3/13 = 23.08% rounds to 23%
 		end)
 
 		it("tracks earned rewards only from claimed achievements", function()
@@ -659,7 +660,7 @@ describe("AchievementService", function()
 		end)
 
 		it("reports 100% completion when all achievements unlocked", function()
-			-- Unlock all 10 achievements
+			-- Unlock all 13 achievements
 			AchievementService.RecordBuildPlaced(player, 150)         -- 2 building
 			for _ = 1, 50 do
 				AchievementService.RecordChoreCompleted(player)       -- 2 household
@@ -671,9 +672,13 @@ describe("AchievementService", function()
 				AchievementService.RecordCraftCompleted(player)       -- 2 crafting
 			end
 			AchievementService.RecordLevelReached(player, 12)         -- 2 progression
+			for _ = 1, 7 do
+				AchievementService.RecordDailyRewardClaimed(player)   -- daily_first + daily_week
+			end
+			AchievementService.RecordDailyRewardStreak(player, 14)    -- daily_streak_14
 
 			local summary = AchievementService.GetStatsSummary(player)
-			assert.equals(10, summary.UnlockedCount)
+			assert.equals(13, summary.UnlockedCount)
 			assert.equals(100, summary.CompletionPercent)
 		end)
 
@@ -685,7 +690,7 @@ describe("AchievementService", function()
 			local s2 = AchievementService.GetStatsSummary(player2)
 			assert.equals(1, s1.UnlockedCount)
 			assert.equals(0, s2.UnlockedCount)
-			assert.equals(10, s1.CompletionPercent)
+			assert.equals(8, s1.CompletionPercent)
 			assert.equals(0, s2.CompletionPercent)
 		end)
 	end)
@@ -1195,6 +1200,236 @@ describe("AchievementService", function()
 			assert.equals(0, notifs[1].Metadata.RewardExperience)
 			-- Body should mention Cash but not XP since XP is 0
 			assert.truthy(string.find(notifs[1].Body, "350 Cash"))
+		end)
+	end)
+
+	-- ========== Daily reward achievement recording ==========
+
+	describe("RecordDailyRewardClaimed", function()
+		it("increments DailyRewardsClaimed stat by 1", function()
+			AchievementService.RecordDailyRewardClaimed(player)
+			local snapshot = AchievementService.GetSnapshot(player)
+			assert.equals(1, snapshot.Stats["DailyRewardsClaimed"])
+		end)
+
+		it("accumulates across multiple calls", function()
+			for _ = 1, 5 do
+				AchievementService.RecordDailyRewardClaimed(player)
+			end
+			local snapshot = AchievementService.GetSnapshot(player)
+			assert.equals(5, snapshot.Stats["DailyRewardsClaimed"])
+		end)
+
+		it("unlocks daily_first after 1 claim", function()
+			AchievementService.RecordDailyRewardClaimed(player)
+			local snapshot = AchievementService.GetSnapshot(player)
+			for _, row in ipairs(snapshot.Achievements) do
+				if row.Id == "daily_first" then
+					assert.is_true(row.IsUnlocked)
+				end
+			end
+		end)
+
+		it("does not unlock daily_week after only 3 claims", function()
+			for _ = 1, 3 do
+				AchievementService.RecordDailyRewardClaimed(player)
+			end
+			local snapshot = AchievementService.GetSnapshot(player)
+			for _, row in ipairs(snapshot.Achievements) do
+				if row.Id == "daily_week" then
+					assert.is_false(row.IsUnlocked)
+					assert.equals(3, row.ProgressValue)
+				end
+			end
+		end)
+
+		it("unlocks daily_week after 7 claims", function()
+			for _ = 1, 7 do
+				AchievementService.RecordDailyRewardClaimed(player)
+			end
+			local snapshot = AchievementService.GetSnapshot(player)
+			for _, row in ipairs(snapshot.Achievements) do
+				if row.Id == "daily_week" then
+					assert.is_true(row.IsUnlocked)
+				end
+			end
+		end)
+
+		it("allows claiming daily_first reward", function()
+			AchievementService.RecordDailyRewardClaimed(player)
+			local ok, msg, data = AchievementService.ClaimAchievement(player, "daily_first")
+			assert.is_true(ok)
+			assert.equals(100, data.RewardCash)
+			assert.equals(25, data.RewardExperience)
+		end)
+	end)
+
+	describe("RecordDailyRewardStreak", function()
+		it("records the longest streak using overwrite-max semantics", function()
+			AchievementService.RecordDailyRewardStreak(player, 5)
+			local snapshot = AchievementService.GetSnapshot(player)
+			assert.equals(5, snapshot.Stats["DailyRewardLongestStreak"])
+		end)
+
+		it("does not decrease streak when a lower value is reported", function()
+			AchievementService.RecordDailyRewardStreak(player, 10)
+			AchievementService.RecordDailyRewardStreak(player, 3)
+			local snapshot = AchievementService.GetSnapshot(player)
+			assert.equals(10, snapshot.Stats["DailyRewardLongestStreak"])
+		end)
+
+		it("updates streak when a higher value is reported", function()
+			AchievementService.RecordDailyRewardStreak(player, 5)
+			AchievementService.RecordDailyRewardStreak(player, 14)
+			local snapshot = AchievementService.GetSnapshot(player)
+			assert.equals(14, snapshot.Stats["DailyRewardLongestStreak"])
+		end)
+
+		it("does not unlock daily_streak_14 below threshold", function()
+			AchievementService.RecordDailyRewardStreak(player, 10)
+			local snapshot = AchievementService.GetSnapshot(player)
+			for _, row in ipairs(snapshot.Achievements) do
+				if row.Id == "daily_streak_14" then
+					assert.is_false(row.IsUnlocked)
+					assert.equals(10, row.ProgressValue)
+				end
+			end
+		end)
+
+		it("unlocks daily_streak_14 when streak reaches 14", function()
+			AchievementService.RecordDailyRewardStreak(player, 14)
+			local snapshot = AchievementService.GetSnapshot(player)
+			for _, row in ipairs(snapshot.Achievements) do
+				if row.Id == "daily_streak_14" then
+					assert.is_true(row.IsUnlocked)
+				end
+			end
+		end)
+
+		it("allows claiming daily_streak_14 reward", function()
+			AchievementService.RecordDailyRewardStreak(player, 14)
+			local ok, msg, data = AchievementService.ClaimAchievement(player, "daily_streak_14")
+			assert.is_true(ok)
+			assert.equals(750, data.RewardCash)
+			assert.equals(200, data.RewardExperience)
+		end)
+	end)
+
+	-- ========== Daily category filtering ==========
+
+	describe("GetAchievementsByCategory for Daily", function()
+		it("returns all three daily achievements for Daily category", function()
+			local results = AchievementService.GetAchievementsByCategory("Daily")
+			assert.equals(3, #results)
+			assert.equals("daily_first", results[1].Id)
+			assert.equals("daily_week", results[2].Id)
+			assert.equals("daily_streak_14", results[3].Id)
+			for _, row in ipairs(results) do
+				assert.equals("Daily", row.Category)
+			end
+		end)
+
+		it("matches Daily category case-insensitively", function()
+			local results = AchievementService.GetAchievementsByCategory("daily")
+			assert.equals(3, #results)
+		end)
+	end)
+
+	-- ========== DailyRewardService integration ==========
+
+	describe("DailyRewardService achievement integration", function()
+		local DailyRewardService = assert(loadfile("src/Server/Services/DailyRewardService.luau"))()
+		local HOUR = 3600
+
+		before_each(function()
+			AchievementService._ResetForTests()
+			AchievementService._SetClock(function()
+				return currentTime
+			end)
+			DailyRewardService._ResetForTests()
+			DailyRewardService._SetClock(function()
+				return currentTime
+			end)
+			DailyRewardService._SetAchievementService(AchievementService)
+		end)
+
+		after_each(function()
+			DailyRewardService._SetClock(nil)
+			DailyRewardService._SetAchievementService(nil)
+		end)
+
+		it("records DailyRewardsClaimed stat after a successful claim", function()
+			DailyRewardService.ClaimReward(player)
+			local snapshot = AchievementService.GetSnapshot(player)
+			assert.equals(1, snapshot.Stats["DailyRewardsClaimed"])
+		end)
+
+		it("records DailyRewardLongestStreak after a successful claim", function()
+			DailyRewardService.ClaimReward(player)
+			local snapshot = AchievementService.GetSnapshot(player)
+			assert.equals(1, snapshot.Stats["DailyRewardLongestStreak"])
+		end)
+
+		it("unlocks daily_first achievement on first daily reward claim", function()
+			DailyRewardService.ClaimReward(player)
+			local snapshot = AchievementService.GetSnapshot(player)
+			for _, row in ipairs(snapshot.Achievements) do
+				if row.Id == "daily_first" then
+					assert.is_true(row.IsUnlocked)
+				end
+			end
+		end)
+
+		it("accumulates DailyRewardsClaimed across multiple claims", function()
+			for day = 1, 3 do
+				DailyRewardService.ClaimReward(player)
+				if day < 3 then
+					currentTime = currentTime + (21 * HOUR)
+				end
+			end
+			local snapshot = AchievementService.GetSnapshot(player)
+			assert.equals(3, snapshot.Stats["DailyRewardsClaimed"])
+		end)
+
+		it("unlocks daily_week after 7 daily reward claims", function()
+			for day = 1, 7 do
+				DailyRewardService.ClaimReward(player)
+				if day < 7 then
+					currentTime = currentTime + (21 * HOUR)
+				end
+			end
+			local snapshot = AchievementService.GetSnapshot(player)
+			for _, row in ipairs(snapshot.Achievements) do
+				if row.Id == "daily_week" then
+					assert.is_true(row.IsUnlocked)
+				end
+			end
+		end)
+
+		it("tracks longest streak via overwrite-max after streak resets", function()
+			-- Build a 3-day streak
+			for day = 1, 3 do
+				DailyRewardService.ClaimReward(player)
+				if day < 3 then
+					currentTime = currentTime + (21 * HOUR)
+				end
+			end
+			-- Let the streak expire (advance past 48h grace)
+			currentTime = currentTime + (49 * HOUR)
+			-- Start new streak (resets to 1)
+			DailyRewardService.ClaimReward(player)
+
+			local snapshot = AchievementService.GetSnapshot(player)
+			-- Longest streak should still be 3 (overwrite-max won't decrease)
+			assert.equals(3, snapshot.Stats["DailyRewardLongestStreak"])
+		end)
+
+		it("does not record achievements when AchievementService is not set", function()
+			DailyRewardService._SetAchievementService(nil)
+			DailyRewardService.ClaimReward(player)
+			local snapshot = AchievementService.GetSnapshot(player)
+			-- No DailyRewardsClaimed stat should exist
+			assert.is_nil(snapshot.Stats["DailyRewardsClaimed"])
 		end)
 	end)
 end)
