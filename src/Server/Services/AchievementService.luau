@@ -624,6 +624,30 @@ function AchievementService.GetAchievementProgress(player, achievementId)
 	return progress
 end
 
+--- Returns completion percent (0-100) for a specific achievement, rounded to
+--- the nearest whole number. Returns nil for invalid inputs/missing player.
+function AchievementService.GetAchievementCompletionPercent(player, achievementId)
+	if type(achievementId) ~= "string" or achievementId == "" then
+		return nil
+	end
+
+	local definition = getDefinitionById(achievementId)
+	if not definition then
+		return nil
+	end
+
+	local state = getStateForPlayer(player, false)
+	if not state then
+		return nil
+	end
+
+	local _, progress, target = definitionProgress(state, definition)
+	if target <= 0 then
+		return 0
+	end
+	return math.floor((progress / target) * 100 + 0.5)
+end
+
 --- Returns a dictionary mapping every achievement ID to its clamped progress
 --- value for the given player, or nil if the player has no profile.
 --- Example: { builder_novice = 10, builder_pro = 10, chores_starter = 0, ... }
