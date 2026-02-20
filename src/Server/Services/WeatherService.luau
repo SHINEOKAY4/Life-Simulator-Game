@@ -15,6 +15,11 @@ type WeatherState = {
 	NextWeatherType: WeatherConfig.WeatherType,
 	LastDayIndex: number,
 }
+type SeasonChangedCallback = (
+	newSeason: WeatherConfig.Season,
+	previousSeason: WeatherConfig.Season,
+	state: WeatherState
+) -> ()
 
 local _currentState: WeatherState = {
 	Season = "Spring",
@@ -23,6 +28,7 @@ local _currentState: WeatherState = {
 	NextWeatherType = "Sunny",
 	LastDayIndex = -1,
 }
+local _seasonChangedListeners: { [string]: SeasonChangedCallback } = {}
 
 -- Create ReplicatedStorage folder for weather state (auto-replicates to clients)
 local weatherFolder = ReplicatedStorage:FindFirstChild("WeatherState")
@@ -73,6 +79,7 @@ local function updateWeatherState()
 		return
 	end
 
+	local previousSeason = _currentState.Season
 	local season: WeatherConfig.Season, dayInSeason = WeatherConfig.GetSeasonFromDay(dayIndex)
 
 	-- If it's a new day, shift next weather to current, and pick a new next
@@ -110,6 +117,15 @@ local function updateWeatherState()
 			nextWeather
 		)
 	)
+
+	if season ~= previousSeason then
+		for listenerName, callback in pairs(_seasonChangedListeners) do
+			local ok, err = pcall(callback, season, previousSeason, _currentState)
+			if not ok then
+				warn(string.format("[WeatherService] Season listener '%s' failed: %s", listenerName, tostring(err)))
+			end
+		end
+	end
 end
 
 function WeatherService.Start()
@@ -132,6 +148,16 @@ end
 
 function WeatherService.GetState()
 	return _currentState
+end
+
+function WeatherService.SubscribeSeasonChanged(listenerName: string, callback: SeasonChangedCallback)
+	assert(type(listenerName) == "string" and listenerName ~= "", "listenerName must be a non-empty string")
+	assert(type(callback) == "function", "callback must be a function")
+	_seasonChangedListeners[listenerName] = callback
+end
+
+function WeatherService.UnsubscribeSeasonChanged(listenerName: string)
+	_seasonChangedListeners[listenerName] = nil
 end
 
 return WeatherService

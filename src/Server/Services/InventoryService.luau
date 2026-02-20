@@ -1112,4 +1112,49 @@ function Inventory:EmitBagSnapshot(player: Player, playerData: { [string]: any }
 	})
 end
 
+--==========================[ Transfers ]==========================
+-- Move a single item record from one player's bag to another player's bag.
+-- This uses the existing Add/Remove semantics to preserve item data where possible.
+-- If destination transfer fails, the source item is restored to its original place.
+--@param player Player
+--@param itemId string
+--@param destPlayer Player
+--@param destPlayerData table
+--@return boolean ok, ErrCode? err
+function Inventory:Transfer(
+    player: Player,
+    itemId: string,
+    sourcePlayerData: { [string]: any },
+    destPlayer: Player,
+    destPlayerData: { [string]: any }
+): (boolean, ErrCode?)
+    -- Locate source item
+    local srcBag = self:PeekBag(sourcePlayerData)
+    if not srcBag then
+        return false, "NotFound"
+    end
+    local it = srcBag.items[itemId]
+    if not it then
+        return false, "NotFound"
+    end
+    -- Attempt to remove from source first
+    local ok, err = self:Remove(player, itemId, sourcePlayerData)
+    if not ok then
+        return false, err
+    end
+    -- Try to add to destination
+    local added, addErr = self:Add(destPlayer, it.defId, 1, destPlayerData)
+    if not added then
+        -- Revert on failure
+        local revokeOk, revokeErr = self:Add(player, it.defId, 1, sourcePlayerData)
+        if not revokeOk then
+            -- If revert also fails, we can't recover reliably
+            return false, revokeErr
+        end
+        return false, addErr
+    end
+    -- Transfer succeeded
+    return true
+end
+
 return (Inventory :: any) :: InventoryModule

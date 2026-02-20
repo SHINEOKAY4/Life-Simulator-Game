@@ -52,6 +52,10 @@ local Profile = {
 		OutageActive = false,
 	},
 	InventoryState = {},
+	CraftingState = {
+		Skills = {},
+		StarterResourcesGranted = false,
+	},
 	TutorialState = {
 		IsCompleted = false,
 		Step = 0,
@@ -59,6 +63,37 @@ local Profile = {
 	},
 	ReviewState = {
 		Reviews = {},
+	},
+	ReputationState = {
+		ReputationScore = 50,
+		HighestTierUnlocked = 2,
+		LifetimeRewards = 0,
+	},
+	AchievementState = {
+		Version = 1,
+		Stats = {},
+		Unlocked = {},
+		Claimed = {},
+	},
+	DailyRewardState = {
+		CurrentStreak = 0,
+		LongestStreak = 0,
+		LastClaimTime = 0,
+		TotalClaimed = 0,
+		TotalCashEarned = 0,
+		TotalExperienceEarned = 0,
+		MilestonesClaimed = {},
+	},
+	SeasonalEventState = {
+		CurrentSeason = "Spring",
+		SeasonStartTime = 0,
+		SeasonsCompleted = 0,
+		ChallengeProgress = {},
+		CompletedChallenges = {},
+		ClaimedMilestones = {},
+		TotalChallengesCompleted = 0,
+		TotalSeasonalCashEarned = 0,
+		TotalSeasonalExperienceEarned = 0,
 	},
 }
 

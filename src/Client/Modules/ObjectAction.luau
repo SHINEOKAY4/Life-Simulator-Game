@@ -23,6 +23,7 @@ local RadialBillboardButtonEnabled = ActiveQueryFolder.RadialBillboardButtonEnab
 
 local InputContextsFolder = PlayerGui:WaitForChild("InputContexts")
 local ObjectActionContext = InputContextsFolder:WaitForChild("ObjectActionContext")
+local BuildContext = InputContextsFolder:WaitForChild("BuildContext")
 
 local ObjectAction = {}
 local INPUT_DEBOUNCE_SECONDS = 0.25
@@ -31,6 +32,7 @@ local SelectedObjectOriginalParent: Instance? = nil
 local DetachedPreviewObject: Model? = nil
 local DetachedPreviewOriginalParent: Instance? = nil
 local TemporaryRestoredWall: Model? = nil
+local IsInCopyMode = false
 
 local function destroyTemporaryWall()
 	if TemporaryRestoredWall then
@@ -460,7 +462,6 @@ function ObjectAction.Delete(object: Model)
 	end
 end
 
--- #TODO: Bug fix the copy and close mechanic (while on the copy preview, clicking the close action does not stop object selection mode)
 function ObjectAction.Copy(object: Model)
 	print("Copying object:", object:GetFullName())
 	-- Implement copy logic here
@@ -470,11 +471,16 @@ function ObjectAction.Copy(object: Model)
 		return
 	end
 	local facing = object:GetAttribute("Facing") :: string
+	IsInCopyMode = true
 	PlotBuilder.PreviewSelected(itemId, facing)
 end
 
 function ObjectAction.Close()
 	ObjectPreview.ClearPreview()
+	if IsInCopyMode then
+		IsInCopyMode = false
+		BuildContext.PlacePreview.Enabled = false
+	end
 	if restoreDetachedPreview() then
 		return
 	end

@@ -9,6 +9,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local ProgressionConfig = require(ReplicatedStorage.Shared.Configurations.ProgressionConfig)
 local ProgressionPackets = require(ReplicatedStorage.Network.ProgressionPackets)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
+local AchievementService = require(ServerScriptService.Server.Services.AchievementService)
 
 export type ProgressionState = {
 	Level: number,
@@ -120,6 +121,7 @@ local function hydrateState(player: Player): ProgressionState?
 	applyUnlocksForLevel(state, level)
 	RuntimeUnlockCache[player.UserId] = state.UnlockedItems
 	syncAttributes(player, level, state.Experience, xpIntoLevel, xpForNext)
+	AchievementService.RecordLevelReached(player, level)
 
 	return state
 end
@@ -193,6 +195,7 @@ function ProgressionService.AwardExperience(player: Player, amount: number, reas
 	RuntimeUnlockCache[player.UserId] = state.UnlockedItems
 	syncAttributes(player, level, state.Experience, xpIntoLevel, xpForNext)
 	broadcastProgression(player, state, amount, reason, newUnlocks)
+	AchievementService.RecordLevelReached(player, level)
 
 	return level
 end

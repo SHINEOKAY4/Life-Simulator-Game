@@ -1,0 +1,102 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Lua and Luarocks
+        run: |
+          sudo apt-get update
+          if apt-cache show lua5.1-dev >/dev/null 2>&1; then
+            LUA_DEV_PACKAGE=lua5.1-dev
+          else
+            LUA_DEV_PACKAGE=liblua5.1-0-dev
+          fi
+          sudo apt-get install -y lua5.1 "$LUA_DEV_PACKAGE" luarocks build-essential libreadline-dev unzip
+      - name: Install busted
+        run: luarocks --lua-version=5.1 --tree="$HOME/.luarocks" install busted
+      - name: Run test suite
+        run: ./run_tests.sh
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ✅ Replaces curl to aftman.io (which is failing DNS) with a reliable installer
+      - name: Setup Aftman
+        uses: ok-nick/setup-aftman@v0.4.2
+
+      - name: Install toolchain (Rojo via Aftman)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Ensure Aftman's bin dir is on PATH for subsequent steps
+          echo "$HOME/.aftman/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.aftman/bin:$PATH"
+
+          # If you haven't committed aftman.toml yet, this makes CI work immediately.
+          # Strongly recommended: add aftman.toml to your repo instead of relying on this fallback.
+          if [ ! -f aftman.toml ]; then
+            cat > aftman.toml <<'EOF'
+          [tools]
+          rojo = "rojo-rbx/rojo@7.4.3"
+          EOF
+          fi
+
+          aftman --version
+          aftman install
+          rojo --version
+
+      - name: Build with Rojo
+        run: rojo build default.project.json -o Life-Simulator.rbxl
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Life-Simulator
+          path: Life-Simulator.rbxl
+
+  docs:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - name: Install docs dependencies
+        run: npm ci --prefix docs
+      - name: Build docs
+        run: npm run build --prefix docs
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/build
+
+  deploy-docs:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: docs
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -10,6 +10,7 @@ local ChorePackets = require(ReplicatedStorage.Network.ChorePackets)
 local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local ProgressionService = require(ServerScriptService.Server.Services.ProgressionService)
+local AchievementService = require(ServerScriptService.Server.Services.AchievementService)
 local ResidentsFolderFinder = require(ReplicatedStorage.Shared.Utilities.ResidentsFolderFinder)
 local RepairManager = require(ServerScriptService.Server.Modules.Chores.RepairManager)
 
@@ -278,6 +279,7 @@ local function completeChore(player: Player, choreId: string): (boolean, string)
 	end
 
 	ProgressionService.RecordChoreCompletion(player)
+	AchievementService.RecordChoreCompleted(player)
 	ChoreService.RemoveChore(choreId, "Completed")
 
 	return true, message or "Nice work!"

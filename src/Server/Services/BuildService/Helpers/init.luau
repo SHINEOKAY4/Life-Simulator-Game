@@ -6,6 +6,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 local ProgressionService = require(ServerScriptService.Server.Services.ProgressionService)
+local AchievementService = require(ServerScriptService.Server.Services.AchievementService)
 local PlotStateModule = require(ServerScriptService.Server.Classes.PlotState)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
@@ -303,6 +304,7 @@ end
 
 function Helpers.rewardPlacementProgress(player: Player, itemSpec: { [string]: any }?, quantity: number?)
 	ProgressionService.RecordBuildPlacement(player, itemSpec, quantity)
+	AchievementService.RecordBuildPlaced(player, quantity)
 end
 
 return Helpers
