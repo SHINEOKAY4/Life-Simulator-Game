@@ -19,6 +19,7 @@ local AchievementDefinitions = nil
 local AchievementPackets = nil
 local PlayerSession = nil
 local CurrencyService = nil
+local NotificationService = nil
 
 if IS_ROBLOX then
 	Players = game:GetService("Players")
@@ -29,6 +30,7 @@ if IS_ROBLOX then
 	AchievementPackets = require(ReplicatedStorage.Network.AchievementPackets)
 	PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
 	CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
+	NotificationService = require(ServerScriptService.Server.Services.NotificationService)
 end
 
 -- ============ Inline definitions for test mode ============
@@ -349,6 +351,34 @@ local function getProgressionService()
 	}
 end
 
+local function getPlayerId(player)
+	if player == nil then
+		return nil
+	end
+	return player.UserId or player
+end
+
+local function sendNotification(player, title, body, metadata)
+	local playerId = getPlayerId(player)
+	if playerId == nil then
+		return
+	end
+	if IS_ROBLOX and NotificationService then
+		NotificationService.Send(playerId, "Achievement", title, body, metadata)
+		return
+	end
+	-- In test mode, store notifications for verification
+	if AchievementService._testNotifications then
+		table.insert(AchievementService._testNotifications, {
+			PlayerId = playerId,
+			Category = "Achievement",
+			Title = title,
+			Body = body,
+			Metadata = metadata or {},
+		})
+	end
+end
+
 local function tryUnlockDefinition(player, state, definition, unlockedIds)
 	local _, _, target, isUnlocked, _ = definitionProgress(state, definition)
 	if isUnlocked and state.Unlocked[definition.Id] == nil then
@@ -360,6 +390,12 @@ local function tryUnlockDefinition(player, state, definition, unlockedIds)
 				UnlockedAt = state.Unlocked[definition.Id],
 			})
 		end
+		sendNotification(player, "Achievement Unlocked!", definition.Name .. " — " .. definition.Description, {
+			AchievementId = definition.Id,
+			AchievementName = definition.Name,
+			Category = definition.Category,
+			Event = "Unlocked",
+		})
 	end
 	-- Snap to target for cleaner displays once unlocked.
 	if isUnlocked then
@@ -710,6 +746,23 @@ function AchievementService.ClaimAchievement(player, achievementId)
 	state.Claimed[definition.Id] = now()
 	sendSnapshot(player, state)
 
+	local rewardParts = {}
+	if rewardCash > 0 then
+		rewardParts[#rewardParts + 1] = rewardCash .. " Cash"
+	end
+	if rewardExperience > 0 then
+		rewardParts[#rewardParts + 1] = rewardExperience .. " XP"
+	end
+	local rewardText = #rewardParts > 0 and ("Rewards: " .. table.concat(rewardParts, ", ")) or ""
+	sendNotification(player, "Achievement Claimed!", definition.Name .. " — " .. rewardText, {
+		AchievementId = definition.Id,
+		AchievementName = definition.Name,
+		Category = definition.Category,
+		RewardCash = rewardCash,
+		RewardExperience = rewardExperience,
+		Event = "Claimed",
+	})
+
 	return true, "Achievement claimed.", {
 		AchievementId = definition.Id,
 		RewardCash = rewardCash,
@@ -762,6 +815,7 @@ end
 function AchievementService._ResetForTests()
 	testProfiles = {}
 	clockFn = os.time
+	AchievementService._testNotifications = nil
 end
 
 function AchievementService._SetClock(fn)

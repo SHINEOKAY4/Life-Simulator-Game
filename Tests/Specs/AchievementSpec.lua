@@ -1031,4 +1031,160 @@ describe("AchievementService", function()
 			end
 		end)
 	end)
+
+	-- ========== Notification integration ==========
+
+	describe("notification integration", function()
+		before_each(function()
+			AchievementService._testNotifications = {}
+		end)
+
+		after_each(function()
+			AchievementService._testNotifications = nil
+		end)
+
+		it("sends an unlock notification when an achievement is auto-unlocked", function()
+			AchievementService.RecordBuildPlaced(player, 25) -- unlocks builder_novice
+			local notifs = AchievementService._testNotifications
+			assert.is_not_nil(notifs)
+			assert.equals(1, #notifs)
+			assert.equals("Achievement Unlocked!", notifs[1].Title)
+			assert.equals("Achievement", notifs[1].Category)
+			assert.is_not_nil(notifs[1].Metadata)
+			assert.equals("builder_novice", notifs[1].Metadata.AchievementId)
+			assert.equals("Blueprint Beginner", notifs[1].Metadata.AchievementName)
+			assert.equals("Building", notifs[1].Metadata.Category)
+			assert.equals("Unlocked", notifs[1].Metadata.Event)
+		end)
+
+		it("sends multiple unlock notifications when multiple achievements unlock at once", function()
+			AchievementService.RecordBuildPlaced(player, 150) -- unlocks builder_novice AND builder_pro
+			local notifs = AchievementService._testNotifications
+			assert.is_not_nil(notifs)
+			assert.equals(2, #notifs)
+
+			local ids = {}
+			for _, n in ipairs(notifs) do
+				ids[n.Metadata.AchievementId] = true
+				assert.equals("Achievement Unlocked!", n.Title)
+				assert.equals("Unlocked", n.Metadata.Event)
+			end
+			assert.is_true(ids["builder_novice"])
+			assert.is_true(ids["builder_pro"])
+		end)
+
+		it("does not send an unlock notification when stat is below threshold", function()
+			AchievementService.RecordBuildPlaced(player, 10) -- below 25 threshold
+			local notifs = AchievementService._testNotifications
+			assert.equals(0, #notifs)
+		end)
+
+		it("sends a claim notification when an achievement is claimed", function()
+			AchievementService.RecordBuildPlaced(player, 25)
+			-- Clear the unlock notification
+			AchievementService._testNotifications = {}
+
+			AchievementService.ClaimAchievement(player, "builder_novice")
+			local notifs = AchievementService._testNotifications
+			assert.equals(1, #notifs)
+			assert.equals("Achievement Claimed!", notifs[1].Title)
+			assert.equals("Achievement", notifs[1].Category)
+			assert.equals("Claimed", notifs[1].Metadata.Event)
+			assert.equals("builder_novice", notifs[1].Metadata.AchievementId)
+			assert.equals("Blueprint Beginner", notifs[1].Metadata.AchievementName)
+			assert.equals(150, notifs[1].Metadata.RewardCash)
+			assert.equals(40, notifs[1].Metadata.RewardExperience)
+		end)
+
+		it("includes reward text in claim notification body", function()
+			AchievementService.RecordBuildPlaced(player, 25)
+			AchievementService._testNotifications = {}
+
+			AchievementService.ClaimAchievement(player, "builder_novice")
+			local notifs = AchievementService._testNotifications
+			assert.is_not_nil(notifs[1].Body)
+			-- Body should mention cash and XP
+			assert.truthy(string.find(notifs[1].Body, "150 Cash"))
+			assert.truthy(string.find(notifs[1].Body, "40 XP"))
+		end)
+
+		it("does not send a claim notification when claim is rejected", function()
+			-- Not unlocked yet
+			AchievementService.ClaimAchievement(player, "builder_novice")
+			local notifs = AchievementService._testNotifications
+			assert.equals(0, #notifs)
+		end)
+
+		it("does not send a claim notification for double-claim", function()
+			AchievementService.RecordBuildPlaced(player, 25)
+			AchievementService.ClaimAchievement(player, "builder_novice")
+			AchievementService._testNotifications = {}
+
+			AchievementService.ClaimAchievement(player, "builder_novice")
+			local notifs = AchievementService._testNotifications
+			assert.equals(0, #notifs)
+		end)
+
+		it("does not send notifications when _testNotifications is nil", function()
+			AchievementService._testNotifications = nil
+			-- Should not error
+			AchievementService.RecordBuildPlaced(player, 25)
+			AchievementService.ClaimAchievement(player, "builder_novice")
+			-- If we get here without error, notifications were silently skipped
+			assert.is_nil(AchievementService._testNotifications)
+		end)
+
+		it("sends unlock notification with correct body text", function()
+			AchievementService.RecordBuildPlaced(player, 25)
+			local notifs = AchievementService._testNotifications
+			assert.is_not_nil(notifs[1].Body)
+			-- Body should contain the achievement name and description
+			assert.truthy(string.find(notifs[1].Body, "Blueprint Beginner"))
+			assert.truthy(string.find(notifs[1].Body, "Place 25 objects in build mode."))
+		end)
+
+		it("sends unlock notifications for level-based achievements", function()
+			AchievementService.RecordLevelReached(player, 12) -- unlocks both level_5 and level_12
+			local notifs = AchievementService._testNotifications
+			assert.equals(2, #notifs)
+
+			local ids = {}
+			for _, n in ipairs(notifs) do
+				ids[n.Metadata.AchievementId] = true
+			end
+			assert.is_true(ids["level_5"])
+			assert.is_true(ids["level_12"])
+		end)
+
+		it("uses player UserId as PlayerId in notification", function()
+			AchievementService.RecordBuildPlaced(player, 25)
+			local notifs = AchievementService._testNotifications
+			assert.equals(player.UserId, notifs[1].PlayerId)
+		end)
+
+		it("sends notifications independently per player", function()
+			local player2 = { UserId = 88, Name = "Player2" }
+			AchievementService.RecordBuildPlaced(player, 25)  -- unlock for player
+			AchievementService.RecordBuildPlaced(player2, 25) -- unlock for player2
+
+			local notifs = AchievementService._testNotifications
+			assert.equals(2, #notifs)
+			assert.equals(player.UserId, notifs[1].PlayerId)
+			assert.equals(player2.UserId, notifs[2].PlayerId)
+		end)
+
+		it("handles claim notification for zero-XP achievements", function()
+			AchievementService.RecordLevelReached(player, 5) -- level_5 has 0 XP reward
+			AchievementService._testNotifications = {}
+
+			AchievementService.ClaimAchievement(player, "level_5")
+			local notifs = AchievementService._testNotifications
+			assert.equals(1, #notifs)
+			assert.equals("Claimed", notifs[1].Metadata.Event)
+			assert.equals(350, notifs[1].Metadata.RewardCash)
+			assert.equals(0, notifs[1].Metadata.RewardExperience)
+			-- Body should mention Cash but not XP since XP is 0
+			assert.truthy(string.find(notifs[1].Body, "350 Cash"))
+		end)
+	end)
 end)
