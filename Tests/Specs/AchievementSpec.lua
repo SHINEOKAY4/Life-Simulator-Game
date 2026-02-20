@@ -90,6 +90,36 @@ describe("AchievementService", function()
 		end)
 	end)
 
+	describe("GetClaimableAchievements", function()
+		it("returns nil for nil player", function()
+			local result = AchievementService.GetClaimableAchievements(nil)
+			assert.is_nil(result)
+		end)
+
+		it("returns empty claimable list for a new player", function()
+			local result = AchievementService.GetClaimableAchievements(player)
+			assert.is_not_nil(result)
+			assert.equals(0, result.ClaimableCount)
+			assert.equals(0, #result.Claimable)
+		end)
+
+		it("returns only unlocked but unclaimed achievements", function()
+			AchievementService.RecordBuildPlaced(player, 25) -- unlock builder_novice
+			AchievementService.RecordChoreCompleted(player) -- only progress chores
+
+			local beforeClaim = AchievementService.GetClaimableAchievements(player)
+			assert.equals(1, beforeClaim.ClaimableCount)
+			assert.equals("builder_novice", beforeClaim.Claimable[1].Id)
+			assert.is_true(beforeClaim.Claimable[1].IsUnlocked)
+			assert.is_false(beforeClaim.Claimable[1].IsClaimed)
+
+			AchievementService.ClaimAchievement(player, "builder_novice")
+			local afterClaim = AchievementService.GetClaimableAchievements(player)
+			assert.equals(0, afterClaim.ClaimableCount)
+			assert.equals(0, #afterClaim.Claimable)
+		end)
+	end)
+
 	-- ========== GetAchievementMetadata ==========
 
 	describe("GetAchievementMetadata", function()

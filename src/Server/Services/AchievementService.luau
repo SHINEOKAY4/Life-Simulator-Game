@@ -438,6 +438,28 @@ function AchievementService.GetUnlockedAndInProgress(player)
 	}
 end
 
+--- Returns unlocked achievements that have not been claimed yet.
+--- Returns nil if player has no profile/state.
+function AchievementService.GetClaimableAchievements(player)
+	local state = getStateForPlayer(player, false)
+	if not state then
+		return nil
+	end
+
+	local claimable = {}
+	for _, definition in ipairs(getDefinitionsList()) do
+		local row = buildAchievementRow(state, definition)
+		if row.IsUnlocked and not row.IsClaimed then
+			claimable[#claimable + 1] = row
+		end
+	end
+
+	return {
+		Claimable = claimable,
+		ClaimableCount = #claimable,
+	}
+end
+
 --- Returns the static definition metadata for the given achievement, or nil
 --- if the ID is invalid or unknown.  The returned table contains:
 ---   Id, Name, Description, Category, StatKey, TargetValue, SortOrder, Rewards
