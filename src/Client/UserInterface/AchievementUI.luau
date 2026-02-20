@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local AchievementPackets = require(ReplicatedStorage.Network.AchievementPackets)
+local BadgeService = require(ReplicatedStorage.Shared.Services.BadgeService)
 local Notification = require(script.Parent.Notification)
 
 local AchievementUI = {}
@@ -221,11 +222,39 @@ local function makeCard(row: AchievementRow, layoutOrder: number): Frame
 		elseif row.IsUnlocked then Color3.fromRGB(110, 166, 255) else Color3.fromRGB(95, 109, 131)
 	stroke.Parent = card
 
+	-- Badge icon for the achievement category
+	local badge = BadgeService.GetBadgeForCategory(row.Category)
+	local BADGE_SIZE = 28
+	local CONTENT_LEFT = 14 + BADGE_SIZE + 8 -- left pad + badge + gap
+
+	local badgeFrame = Instance.new("Frame")
+	badgeFrame.Name = "BadgeFrame"
+	badgeFrame.Position = UDim2.fromOffset(14, 10)
+	badgeFrame.Size = UDim2.fromOffset(BADGE_SIZE, BADGE_SIZE)
+	badgeFrame.BackgroundColor3 = Color3.fromRGB(badge.Color.R, badge.Color.G, badge.Color.B)
+	badgeFrame.BackgroundTransparency = 0.75
+	badgeFrame.BorderSizePixel = 0
+	badgeFrame.Parent = card
+
+	local badgeCorner = Instance.new("UICorner")
+	badgeCorner.CornerRadius = UDim.new(0, 6)
+	badgeCorner.Parent = badgeFrame
+
+	local badgeIcon = Instance.new("TextLabel")
+	badgeIcon.Name = "BadgeIcon"
+	badgeIcon.Size = UDim2.fromScale(1, 1)
+	badgeIcon.BackgroundTransparency = 1
+	badgeIcon.Font = Enum.Font.Gotham
+	badgeIcon.TextSize = 16
+	badgeIcon.Text = badge.Icon
+	badgeIcon.TextColor3 = Color3.fromRGB(badge.Color.R, badge.Color.G, badge.Color.B)
+	badgeIcon.Parent = badgeFrame
+
 	local title = Instance.new("TextLabel")
 	title.Name = "Title"
 	title.BackgroundTransparency = 1
-	title.Position = UDim2.fromOffset(14, 8)
-	title.Size = UDim2.new(1, -180, 0, 22)
+	title.Position = UDim2.fromOffset(CONTENT_LEFT, 8)
+	title.Size = UDim2.new(1, -CONTENT_LEFT - 140, 0, 22)
 	title.Font = Enum.Font.GothamBold
 	title.TextSize = 18
 	title.TextXAlignment = Enum.TextXAlignment.Left
@@ -236,8 +265,8 @@ local function makeCard(row: AchievementRow, layoutOrder: number): Frame
 	local desc = Instance.new("TextLabel")
 	desc.Name = "Desc"
 	desc.BackgroundTransparency = 1
-	desc.Position = UDim2.fromOffset(14, 31)
-	desc.Size = UDim2.new(1, -190, 0, 19)
+	desc.Position = UDim2.fromOffset(CONTENT_LEFT, 31)
+	desc.Size = UDim2.new(1, -CONTENT_LEFT - 150, 0, 19)
 	desc.Font = Enum.Font.Gotham
 	desc.TextSize = 13
 	desc.TextXAlignment = Enum.TextXAlignment.Left
@@ -247,8 +276,8 @@ local function makeCard(row: AchievementRow, layoutOrder: number): Frame
 
 	local progressBack = Instance.new("Frame")
 	progressBack.Name = "ProgressBack"
-	progressBack.Position = UDim2.fromOffset(14, 60)
-	progressBack.Size = UDim2.new(1, -205, 0, 14)
+	progressBack.Position = UDim2.fromOffset(CONTENT_LEFT, 60)
+	progressBack.Size = UDim2.new(1, -CONTENT_LEFT - 165, 0, 14)
 	progressBack.BackgroundColor3 = Color3.fromRGB(16, 20, 29)
 	progressBack.BorderSizePixel = 0
 	progressBack.Parent = card
@@ -276,8 +305,8 @@ local function makeCard(row: AchievementRow, layoutOrder: number): Frame
 	local progressText = Instance.new("TextLabel")
 	progressText.Name = "ProgressText"
 	progressText.BackgroundTransparency = 1
-	progressText.Position = UDim2.fromOffset(14, 76)
-	progressText.Size = UDim2.new(1, -210, 0, 20)
+	progressText.Position = UDim2.fromOffset(CONTENT_LEFT, 76)
+	progressText.Size = UDim2.new(1, -CONTENT_LEFT - 170, 0, 20)
 	progressText.Font = Enum.Font.GothamMedium
 	progressText.TextSize = 13
 	progressText.TextXAlignment = Enum.TextXAlignment.Left
@@ -290,8 +319,8 @@ local function makeCard(row: AchievementRow, layoutOrder: number): Frame
 		local rewards = Instance.new("TextLabel")
 		rewards.Name = "Rewards"
 		rewards.BackgroundTransparency = 1
-		rewards.Position = UDim2.fromOffset(14, 93)
-		rewards.Size = UDim2.new(1, -215, 0, 16)
+		rewards.Position = UDim2.fromOffset(CONTENT_LEFT, 93)
+		rewards.Size = UDim2.new(1, -CONTENT_LEFT - 175, 0, 16)
 		rewards.Font = Enum.Font.Gotham
 		rewards.TextSize = 12
 		rewards.TextXAlignment = Enum.TextXAlignment.Left
@@ -413,8 +442,10 @@ local function onAchievementUnlocked(payload: any)
 
 	local row = rowById[achievementId]
 	local name = if row then row.Name else "Achievement"
+	local category = if row then row.Category else ""
+	local badge = BadgeService.GetBadgeForCategory(category)
 	Notification.Show({
-		Title = "Achievement Unlocked",
+		Title = badge.Icon .. " Achievement Unlocked",
 		Text = string.format("%s is now ready to claim.", name),
 		Duration = 4,
 		BackgroundColor = Color3.fromRGB(43, 88, 141),
