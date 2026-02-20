@@ -30,13 +30,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Aftman
+
+      # ✅ Replaces curl to aftman.io (which is failing DNS) with a reliable installer
+      - name: Setup Aftman
+        uses: ok-nick/setup-aftman@v0.4.2
+
+      - name: Install toolchain (Rojo via Aftman)
+        shell: bash
         run: |
-          curl -fsSL https://aftman.io/install.sh | sh
-      - name: Add Aftman to PATH
-        run: echo "$HOME/.aftman/bin" >> $GITHUB_PATH
+          set -euo pipefail
+
+          # Ensure Aftman's bin dir is on PATH for subsequent steps
+          echo "$HOME/.aftman/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.aftman/bin:$PATH"
+
+          # If you haven't committed aftman.toml yet, this makes CI work immediately.
+          # Strongly recommended: add aftman.toml to your repo instead of relying on this fallback.
+          if [ ! -f aftman.toml ]; then
+            cat > aftman.toml <<'EOF'
+          [tools]
+          rojo = "rojo-rbx/rojo@7.4.3"
+          EOF
+          fi
+
+          aftman --version
+          aftman install
+          rojo --version
+
       - name: Build with Rojo
         run: rojo build default.project.json -o Life-Simulator.rbxl
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
