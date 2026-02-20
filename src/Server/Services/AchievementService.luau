@@ -182,6 +182,17 @@ local function asWholePositive(value)
 	return math.max(0, math.floor(value + 0.5))
 end
 
+local function normalizeCategory(category)
+	if type(category) ~= "string" then
+		return nil
+	end
+	local trimmed = string.match(category, "^%s*(.-)%s*$")
+	if trimmed == "" then
+		return nil
+	end
+	return string.lower(trimmed)
+end
+
 local function ensureState(profile)
 	local state = profile.AchievementState
 	if type(state) ~= "table" then
@@ -524,13 +535,14 @@ end
 --- Returns a list of static achievement definition metadata entries for a
 --- category. Returns an empty list for invalid/unknown categories.
 function AchievementService.GetAchievementsByCategory(category)
-	if type(category) ~= "string" or category == "" then
+	local requestedCategory = normalizeCategory(category)
+	if requestedCategory == nil then
 		return {}
 	end
 
 	local results = {}
 	for _, definition in ipairs(getDefinitionsList()) do
-		if definition.Category == category then
+		if normalizeCategory(definition.Category) == requestedCategory then
 			results[#results + 1] = {
 				Id = definition.Id,
 				Name = definition.Name,
