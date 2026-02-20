@@ -304,6 +304,38 @@ describe("AchievementService", function()
 		end)
 	end)
 
+	-- ========== GetAchievementCategories ==========
+
+	describe("GetAchievementCategories", function()
+		it("returns all known categories in definition order", function()
+			local categories = AchievementService.GetAchievementCategories()
+			assert.equals(5, #categories)
+			assert.equals("Building", categories[1])
+			assert.equals("Household", categories[2])
+			assert.equals("Tenants", categories[3])
+			assert.equals("Crafting", categories[4])
+			assert.equals("Progression", categories[5])
+		end)
+
+		it("returns each category only once", function()
+			local categories = AchievementService.GetAchievementCategories()
+			local seen = {}
+			for _, category in ipairs(categories) do
+				assert.is_nil(seen[category], "duplicate category " .. tostring(category))
+				seen[category] = true
+			end
+		end)
+
+		it("returns a fresh table each call", function()
+			local a = AchievementService.GetAchievementCategories()
+			local b = AchievementService.GetAchievementCategories()
+			assert.are_not.equal(a, b)
+			assert.equals(a[1], b[1])
+			a[1] = "Mutated"
+			assert.equals("Building", b[1])
+		end)
+	end)
+
 	-- ========== GetAchievementProgress ==========
 
 	describe("GetAchievementProgress", function()

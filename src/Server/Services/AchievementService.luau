@@ -510,6 +510,23 @@ function AchievementService.GetAchievementsByCategory(category)
 	return results
 end
 
+--- Returns distinct achievement categories in definition order.
+--- Useful for UI category tabs/filters without hardcoded strings.
+function AchievementService.GetAchievementCategories()
+	local seen = {}
+	local results = {}
+
+	for _, definition in ipairs(getDefinitionsList()) do
+		local category = definition.Category
+		if type(category) == "string" and category ~= "" and not seen[category] then
+			seen[category] = true
+			results[#results + 1] = category
+		end
+	end
+
+	return results
+end
+
 function AchievementService.GetAchievementProgress(player, achievementId)
 	if type(achievementId) ~= "string" or achievementId == "" then
 		return nil
