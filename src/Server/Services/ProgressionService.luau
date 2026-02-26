@@ -71,6 +71,41 @@ local RuntimeUnlockCache = {}
 -- Injectable achievement sink for test mode (replaces AchievementService.RecordLevelReached)
 local achievementSink = nil
 
+-- ============ Test Mode state ============
+
+-- External XP multiplier (e.g. from SeasonalEventService buffs)
+-- In Roblox, this is queried from SeasonalEventService per-player.
+-- In test mode, this injectable function replaces the real service call.
+local externalMultiplierFn = nil -- function(player) -> number (1.0 = no buff)
+
+-- Cooldown tracking: maps "UserId:action" -> os.clock() of last execution
+local cooldownTimestamps = {}
+local COOLDOWN_DURATION = 1.0 -- seconds between repeated actions
+
+local function getXpMultiplier(player)
+	-- Try injectable sink first (test mode)
+	if externalMultiplierFn then
+		local ok, result = pcall(externalMultiplierFn, player)
+		if ok and type(result) == "number" and result > 0 then
+			return result
+		end
+		return 1.0
+	end
+	-- In Roblox, query SeasonalEventService directly
+	if IS_ROBLOX then
+		local ok, SeasonalEventService = pcall(function()
+			return require(game:GetService("ServerScriptService").Server.Services.SeasonalEventService)
+		end)
+		if ok and SeasonalEventService and SeasonalEventService.GetBuffMultiplier then
+			local multOk, mult = pcall(SeasonalEventService.GetBuffMultiplier, player, "XPMultiplier")
+			if multOk and type(mult) == "number" and mult > 0 then
+				return mult
+			end
+		end
+	end
+	return 1.0
+end
+
 -- ============ Internal helpers ============
 
 local function resolveRequiredLevel(spec)
@@ -322,8 +357,11 @@ function ProgressionService.AwardExperience(player, amount, reason)
 		return 1
 	end
 
+	-- Apply seasonal/external XP multiplier
+	local effectiveAmount = amount * getXpMultiplier(player)
+
 	local previousLevel = computeProgress(state.Experience)
-	state.Experience = state.Experience + math.floor(amount + 0.5)
+	state.Experience = state.Experience + math.floor(effectiveAmount + 0.5)
 	local level, xpIntoLevel, xpForNext = computeProgress(state.Experience)
 	state.Level = level
 
@@ -338,7 +376,7 @@ function ProgressionService.AwardExperience(player, amount, reason)
 	end
 
 	syncAttributes(player, level, state.Experience, xpIntoLevel, xpForNext)
-	broadcastProgression(player, state, amount, reason, newUnlocks)
+	broadcastProgression(player, state, effectiveAmount, reason, newUnlocks)
 	recordAchievementLevel(player, level)
 
 	return level
@@ -428,6 +466,8 @@ function ProgressionService._ResetForTests()
 	testProfiles = {}
 	RuntimeUnlockCache = {}
 	achievementSink = nil
+	externalMultiplierFn = nil
+	cooldownTimestamps = {}
 	ProgressionService._testBroadcasts = nil
 end
 
@@ -445,6 +485,14 @@ function ProgressionService._GetTestProfile(player)
 	end
 	local key = tostring(player.UserId or player)
 	return testProfiles[key]
+end
+
+function ProgressionService._SetExternalMultiplier(fn)
+	if type(fn) == "function" then
+		externalMultiplierFn = fn
+	else
+		externalMultiplierFn = nil
+	end
 end
 
 return ProgressionService

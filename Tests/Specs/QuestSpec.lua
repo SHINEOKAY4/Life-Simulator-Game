@@ -278,4 +278,98 @@ describe("QuestService", function()
 			assert.is_nil(QuestService.GetRewardsLog(nil))
 		end)
 	end)
+
+	describe("Reward granting via sinks", function()
+		local xpGrants, currencyGrants, notifications
+
+		before_each(function()
+			xpGrants = {}
+			currencyGrants = {}
+			notifications = {}
+
+			QuestService._SetXPSink(function(p, amount, reason)
+				table.insert(xpGrants, { player = p, amount = amount, reason = reason })
+			end)
+			QuestService._SetCurrencySink(function(p, name, amount)
+				table.insert(currencyGrants, { player = p, name = name, amount = amount })
+			end)
+			QuestService._SetNotificationSink(function(p, title, body, metadata)
+				table.insert(notifications, { player = p, title = title, body = body, metadata = metadata })
+			end)
+		end)
+
+		it("grants XP via sink when quest is claimed", function()
+			QuestService.StartQuest(player, "quest_basic")
+			QuestService.ProgressObjective(player, "quest_basic", "collect_coins", 10)
+			QuestService.TriggerObjectiveEvent(player, "quest_basic", "visit_npc")
+			QuestService.ClaimQuest(player, "quest_basic")
+
+			assert.equals(1, #xpGrants)
+			assert.equals(100, xpGrants[1].amount)
+			assert.truthy(string.find(xpGrants[1].reason, "QuestReward"))
+		end)
+
+		it("grants currency via sink when quest is claimed", function()
+			QuestService.StartQuest(player, "quest_basic")
+			QuestService.ProgressObjective(player, "quest_basic", "collect_coins", 10)
+			QuestService.TriggerObjectiveEvent(player, "quest_basic", "visit_npc")
+			QuestService.ClaimQuest(player, "quest_basic")
+
+			assert.equals(1, #currencyGrants)
+			assert.equals("Coins", currencyGrants[1].name)
+			assert.equals(50, currencyGrants[1].amount)
+		end)
+
+		it("sends notification via sink when quest is claimed", function()
+			QuestService.StartQuest(player, "quest_basic")
+			QuestService.ProgressObjective(player, "quest_basic", "collect_coins", 10)
+			QuestService.TriggerObjectiveEvent(player, "quest_basic", "visit_npc")
+			QuestService.ClaimQuest(player, "quest_basic")
+
+			assert.equals(1, #notifications)
+			assert.equals("Quest Complete!", notifications[1].title)
+			assert.equals("QuestService", notifications[1].metadata.Source)
+		end)
+
+		it("does not grant rewards when quest has no rewards field", function()
+			-- Manually complete and claim quest_chain_2 after prerequisites
+			QuestService.StartQuest(player, "quest_basic")
+			QuestService.ProgressObjective(player, "quest_basic", "collect_coins", 10)
+			QuestService.TriggerObjectiveEvent(player, "quest_basic", "visit_npc")
+			QuestService.ClaimQuest(player, "quest_basic")
+
+			-- Reset sinks tracking after first claim
+			xpGrants = {}
+			currencyGrants = {}
+			notifications = {}
+
+			QuestService.RefreshPlayerStates(player)
+			QuestService.StartQuest(player, "quest_chain_2")
+			QuestService.TriggerObjectiveEvent(player, "quest_chain_2", "place_chest")
+			-- quest_chain_2 is AutoClaim, so it claims automatically
+
+			-- quest_chain_2 does have rewards, so sinks should fire
+			assert.equals(1, #xpGrants)
+			assert.equals(60, xpGrants[1].amount)
+		end)
+
+		it("grants nothing when sinks are nil", function()
+			QuestService._SetXPSink(nil)
+			QuestService._SetCurrencySink(nil)
+			QuestService._SetNotificationSink(nil)
+
+			QuestService.StartQuest(player, "quest_basic")
+			QuestService.ProgressObjective(player, "quest_basic", "collect_coins", 10)
+			QuestService.TriggerObjectiveEvent(player, "quest_basic", "visit_npc")
+
+			-- Should not error even with nil sinks
+			assert.has_no.errors(function()
+				QuestService.ClaimQuest(player, "quest_basic")
+			end)
+
+			-- Rewards log should still be populated
+			local log = QuestService.GetRewardsLog(player)
+			assert.is_not_nil(log["quest_basic"])
+		end)
+	end)
 end)

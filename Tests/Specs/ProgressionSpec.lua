@@ -543,4 +543,88 @@ describe("ProgressionService", function()
 			assert.truthy(string.find(msg, "level 5"))
 		end)
 	end)
+
+	-- ========== Seasonal XP Multiplier ==========
+
+	describe("Seasonal XP multiplier", function()
+		it("applies 1.0x multiplier by default (no external multiplier set)", function()
+			ProgressionService.AwardExperience(player, 100, "test")
+			local profile = ProgressionService._GetTestProfile(player)
+			assert.equals(100, profile.Experience)
+		end)
+
+		it("applies external multiplier to XP awards", function()
+			ProgressionService._SetExternalMultiplier(function(_player)
+				return 1.5
+			end)
+			ProgressionService.AwardExperience(player, 100, "test")
+			local profile = ProgressionService._GetTestProfile(player)
+			-- 100 * 1.5 = 150
+			assert.equals(150, profile.Experience)
+		end)
+
+		it("broadcasts the effective (multiplied) XP delta", function()
+			ProgressionService._SetExternalMultiplier(function(_player)
+				return 2.0
+			end)
+			ProgressionService.AwardExperience(player, 50, "test")
+			assert.equals(1, #ProgressionService._testBroadcasts)
+			assert.equals(100, ProgressionService._testBroadcasts[1].Payload.Delta)
+		end)
+
+		it("handles multiplier function returning non-number gracefully", function()
+			ProgressionService._SetExternalMultiplier(function(_player)
+				return "bad"
+			end)
+			ProgressionService.AwardExperience(player, 100, "test")
+			local profile = ProgressionService._GetTestProfile(player)
+			-- Falls back to 1.0x
+			assert.equals(100, profile.Experience)
+		end)
+
+		it("handles multiplier function throwing error gracefully", function()
+			ProgressionService._SetExternalMultiplier(function(_player)
+				error("seasonal service broken")
+			end)
+			ProgressionService.AwardExperience(player, 100, "test")
+			local profile = ProgressionService._GetTestProfile(player)
+			-- Falls back to 1.0x
+			assert.equals(100, profile.Experience)
+		end)
+
+		it("can use per-player multipliers", function()
+			local player2 = { UserId = 2, Name = "Player2", _attributes = {} }
+			ProgressionService._SetExternalMultiplier(function(p)
+				if p.UserId == 1 then return 1.15 end
+				if p.UserId == 2 then return 1.20 end
+				return 1.0
+			end)
+
+			ProgressionService.AwardExperience(player, 100, "test")
+			ProgressionService.AwardExperience(player2, 100, "test")
+
+			local p1 = ProgressionService._GetTestProfile(player)
+			local p2 = ProgressionService._GetTestProfile(player2)
+			-- 100 * 1.15 = 115
+			assert.equals(115, p1.Experience)
+			-- 100 * 1.20 = 120
+			assert.equals(120, p2.Experience)
+		end)
+
+		it("resets multiplier on _ResetForTests", function()
+			ProgressionService._SetExternalMultiplier(function(_player)
+				return 2.0
+			end)
+			ProgressionService._ResetForTests()
+			ProgressionService._testBroadcasts = {}
+			ProgressionService._SetAchievementSink(function(p, level)
+				achievementCalls[#achievementCalls + 1] = { Player = p, Level = level }
+			end)
+
+			ProgressionService.AwardExperience(player, 100, "test")
+			local profile = ProgressionService._GetTestProfile(player)
+			-- Should be back to 1.0x
+			assert.equals(100, profile.Experience)
+		end)
+	end)
 end)
