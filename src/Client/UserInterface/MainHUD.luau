@@ -15,6 +15,7 @@ local ReputationUI = require(script.Parent.ReputationUI)
 local ProfileUI = require(script.Parent.ProfileUI)
 local BillUI = require(script.Parent.BillUI)
 local AchievementUI = require(script.Parent.AchievementUI)
+local DailyRewardUI = require(script.Parent.DailyRewardUI)
 local PlotExpansion = require(script.Parent.Parent.Modules.PlotExpansion)
 
 local Player = Players.LocalPlayer
@@ -80,6 +81,18 @@ local AchievementsButton = (function(): TextButton
 	button.Name = "AchievementsButton"
 	button.Text = "Achievements"
 	button.LayoutOrder = math.max(BillsButton.LayoutOrder, ReputationButton.LayoutOrder) + 1
+	button.Parent = BottomRight
+	return button
+end)()
+local DailyRewardsButton = (function(): TextButton
+	local existing = BottomRight:FindFirstChild("DailyRewardsButton")
+	if existing and existing:IsA("TextButton") then
+		return existing
+	end
+	local button = ReviewsButton:Clone()
+	button.Name = "DailyRewardsButton"
+	button.Text = "Daily Rewards"
+	button.LayoutOrder = AchievementsButton.LayoutOrder + 1
 	button.Parent = BottomRight
 	return button
 end)()
@@ -597,6 +610,10 @@ function MainHUD.Init()
 		AchievementUI.Toggle()
 	end)
 
+	DailyRewardsButton.Activated:Connect(function()
+		DailyRewardUI.Toggle()
+	end)
+
 	PlotBuilderEnabled.Changed:Connect(function()
 		if PlotBuilderEnabled.Value then
 			MainHUD.Hide()
@@ -661,7 +678,7 @@ function MainHUD.Init()
 		Player:GetAttributeChangedSignal(attributeName):Connect(updateProgressionDisplay)
 	end
 
-	for _, button in ipairs({ BuildButton, ReviewsButton, ReputationButton, ProfileButton, BillsButton, AchievementsButton }) do
+	for _, button in ipairs({ BuildButton, ReviewsButton, ReputationButton, ProfileButton, BillsButton, AchievementsButton, DailyRewardsButton }) do
 		configureButtonVisuals(button)
 	end
 

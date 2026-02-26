@@ -51,7 +51,7 @@ Last updated: 2026-02-18
   - [ ] Add seasonal achievements to AchievementDefinitions
   - [x] Integrate seasonal buffs into ProgressionService (XP multiplier) and BillingService (cash multiplier)
 - [ ] Daily Reward System follow-ups
-  - [ ] Build client-side DailyRewardUI (claim button, streak calendar, countdown timer)
+  - [x] Build client-side DailyRewardUI (claim button, streak calendar, countdown timer)
   - [x] Wire DailyRewardService into ProgressionService for XP grants
   - [ ] Add Daily Reward achievements to AchievementDefinitions
   - [ ] Add daily challenge variant (rotating objectives using QuestService)
