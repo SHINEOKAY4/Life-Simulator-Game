@@ -83,6 +83,34 @@ local TradeService = {
 	TradeCompleted = GoodSignal.new(),
 }
 
+local notificationService = nil
+local notificationSink = nil
+
+local function sendNotification(playerId, title, body, metadata)
+	if playerId == nil then
+		return
+	end
+	if notificationSink then
+		notificationSink(playerId, title, body, metadata or {})
+		return
+	end
+	if type(game) ~= "userdata" and type(game) ~= "table" then
+		return
+	end
+	if not notificationService then
+		local ok, resolved = pcall(function()
+			local serverScriptService = game:GetService("ServerScriptService")
+			return require(serverScriptService.Server.Services.NotificationService)
+		end)
+		if ok then
+			notificationService = resolved
+		end
+	end
+	if notificationService and notificationService.Send then
+		notificationService.Send(playerId, "Trade", title, body, metadata or {})
+	end
+end
+
 -- Internal state
 local tradeCounter = 0
 local trades = {}
@@ -227,6 +255,21 @@ function TradeService.RequestTrade(initiatorId, recipientId, initiatorItemIds, r
 	addPendingIndex(pendingByRecipient, recipientId, tradeId)
 	addPendingIndex(pendingByInitiator, initiatorId, tradeId)
 
+	sendNotification(
+		recipientId,
+		"New Trade Offer",
+		string.format("Player %s sent you a trade offer.", tostring(initiatorId)),
+		{
+			Source = "TradeService",
+			Event = "Requested",
+			TradeId = tradeId,
+			InitiatorUserId = initiatorId,
+			RecipientUserId = recipientId,
+			InitiatorItemCount = #initiatorItemIds,
+			RecipientItemCount = #recipientItemIds,
+		}
+	)
+
 	TradeService.TradeRequested:Fire(initiatorId, recipientId, tradeId)
 	return tradeId, nil
 end
@@ -302,6 +345,29 @@ function TradeService.AcceptTrade(tradeId, acceptingPlayerId)
 	trade.resolvedAt = now()
 	cleanupPending(trade)
 
+	sendNotification(
+		trade.initiator.playerId,
+		"Trade Completed",
+		string.format("Your trade with player %s completed.", tostring(trade.recipient.playerId)),
+		{
+			Source = "TradeService",
+			Event = "Completed",
+			TradeId = trade.tradeId,
+			CounterpartyUserId = trade.recipient.playerId,
+		}
+	)
+	sendNotification(
+		trade.recipient.playerId,
+		"Trade Completed",
+		string.format("Your trade with player %s completed.", tostring(trade.initiator.playerId)),
+		{
+			Source = "TradeService",
+			Event = "Completed",
+			TradeId = trade.tradeId,
+			CounterpartyUserId = trade.initiator.playerId,
+		}
+	)
+
 	TradeService.TradeAccepted:Fire(trade.initiator.playerId, trade.recipient.playerId, tradeId)
 	TradeService.TradeCompleted:Fire(trade.initiator.playerId, trade.recipient.playerId, tradeId)
 	return true, nil
@@ -324,6 +390,18 @@ function TradeService.DeclineTrade(tradeId, decliningPlayerId)
 	trade.resolvedAt = now()
 	cleanupPending(trade)
 
+	sendNotification(
+		trade.initiator.playerId,
+		"Trade Declined",
+		string.format("Player %s declined your trade offer.", tostring(trade.recipient.playerId)),
+		{
+			Source = "TradeService",
+			Event = "Declined",
+			TradeId = trade.tradeId,
+			CounterpartyUserId = trade.recipient.playerId,
+		}
+	)
+
 	TradeService.TradeDeclined:Fire(trade.initiator.playerId, trade.recipient.playerId, tradeId)
 	return true, nil
 end
@@ -344,6 +422,18 @@ function TradeService.CancelTrade(tradeId, cancellingPlayerId)
 	trade.status = "Cancelled"
 	trade.resolvedAt = now()
 	cleanupPending(trade)
+
+	sendNotification(
+		trade.recipient.playerId,
+		"Trade Cancelled",
+		string.format("Player %s cancelled a trade offer.", tostring(trade.initiator.playerId)),
+		{
+			Source = "TradeService",
+			Event = "Cancelled",
+			TradeId = trade.tradeId,
+			CounterpartyUserId = trade.initiator.playerId,
+		}
+	)
 
 	TradeService.TradeCancelled:Fire(trade.initiator.playerId, trade.recipient.playerId, tradeId)
 	return true, nil
@@ -584,6 +674,8 @@ function TradeService._ResetForTests()
 	clockFn = nil
 	itemValidator = nil
 	transferExecutor = nil
+	notificationSink = nil
+	notificationService = nil
 end
 
 --- Override the clock function (for testing).
@@ -599,6 +691,11 @@ end
 --- Override the transfer executor (for testing).
 function TradeService._SetTransferExecutor(fn)
 	transferExecutor = fn
+end
+
+--- Override notification sink for tests: (playerId, title, body, metadata) -> ()
+function TradeService._SetNotificationSink(fn)
+	notificationSink = fn
 end
 
 --- Set the trade expiry duration in seconds (for testing).

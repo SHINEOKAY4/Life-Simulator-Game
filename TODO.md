@@ -57,7 +57,10 @@ Last updated: 2026-02-18
   - [ ] Add daily challenge variant (rotating objectives using QuestService)
 - [ ] Replace stub-heavy tests with behavior tests against production service logic
   - Focus first on `PlotService` and `TenantService` edge cases
-- [ ] Integrate NotificationService into AchievementService, BillingService, TradeService
+- [ ] Integrate NotificationService into core economy/services
+  - [x] AchievementService
+  - [x] TradeService
+  - [ ] BillingService
 - [ ] Add CI lint step for Luau source (`selene`)
 - [ ] Expand public docs with gameplay/system overviews and contributor setup guidance
 - [ ] Enable release process that updates `CHANGELOG.md` from merged PR metadata
