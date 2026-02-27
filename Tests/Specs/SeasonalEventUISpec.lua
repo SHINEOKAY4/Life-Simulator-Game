@@ -100,3 +100,22 @@ describe("MainHUD Seasons button integration", function()
 		assert.is_truthy(source:find("SeasonsButton }%) do"))
 	end)
 end)
+
+describe("SeasonalEventPackets schema contract", function()
+	local source
+
+	before_each(function()
+		local f = io.open("src/Network/SeasonalEventPackets.luau", "r")
+		assert.is_not_nil(f, "SeasonalEventPackets.luau must exist")
+		source = f:read("*a")
+		f:close()
+	end)
+
+	it("includes RewardClaimed in challenge status schema", function()
+		assert.is_truthy(source:find("RewardClaimed%s*=%s*Packet%.Boolean8"))
+	end)
+
+	it("includes claimed milestone reward seasons in season status schema", function()
+		assert.is_truthy(source:find("ClaimedMilestoneRewardSeasons%s*=%s*{%s*Packet%.NumberU16%s*}"))
+	end)
+end)

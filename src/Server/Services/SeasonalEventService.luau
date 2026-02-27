@@ -546,6 +546,7 @@ function SeasonalEventService.RecordProgress(player, statKey, amount)
 					CurrentValue = math.min(progress, challenge.TargetValue),
 					TargetValue = challenge.TargetValue,
 					Completed = true,
+					RewardClaimed = false,
 					RewardCash = challenge.RewardCash,
 					RewardExperience = challenge.RewardExperience,
 				})
@@ -601,6 +602,15 @@ function SeasonalEventService.GetStatus(player)
 		claimedMilestonesCount = claimedMilestonesCount + 1
 	end
 
+	local claimedMilestoneRewardSeasons = {}
+	for key in pairs(state.ClaimedMilestoneRewards) do
+		local seasonCount = tonumber(key)
+		if seasonCount then
+			table.insert(claimedMilestoneRewardSeasons, math.floor(seasonCount + 0.5))
+		end
+	end
+	table.sort(claimedMilestoneRewardSeasons)
+
 	return {
 		CurrentSeason = state.CurrentSeason,
 		SeasonName = seasonDef.Name,
@@ -614,6 +624,7 @@ function SeasonalEventService.GetStatus(player)
 		TotalCashDistributed = state.TotalCashDistributed,
 		TotalExperienceDistributed = state.TotalExperienceDistributed,
 		SeasonStartTime = state.SeasonStartTime,
+		ClaimedMilestoneRewardSeasons = claimedMilestoneRewardSeasons,
 		ClaimedMilestonesCount = claimedMilestonesCount,
 	}
 end

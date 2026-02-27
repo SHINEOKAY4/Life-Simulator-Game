@@ -261,10 +261,9 @@ local function createBuffRow(buff: { [string]: any }, index: number): Frame
 	return row
 end
 
-local function createMilestoneRow(milestone: any, index: number, seasonsCompleted: number, claimedCount: number): Frame
+local function createMilestoneRow(milestone: any, index: number, seasonsCompleted: number, claimedRewardSeasons: { [number]: true }): Frame
 	local isReached = seasonsCompleted >= milestone.SeasonsCompleted
-	-- Milestones are ordered; assume first N are claimed if claimedCount == N
-	local isClaimed = index <= claimedCount
+	local isClaimed = claimedRewardSeasons[milestone.SeasonsCompleted] == true
 
 	local row = Instance.new("Frame")
 	row.Name = "Milestone_" .. tostring(milestone.SeasonsCompleted)
@@ -411,12 +410,26 @@ local function renderStatus(status: { [string]: any })
 
 	local seasonsCompleted = math.max(0, math.floor(tonumber(status.SeasonsCompleted) or 0))
 	local totalChallenges = math.max(0, math.floor(tonumber(status.TotalChallengesCompleted) or 0))
-	local claimedMilestones = math.max(0, math.floor(tonumber(status.ClaimedMilestonesCount) or 0))
+	local claimedRewardSeasons: { [number]: true } = {}
+	local claimedRewardCount = 0
+	local claimedRewardSeasonsRaw = status.ClaimedMilestoneRewardSeasons
+	if typeof(claimedRewardSeasonsRaw) == "table" then
+		for _, seasonCount in ipairs(claimedRewardSeasonsRaw) do
+			local numericCount = tonumber(seasonCount)
+			if numericCount then
+				local roundedCount = math.max(0, math.floor(numericCount + 0.5))
+				if claimedRewardSeasons[roundedCount] ~= true then
+					claimedRewardSeasons[roundedCount] = true
+					claimedRewardCount += 1
+				end
+			end
+		end
+	end
 	local totalMilestones = #SeasonalEventDefinitions.Milestones
 
 	seasonStatsLabel.Text = string.format(
 		"Seasons: %d | Challenges: %d | Milestones: %d/%d",
-		seasonsCompleted, totalChallenges, claimedMilestones, totalMilestones
+		seasonsCompleted, totalChallenges, claimedRewardCount, totalMilestones
 	)
 	applySeasonColor(seasonId)
 
@@ -444,7 +457,7 @@ local function renderStatus(status: { [string]: any })
 	clearRows(milestoneList)
 	local milestones = SeasonalEventDefinitions.Milestones
 	for index, milestone in ipairs(milestones) do
-		local row = createMilestoneRow(milestone, index, seasonsCompleted, claimedMilestones)
+		local row = createMilestoneRow(milestone, index, seasonsCompleted, claimedRewardSeasons)
 		row.Parent = milestoneList
 	end
 end

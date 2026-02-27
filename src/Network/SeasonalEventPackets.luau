@@ -21,6 +21,7 @@ local ChallengeStatusSchema = {
 	CurrentValue = Packet.NumberU32,
 	TargetValue = Packet.NumberU32,
 	Completed = Packet.Boolean8,
+	RewardClaimed = Packet.Boolean8,
 	RewardCash = Packet.NumberU32,
 	RewardExperience = Packet.NumberU32,
 }
@@ -38,6 +39,7 @@ local SeasonStatusSchema = {
 	TotalCashDistributed = Packet.NumberU32,
 	TotalExperienceDistributed = Packet.NumberU32,
 	SeasonStartTime = Packet.NumberU32,
+	ClaimedMilestoneRewardSeasons = { Packet.NumberU16 },
 	ClaimedMilestonesCount = Packet.NumberU16,
 }
 

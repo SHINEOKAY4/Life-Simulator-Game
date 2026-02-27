@@ -798,6 +798,23 @@ describe("SeasonalEventService", function()
 			assert.equals(120, result.ExperienceDistributed)
 		end)
 
+		it("exposes claimed milestone reward seasons separately from unlocked milestones in status", function()
+			completeSeasons("player1", 4)
+
+			local beforeClaim = SeasonalEventService.GetStatus("player1")
+			assert.equals(1, beforeClaim.ClaimedMilestonesCount)
+			assert.equals(0, #beforeClaim.ClaimedMilestoneRewardSeasons)
+
+			local result, err = SeasonalEventService.ClaimMilestoneReward("player1", 4)
+			assert.is_nil(err)
+			assert.is_not_nil(result)
+
+			local afterClaim = SeasonalEventService.GetStatus("player1")
+			assert.equals(1, afterClaim.ClaimedMilestonesCount)
+			assert.equals(1, #afterClaim.ClaimedMilestoneRewardSeasons)
+			assert.equals(4, afterClaim.ClaimedMilestoneRewardSeasons[1])
+		end)
+
 		it("rejects milestone not yet reached", function()
 			SeasonalEventService.TransitionSeason("player1", "Spring")
 

@@ -45,7 +45,7 @@ Last updated: 2026-02-18
 
 ## Next Work (Product/Code Depth)
 
-- [ ] Seasonal Event System follow-ups
+- [x] Seasonal Event System follow-ups
   - [x] Wire SeasonalEventService into WeatherService for automatic season transitions
   - [x] Build client-side SeasonalEventUI (season banner, challenge tracker, buff display, milestone rewards, per-challenge/milestone reward claiming, MainHUD button)
   - [x] Add seasonal achievements to AchievementDefinitions
@@ -57,7 +57,7 @@ Last updated: 2026-02-18
   - [ ] Add daily challenge variant (rotating objectives using QuestService)
 - [ ] Replace stub-heavy tests with behavior tests against production service logic
   - Focus first on `PlotService` and `TenantService` edge cases
-- [ ] Integrate NotificationService into core economy/services
+- [x] Integrate NotificationService into core economy/services
   - [x] AchievementService
   - [x] TradeService
   - [x] BillingService
