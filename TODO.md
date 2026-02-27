@@ -47,7 +47,7 @@ Last updated: 2026-02-18
 
 - [ ] Seasonal Event System follow-ups
   - [x] Wire SeasonalEventService into WeatherService for automatic season transitions
-  - [ ] Build client-side SeasonalEventUI (season banner, challenge tracker, buff display)
+  - [x] Build client-side SeasonalEventUI (season banner, challenge tracker, buff display, milestone rewards, per-challenge/milestone reward claiming, MainHUD button)
   - [x] Add seasonal achievements to AchievementDefinitions
   - [x] Integrate seasonal buffs into ProgressionService (XP multiplier) and BillingService (cash multiplier)
 - [ ] Daily Reward System follow-ups
