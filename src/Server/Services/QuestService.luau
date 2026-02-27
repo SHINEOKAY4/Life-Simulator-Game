@@ -53,7 +53,7 @@ local QuestService = {}
 -- Type definitions (Luau export types not used to keep loadfile() compatibility)
 -- Objective: { id: string, kind: string, target: any, progress?: number }
 -- QuestDefinition: { id: string, name?: string, prerequisites?: {string},
---   objectives: {Objective}, rewards?: { Currency?, XP?, Items? }, AutoClaim?: boolean }
+--   objectives: {Objective}, rewards?: { Currency?, XP?, Items? }, AutoClaim?: boolean, Repeatable?: boolean }
 -- QuestState: { State: string, Progress: { [string]: number } }
 -- PlayerQuestState: { [string]: QuestState }
 
@@ -151,6 +151,50 @@ local function EnsureDefaultCatalog()
             Currency = { { Name = "Coins", Amount = 20 } },
         },
         AutoClaim = true,
+    }
+
+    -- Daily challenge variants rotate through these objective types.
+    QuestCatalog["daily_challenge_collect"] = {
+        id = "daily_challenge_collect",
+        name = "Daily: Resource Run",
+        prerequisites = {},
+        objectives = {
+            { id = "daily_collect", kind = "Collect", target = 25 },
+        },
+        rewards = {
+            XP = 25,
+            Currency = { { Name = "Coins", Amount = 35 } },
+        },
+        AutoClaim = true,
+        Repeatable = true,
+    }
+    QuestCatalog["daily_challenge_visit"] = {
+        id = "daily_challenge_visit",
+        name = "Daily: Check In",
+        prerequisites = {},
+        objectives = {
+            { id = "daily_visit", kind = "Talk", target = "OldMan" },
+        },
+        rewards = {
+            XP = 20,
+            Currency = { { Name = "Coins", Amount = 25 } },
+        },
+        AutoClaim = true,
+        Repeatable = true,
+    }
+    QuestCatalog["daily_challenge_place"] = {
+        id = "daily_challenge_place",
+        name = "Daily: Builder Task",
+        prerequisites = {},
+        objectives = {
+            { id = "daily_place", kind = "Place", target = "Chair" },
+        },
+        rewards = {
+            XP = 30,
+            Currency = { { Name = "Coins", Amount = 40 } },
+        },
+        AutoClaim = true,
+        Repeatable = true,
     }
 end
 
@@ -270,6 +314,10 @@ function QuestService.StartQuest(player, questId)
         return false, "UnknownQuest"
     end
     local state = getStateForQuest(player, questId) or { State = "locked", Progress = {} }
+    if quest.Repeatable == true and state.State == "claimed" then
+        state.State = "available"
+        state.Progress = {}
+    end
     if state.State ~= "available" then
         return false, "QuestNotAvailable"
     end

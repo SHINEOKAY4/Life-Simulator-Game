@@ -325,6 +325,30 @@ describe("DailyRewardService", function()
 
 	-- ========== Status Reporting ==========
 
+	it("assigns a rotating daily challenge quest in status", function()
+		local constants = DailyRewardService._GetConstants()
+		local expectedDayId = math.floor(currentTime / (24 * HOUR))
+		local expectedQuestIndex = (expectedDayId % #constants.DailyChallengeQuestIds) + 1
+
+		local status = DailyRewardService.GetStatus("player1")
+		assert.is_not_nil(status.DailyChallenge)
+		assert.equals(expectedDayId, status.DailyChallenge.DayId)
+		assert.equals(constants.DailyChallengeQuestIds[expectedQuestIndex], status.DailyChallenge.QuestId)
+		assert.equals("in_progress", status.DailyChallenge.QuestState)
+	end)
+
+	it("rotates the daily challenge quest on the next UTC day", function()
+		local firstStatus = DailyRewardService.GetStatus("player1")
+		currentTime = currentTime + (24 * HOUR)
+		local secondStatus = DailyRewardService.GetStatus("player1")
+
+		assert.is_not_nil(firstStatus.DailyChallenge)
+		assert.is_not_nil(secondStatus.DailyChallenge)
+		assert.is_true(firstStatus.DailyChallenge.DayId ~= secondStatus.DailyChallenge.DayId)
+		assert.is_true(firstStatus.DailyChallenge.QuestId ~= secondStatus.DailyChallenge.QuestId)
+		assert.equals("in_progress", secondStatus.DailyChallenge.QuestState)
+	end)
+
 	it("reports pending milestone when approaching milestone day", function()
 		for day = 1, 6 do
 			DailyRewardService.ClaimReward("player1")

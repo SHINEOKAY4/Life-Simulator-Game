@@ -18,6 +18,7 @@ local CurrencyService = nil
 local NotificationService = nil
 local AchievementService = nil
 local ProgressionService = nil
+local QuestService = nil
 local DailyRewardDefinitions = nil
 local DailyRewardPackets = nil
 
@@ -33,6 +34,7 @@ if IS_ROBLOX then
 	NotificationService = require(ServerScriptService.Server.Services.NotificationService)
 	AchievementService = require(ServerScriptService.Server.Services.AchievementService)
 	ProgressionService = require(ServerScriptService.Server.Services.ProgressionService)
+	QuestService = require(ServerScriptService.Server.Services.QuestService)
 end
 
 -- ============ Inline definitions for test mode ============
@@ -56,6 +58,32 @@ local MILESTONES = {
 local CLAIM_COOLDOWN_SECONDS = 20 * 60 * 60  -- 20 hours
 local STREAK_GRACE_SECONDS = 48 * 60 * 60    -- 48 hours
 local CYCLE_LENGTH = #REWARDS
+local DAILY_CHALLENGE_QUEST_IDS = {
+	"daily_challenge_collect",
+	"daily_challenge_visit",
+	"daily_challenge_place",
+}
+
+local questServiceInitialized = false
+
+local function getQuestService()
+	if not QuestService and not IS_ROBLOX then
+		local okLoader, loader = pcall(loadfile, "src/Server/Services/QuestService.luau")
+		if okLoader and type(loader) == "function" then
+			local okService, service = pcall(loader)
+			if okService and type(service) == "table" then
+				QuestService = service
+			end
+		end
+	end
+
+	if QuestService and not questServiceInitialized and QuestService.Init then
+		QuestService.Init()
+		questServiceInitialized = true
+	end
+
+	return QuestService
+end
 
 local function getRewardForStreak(streak)
 	if IS_ROBLOX and DailyRewardDefinitions then
@@ -124,6 +152,23 @@ local function ensureStateShape(state)
 
 	if type(state.MilestonesClaimed) ~= "table" then
 		state.MilestonesClaimed = {}
+	end
+
+	if type(state.DailyChallenge) ~= "table" then
+		state.DailyChallenge = {
+			DayId = -1,
+			QuestId = "",
+			AssignedAt = 0,
+		}
+	end
+	if type(state.DailyChallenge.DayId) ~= "number" then
+		state.DailyChallenge.DayId = -1
+	end
+	if type(state.DailyChallenge.QuestId) ~= "string" then
+		state.DailyChallenge.QuestId = ""
+	end
+	if type(state.DailyChallenge.AssignedAt) ~= "number" then
+		state.DailyChallenge.AssignedAt = 0
 	end
 end
 
@@ -209,6 +254,78 @@ local function computeStreakStatus(state, now)
 	}
 end
 
+local function getUtcDayId(now)
+	return math.floor(now / (24 * 60 * 60))
+end
+
+local function getDailyChallengeQuestId(dayId)
+	local index = (dayId % #DAILY_CHALLENGE_QUEST_IDS) + 1
+	return DAILY_CHALLENGE_QUEST_IDS[index]
+end
+
+local function tryStartDailyChallengeQuest(player, questId)
+	local questService = getQuestService()
+	if not questService then
+		return nil
+	end
+
+	if questService.RefreshPlayerStates then
+		questService.RefreshPlayerStates(player)
+	end
+
+	local ok = false
+	if questService.StartQuest then
+		ok = select(1, questService.StartQuest(player, questId)) == true
+	end
+
+	if not ok and questService.GetPlayerQuests then
+		local quests = questService.GetPlayerQuests(player)
+		if quests and quests[questId] then
+			return quests[questId].State
+		end
+	end
+
+	if questService.GetPlayerQuests then
+		local quests = questService.GetPlayerQuests(player)
+		if quests and quests[questId] then
+			return quests[questId].State
+		end
+	end
+
+	return nil
+end
+
+local function syncDailyChallenge(player, state, now)
+	local dayId = getUtcDayId(now)
+	local challenge = state.DailyChallenge
+	if challenge.DayId ~= dayId then
+		local questId = getDailyChallengeQuestId(dayId)
+		challenge.DayId = dayId
+		challenge.QuestId = questId
+		challenge.AssignedAt = now
+		tryStartDailyChallengeQuest(player, questId)
+	end
+end
+
+local function getDailyChallengeSnapshot(player, state)
+	local challenge = state.DailyChallenge
+	local questState = nil
+	local questService = getQuestService()
+	if questService and questService.GetPlayerQuests and challenge.QuestId ~= "" then
+		local quests = questService.GetPlayerQuests(player)
+		if quests and quests[challenge.QuestId] then
+			questState = quests[challenge.QuestId].State
+		end
+	end
+
+	return {
+		DayId = challenge.DayId,
+		QuestId = challenge.QuestId,
+		AssignedAt = challenge.AssignedAt,
+		QuestState = questState,
+	}
+end
+
 -- Injectable XP sink for test mode (replaces ProgressionService.AwardExperience)
 local xpSink = nil
 
@@ -250,6 +367,7 @@ function DailyRewardService.GetStatus(player)
 	end
 
 	local now = getTime()
+	syncDailyChallenge(player, state, now)
 	local status = computeStreakStatus(state, now)
 
 	local nextStreak = state.CurrentStreak + 1
@@ -277,6 +395,7 @@ function DailyRewardService.GetStatus(player)
 		NextReward = nextReward,
 		NextStreak = nextStreak,
 		PendingMilestone = (milestone and not milestoneAlreadyClaimed) and milestone or nil,
+		DailyChallenge = getDailyChallengeSnapshot(player, state),
 	}
 end
 
@@ -294,6 +413,7 @@ function DailyRewardService.ClaimReward(player)
 	end
 
 	local now = getTime()
+	syncDailyChallenge(player, state, now)
 	local status = computeStreakStatus(state, now)
 
 	if not status.CanClaim then
@@ -357,6 +477,7 @@ function DailyRewardService.ClaimReward(player)
 		MilestoneUnlocked = milestoneBonus and milestoneBonus.Label or nil,
 		LongestStreak = state.LongestStreak,
 		StreakReset = (status.IsFirstClaim or not status.StreakAlive) and newStreak == 1,
+		DailyChallenge = getDailyChallengeSnapshot(player, state),
 	}
 
 	-- Send notification
@@ -443,6 +564,18 @@ function DailyRewardService._ResetForTests()
 	DailyRewardService._testNotifications = {}
 	AchievementService = nil
 	xpSink = nil
+	local questService = getQuestService()
+	if questService then
+		if questService._ResetForTests then
+			questService._ResetForTests()
+		end
+		if questService.Init then
+			questService.Init()
+			questServiceInitialized = true
+		end
+	else
+		questServiceInitialized = false
+	end
 end
 
 function DailyRewardService._SetClock(fn)
@@ -462,6 +595,7 @@ function DailyRewardService._GetConstants()
 		ClaimCooldownSeconds = CLAIM_COOLDOWN_SECONDS,
 		StreakGraceSeconds = STREAK_GRACE_SECONDS,
 		CycleLength = CYCLE_LENGTH,
+		DailyChallengeQuestIds = DAILY_CHALLENGE_QUEST_IDS,
 	}
 end
 
