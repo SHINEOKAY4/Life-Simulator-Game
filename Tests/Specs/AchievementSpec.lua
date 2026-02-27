@@ -26,10 +26,10 @@ describe("AchievementService", function()
 		it("returns a snapshot with all definitions for a new player", function()
 			local snapshot = AchievementService.GetSnapshot(player)
 			assert.is_not_nil(snapshot)
-			assert.equals(13, snapshot.TotalCount)
+			assert.equals(18, snapshot.TotalCount)
 			assert.equals(0, snapshot.UnlockedCount)
 			assert.equals(0, snapshot.ClaimedCount)
-			assert.equals(13, #snapshot.Achievements)
+			assert.equals(18, #snapshot.Achievements)
 		end)
 
 		it("reports zero progress for a fresh player", function()
@@ -319,13 +319,14 @@ describe("AchievementService", function()
 	describe("GetAchievementCategories", function()
 		it("returns all known categories in definition order", function()
 			local categories = AchievementService.GetAchievementCategories()
-			assert.equals(6, #categories)
+			assert.equals(7, #categories)
 			assert.equals("Building", categories[1])
 			assert.equals("Household", categories[2])
 			assert.equals("Tenants", categories[3])
 			assert.equals("Crafting", categories[4])
 			assert.equals("Progression", categories[5])
 			assert.equals("Daily", categories[6])
+			assert.equals("Seasonal", categories[7])
 		end)
 
 		it("returns each category only once", function()
@@ -446,6 +447,37 @@ describe("AchievementService", function()
 		end)
 	end)
 
+	-- ========== GetAchievementCompletionPercent ==========
+
+	describe("GetAchievementCompletionPercent", function()
+		it("returns nil for nil player", function()
+			local percent = AchievementService.GetAchievementCompletionPercent(nil, "builder_novice")
+			assert.is_nil(percent)
+		end)
+
+		it("returns nil for non-existent achievement id", function()
+			local percent = AchievementService.GetAchievementCompletionPercent(player, "not_real")
+			assert.is_nil(percent)
+		end)
+
+		it("returns 0 for a new player with no progress", function()
+			local percent = AchievementService.GetAchievementCompletionPercent(player, "builder_novice")
+			assert.equals(0, percent)
+		end)
+
+		it("returns rounded partial completion percent", function()
+			AchievementService.RecordBuildPlaced(player, 10)
+			local percent = AchievementService.GetAchievementCompletionPercent(player, "builder_novice")
+			assert.equals(40, percent) -- 10 / 25
+		end)
+
+		it("returns 100 when achievement is unlocked or over target", function()
+			AchievementService.RecordBuildPlaced(player, 200)
+			local percent = AchievementService.GetAchievementCompletionPercent(player, "builder_novice")
+			assert.equals(100, percent)
+		end)
+	end)
+
 	-- ========== GetPlayerAchievements ==========
 
 	describe("GetPlayerAchievements", function()
@@ -471,13 +503,13 @@ describe("AchievementService", function()
 			end
 		end)
 
-		it("returns exactly 13 entries matching the defined achievements", function()
+		it("returns exactly 18 entries matching the defined achievements", function()
 			local result = AchievementService.GetPlayerAchievements(player)
 			local count = 0
 			for _ in pairs(result) do
 				count = count + 1
 			end
-			assert.equals(13, count)
+			assert.equals(18, count)
 		end)
 
 		it("returns mixed progress values after partial activity", function()
@@ -557,7 +589,7 @@ describe("AchievementService", function()
 		it("returns zero counts and 0% completion for a new player", function()
 			local summary = AchievementService.GetStatsSummary(player)
 			assert.is_not_nil(summary)
-			assert.equals(13, summary.TotalCount)
+			assert.equals(18, summary.TotalCount)
 			assert.equals(0, summary.UnlockedCount)
 			assert.equals(0, summary.ClaimedCount)
 			assert.equals(0, summary.CompletionPercent)
@@ -567,21 +599,20 @@ describe("AchievementService", function()
 
 		it("reports correct total rewards available across all achievements", function()
 			local summary = AchievementService.GetStatsSummary(player)
-			-- Sum of all Cash rewards: 150+500+225+800+250+1200+175+900+350+1400+100+400+750 = 7200
-			assert.equals(7200, summary.TotalCashAvailable)
-			-- Sum of all XP rewards: 40+120+55+180+60+260+70+280+0+0+25+100+200 = 1390
-			assert.equals(1390, summary.TotalXpAvailable)
+			-- Includes 5 seasonal achievements in addition to base + daily rewards.
+			assert.equals(12000, summary.TotalCashAvailable)
+			assert.equals(2560, summary.TotalXpAvailable)
 		end)
 
 		it("reports correct completion percentage after unlocking achievements", function()
-			AchievementService.RecordBuildPlaced(player, 25)  -- unlocks builder_novice (1 of 13)
+			AchievementService.RecordBuildPlaced(player, 25)  -- unlocks builder_novice (1 of 18)
 			local summary = AchievementService.GetStatsSummary(player)
 			assert.equals(1, summary.UnlockedCount)
-			assert.equals(8, summary.CompletionPercent)  -- 1/13 = 7.69% rounds to 8%
+			assert.equals(6, summary.CompletionPercent)  -- 1/18 = 5.56% rounds to 6%
 		end)
 
 		it("rounds completion percentage to nearest integer", function()
-			-- Unlock 3 of 13
+			-- Unlock 3 of 18
 			AchievementService.RecordBuildPlaced(player, 150) -- 2 building achievements
 			AchievementService.RecordChoreCompleted(player)
 			for _ = 1, 9 do
@@ -590,7 +621,7 @@ describe("AchievementService", function()
 			-- Now chores_starter is also unlocked (10 chores)
 			local summary = AchievementService.GetStatsSummary(player)
 			assert.equals(3, summary.UnlockedCount)
-			assert.equals(23, summary.CompletionPercent)  -- 3/13 = 23.08% rounds to 23%
+			assert.equals(17, summary.CompletionPercent)  -- 3/18 = 16.67% rounds to 17%
 		end)
 
 		it("tracks earned rewards only from claimed achievements", function()
@@ -660,7 +691,7 @@ describe("AchievementService", function()
 		end)
 
 		it("reports 100% completion when all achievements unlocked", function()
-			-- Unlock all 13 achievements
+			-- Unlock all 18 achievements
 			AchievementService.RecordBuildPlaced(player, 150)         -- 2 building
 			for _ = 1, 50 do
 				AchievementService.RecordChoreCompleted(player)       -- 2 household
@@ -676,9 +707,13 @@ describe("AchievementService", function()
 				AchievementService.RecordDailyRewardClaimed(player)   -- daily_first + daily_week
 			end
 			AchievementService.RecordDailyRewardStreak(player, 14)    -- daily_streak_14
+			for _ = 1, 30 do
+				AchievementService.RecordSeasonalChallengeCompleted(player) -- 3 seasonal challenge achievements
+			end
+			AchievementService.RecordSeasonCompleted(player, 12)           -- 2 seasonal season-count achievements
 
 			local summary = AchievementService.GetStatsSummary(player)
-			assert.equals(13, summary.UnlockedCount)
+			assert.equals(18, summary.UnlockedCount)
 			assert.equals(100, summary.CompletionPercent)
 		end)
 
@@ -690,7 +725,7 @@ describe("AchievementService", function()
 			local s2 = AchievementService.GetStatsSummary(player2)
 			assert.equals(1, s1.UnlockedCount)
 			assert.equals(0, s2.UnlockedCount)
-			assert.equals(8, s1.CompletionPercent)
+			assert.equals(6, s1.CompletionPercent)
 			assert.equals(0, s2.CompletionPercent)
 		end)
 	end)

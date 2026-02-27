@@ -166,6 +166,57 @@ local INLINE_DEFINITIONS = {
 		SortOrder = 62,
 		Rewards = { Cash = 750, Experience = 200 },
 	},
+	-- Seasonal achievements
+	{
+		Id = "seasonal_first_challenge",
+		Name = "Seasonal Starter",
+		Description = "Complete your first seasonal challenge.",
+		Category = "Seasonal",
+		StatKey = "SeasonalChallengesCompleted",
+		TargetValue = 1,
+		SortOrder = 70,
+		Rewards = { Cash = 200, Experience = 50 },
+	},
+	{
+		Id = "seasonal_challenger",
+		Name = "Seasonal Challenger",
+		Description = "Complete 10 seasonal challenges.",
+		Category = "Seasonal",
+		StatKey = "SeasonalChallengesCompleted",
+		TargetValue = 10,
+		SortOrder = 71,
+		Rewards = { Cash = 600, Experience = 150 },
+	},
+	{
+		Id = "seasonal_master",
+		Name = "Challenge Master",
+		Description = "Complete 30 seasonal challenges.",
+		Category = "Seasonal",
+		StatKey = "SeasonalChallengesCompleted",
+		TargetValue = 30,
+		SortOrder = 72,
+		Rewards = { Cash = 1500, Experience = 350 },
+	},
+	{
+		Id = "seasonal_first_year",
+		Name = "Four Seasons",
+		Description = "Experience all four seasons.",
+		Category = "Seasonal",
+		StatKey = "SeasonsCompleted",
+		TargetValue = 4,
+		SortOrder = 73,
+		Rewards = { Cash = 500, Experience = 120 },
+	},
+	{
+		Id = "seasonal_veteran",
+		Name = "Weathered Veteran",
+		Description = "Complete 12 full seasons.",
+		Category = "Seasonal",
+		StatKey = "SeasonsCompleted",
+		TargetValue = 12,
+		SortOrder = 74,
+		Rewards = { Cash = 2000, Experience = 500 },
+	},
 }
 
 local function getDefinitionsList()
@@ -624,6 +675,30 @@ function AchievementService.GetAchievementProgress(player, achievementId)
 	return progress
 end
 
+--- Returns completion percent (0-100) for a specific achievement, rounded to
+--- the nearest whole number. Returns nil for invalid inputs/missing player.
+function AchievementService.GetAchievementCompletionPercent(player, achievementId)
+	if type(achievementId) ~= "string" or achievementId == "" then
+		return nil
+	end
+
+	local definition = getDefinitionById(achievementId)
+	if not definition then
+		return nil
+	end
+
+	local state = getStateForPlayer(player, false)
+	if not state then
+		return nil
+	end
+
+	local _, progress, target = definitionProgress(state, definition)
+	if target <= 0 then
+		return 0
+	end
+	return math.floor((progress / target) * 100 + 0.5)
+end
+
 --- Returns a dictionary mapping every achievement ID to its clamped progress
 --- value for the given player, or nil if the player has no profile.
 --- Example: { builder_novice = 10, builder_pro = 10, chores_starter = 0, ... }
@@ -739,6 +814,14 @@ end
 
 function AchievementService.RecordDailyRewardStreak(player, streak)
 	applyStatDelta(player, "DailyRewardLongestStreak", streak, true)
+end
+
+function AchievementService.RecordSeasonalChallengeCompleted(player)
+	applyStatDelta(player, "SeasonalChallengesCompleted", 1)
+end
+
+function AchievementService.RecordSeasonCompleted(player, totalSeasonsCompleted)
+	applyStatDelta(player, "SeasonsCompleted", totalSeasonsCompleted, true)
 end
 
 function AchievementService.ClaimAchievement(player, achievementId)

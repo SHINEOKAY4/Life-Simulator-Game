@@ -19,9 +19,20 @@ end
 
 local IS_ROBLOX = hasRobloxRuntime()
 local Players = nil
+local ProgressionService = nil
+local CurrencyService = nil
+local PlayerSession = nil
+local NotificationService = nil
 
 if IS_ROBLOX then
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local ServerScriptService = game:GetService("ServerScriptService")
     Players = game:GetService("Players")
+
+    ProgressionService = require(ServerScriptService.Server.Services.ProgressionService)
+    CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
+    PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
+    NotificationService = require(ServerScriptService.Server.Services.NotificationService)
 end
 
 -- Local minimal config fallback if no global config is present.
@@ -58,6 +69,54 @@ local QuestCatalog = {}
 
 -- Simple in-memory log of rewards granted per player per quest (for tests/QA)
 local RewardsLog = {}
+
+-- Injectable reward sinks for test mode (replaces real services)
+local xpSink = nil         -- function(player, amount, reason) -> called for XP grants
+local currencySink = nil   -- function(player, name, amount) -> called for currency grants
+local notificationSink = nil -- function(player, title, body, metadata) -> called for notifications
+
+-- Grant rewards to a player using real services or injectable sinks
+local function grantRewards(player, rewards, questId)
+    -- Grant XP
+    if rewards.XP and type(rewards.XP) == "number" and rewards.XP > 0 then
+        if IS_ROBLOX and ProgressionService then
+            ProgressionService.AwardExperience(player, rewards.XP, "QuestReward:" .. questId)
+        elseif xpSink then
+            xpSink(player, rewards.XP, "QuestReward:" .. questId)
+        end
+    end
+
+    -- Grant Currency
+    if rewards.Currency and type(rewards.Currency) == "table" then
+        for _, entry in ipairs(rewards.Currency) do
+            local name = entry.Name
+            local amount = entry.Amount
+            if type(name) == "string" and type(amount) == "number" and amount > 0 then
+                if IS_ROBLOX and CurrencyService and PlayerSession then
+                    local currencyState = PlayerSession.TryGetData(player, "CurrencyState")
+                    if not currencyState then
+                        currencyState = PlayerSession.GetData(player, "CurrencyState")
+                    end
+                    if currencyState then
+                        CurrencyService.Add(player, name, amount, currencyState, { Source = "QuestReward", QuestId = questId })
+                    end
+                elseif currencySink then
+                    currencySink(player, name, amount)
+                end
+            end
+        end
+    end
+
+    -- Send notification
+    local title = "Quest Complete!"
+    local body = string.format("Rewards claimed for quest: %s", questId)
+    if IS_ROBLOX and NotificationService then
+        local playerId = player.UserId
+        NotificationService.Send(playerId, "Quest", title, body, { Source = "QuestService", QuestId = questId })
+    elseif notificationSink then
+        notificationSink(player, title, body, { Source = "QuestService", QuestId = questId })
+    end
+end
 
 -- Build a small default catalog if no config is provided. This keeps tests deterministic.
 local function EnsureDefaultCatalog()
@@ -312,12 +371,14 @@ function QuestService.ClaimQuest(player, questId)
     if not quest then return false, "UnknownQuest" end
     local state = getStateForQuest(player, questId)
     if not state or state.State ~= "completed" then return false, "NotCompletable" end
-    -- Reward application is stubbed for testability: we log rewards instead of mutating
+    -- Log rewards for diagnostics/test assertions
     if quest.rewards then
         local rewards = quest.rewards
         local key = _getPlayerKey(player)
         RewardsLog[key] = RewardsLog[key] or {}
         RewardsLog[key][questId] = rewards
+        -- Actually grant rewards via real services or injectable sinks
+        grantRewards(player, rewards, questId)
     end
     state.State = "claimed"
     -- Persist
@@ -333,6 +394,33 @@ function QuestService._ResetForTests()
     PlayerQuests = {}
     QuestCatalog = {}
     RewardsLog = {}
+    xpSink = nil
+    currencySink = nil
+    notificationSink = nil
+end
+
+function QuestService._SetXPSink(fn)
+    if type(fn) == "function" then
+        xpSink = fn
+    else
+        xpSink = nil
+    end
+end
+
+function QuestService._SetCurrencySink(fn)
+    if type(fn) == "function" then
+        currencySink = fn
+    else
+        currencySink = nil
+    end
+end
+
+function QuestService._SetNotificationSink(fn)
+    if type(fn) == "function" then
+        notificationSink = fn
+    else
+        notificationSink = nil
+    end
 end
 
 return QuestService

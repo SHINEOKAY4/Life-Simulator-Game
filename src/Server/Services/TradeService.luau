@@ -4,6 +4,7 @@
 --
 -- NOTE: Luau type annotations are intentionally omitted so this file
 -- can be loaded via plain loadfile() in the Busted test runner.
+-- selene: allow(global_usage, incorrect_standard_library_use, undefined_variable)
 
 --==============================[ Environment ]==============================
 
@@ -51,8 +52,13 @@ local function loadGoodSignal()
 	end
 
 	ensureTaskSpawn()
+	local dynamicLoadfile = nil
+	if type(_G) == "table" then
+		dynamicLoadfile = _G.loadfile
+	end
 	ok, signalModule = pcall(function()
-		return assert(loadfile("Packages/GoodSignal/init.luau"))()
+		assert(type(dynamicLoadfile) == "function", "loadfile is unavailable in this runtime")
+		return assert(dynamicLoadfile("Packages/GoodSignal/init.luau"))()
 	end)
 	if ok and signalModule then
 		return signalModule
@@ -65,7 +71,7 @@ local GoodSignal = loadGoodSignal()
 
 --==============================[ Types ]==============================
 -- TradeStatus: "Pending" | "Accepted" | "Declined" | "Cancelled" | "Completed" | "Expired"
--- ErrCode: "InvalidPlayer" | "SelfTrade" | "NoItems" | "TradeNotFound"
+-- ErrCode: "InvalidPlayer" | "SelfTrade" | "NoItems" | "InvalidItems" | "TradeNotFound"
 --          | "NotParticipant" | "AlreadyResolved" | "ItemValidationFailed"
 --          | "InventoryFull" | "DuplicatePending"
 --
@@ -82,6 +88,34 @@ local TradeService = {
 	TradeCancelled = GoodSignal.new(),
 	TradeCompleted = GoodSignal.new(),
 }
+
+local notificationService = nil
+local notificationSink = nil
+
+local function sendNotification(playerId, title, body, metadata)
+	if playerId == nil then
+		return
+	end
+	if notificationSink then
+		notificationSink(playerId, title, body, metadata or {})
+		return
+	end
+	if type(game) ~= "userdata" and type(game) ~= "table" then
+		return
+	end
+	if not notificationService then
+		local ok, resolved = pcall(function()
+			local serverScriptService = game:GetService("ServerScriptService")
+			return require(serverScriptService.Server.Services.NotificationService)
+		end)
+		if ok then
+			notificationService = resolved
+		end
+	end
+	if notificationService and notificationService.Send then
+		notificationService.Send(playerId, "Trade", title, body, metadata or {})
+	end
+end
 
 -- Internal state
 local tradeCounter = 0
@@ -179,6 +213,9 @@ function TradeService.RequestTrade(initiatorId, recipientId, initiatorItemIds, r
 	if not isValidId(recipientId) then
 		return nil, "InvalidPlayer"
 	end
+	if type(initiatorItemIds) ~= "table" or type(recipientItemIds) ~= "table" then
+		return nil, "InvalidItems"
+	end
 	if initiatorId == recipientId then
 		return nil, "SelfTrade"
 	end
@@ -226,6 +263,21 @@ function TradeService.RequestTrade(initiatorId, recipientId, initiatorItemIds, r
 	trades[tradeId] = trade
 	addPendingIndex(pendingByRecipient, recipientId, tradeId)
 	addPendingIndex(pendingByInitiator, initiatorId, tradeId)
+
+	sendNotification(
+		recipientId,
+		"New Trade Offer",
+		string.format("Player %s sent you a trade offer.", tostring(initiatorId)),
+		{
+			Source = "TradeService",
+			Event = "Requested",
+			TradeId = tradeId,
+			InitiatorUserId = initiatorId,
+			RecipientUserId = recipientId,
+			InitiatorItemCount = #initiatorItemIds,
+			RecipientItemCount = #recipientItemIds,
+		}
+	)
 
 	TradeService.TradeRequested:Fire(initiatorId, recipientId, tradeId)
 	return tradeId, nil
@@ -302,6 +354,29 @@ function TradeService.AcceptTrade(tradeId, acceptingPlayerId)
 	trade.resolvedAt = now()
 	cleanupPending(trade)
 
+	sendNotification(
+		trade.initiator.playerId,
+		"Trade Completed",
+		string.format("Your trade with player %s completed.", tostring(trade.recipient.playerId)),
+		{
+			Source = "TradeService",
+			Event = "Completed",
+			TradeId = trade.tradeId,
+			CounterpartyUserId = trade.recipient.playerId,
+		}
+	)
+	sendNotification(
+		trade.recipient.playerId,
+		"Trade Completed",
+		string.format("Your trade with player %s completed.", tostring(trade.initiator.playerId)),
+		{
+			Source = "TradeService",
+			Event = "Completed",
+			TradeId = trade.tradeId,
+			CounterpartyUserId = trade.initiator.playerId,
+		}
+	)
+
 	TradeService.TradeAccepted:Fire(trade.initiator.playerId, trade.recipient.playerId, tradeId)
 	TradeService.TradeCompleted:Fire(trade.initiator.playerId, trade.recipient.playerId, tradeId)
 	return true, nil
@@ -324,6 +399,18 @@ function TradeService.DeclineTrade(tradeId, decliningPlayerId)
 	trade.resolvedAt = now()
 	cleanupPending(trade)
 
+	sendNotification(
+		trade.initiator.playerId,
+		"Trade Declined",
+		string.format("Player %s declined your trade offer.", tostring(trade.recipient.playerId)),
+		{
+			Source = "TradeService",
+			Event = "Declined",
+			TradeId = trade.tradeId,
+			CounterpartyUserId = trade.recipient.playerId,
+		}
+	)
+
 	TradeService.TradeDeclined:Fire(trade.initiator.playerId, trade.recipient.playerId, tradeId)
 	return true, nil
 end
@@ -344,6 +431,18 @@ function TradeService.CancelTrade(tradeId, cancellingPlayerId)
 	trade.status = "Cancelled"
 	trade.resolvedAt = now()
 	cleanupPending(trade)
+
+	sendNotification(
+		trade.recipient.playerId,
+		"Trade Cancelled",
+		string.format("Player %s cancelled a trade offer.", tostring(trade.initiator.playerId)),
+		{
+			Source = "TradeService",
+			Event = "Cancelled",
+			TradeId = trade.tradeId,
+			CounterpartyUserId = trade.initiator.playerId,
+		}
+	)
 
 	TradeService.TradeCancelled:Fire(trade.initiator.playerId, trade.recipient.playerId, tradeId)
 	return true, nil
@@ -584,6 +683,8 @@ function TradeService._ResetForTests()
 	clockFn = nil
 	itemValidator = nil
 	transferExecutor = nil
+	notificationSink = nil
+	notificationService = nil
 end
 
 --- Override the clock function (for testing).
@@ -599,6 +700,11 @@ end
 --- Override the transfer executor (for testing).
 function TradeService._SetTransferExecutor(fn)
 	transferExecutor = fn
+end
+
+--- Override notification sink for tests: (playerId, title, body, metadata) -> ()
+function TradeService._SetNotificationSink(fn)
+	notificationSink = fn
 end
 
 --- Set the trade expiry duration in seconds (for testing).

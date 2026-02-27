@@ -386,4 +386,50 @@ describe("DailyRewardService", function()
 		assert.equals(GRACE, constants.StreakGraceSeconds)
 		assert.equals(7, constants.CycleLength)
 	end)
+
+	-- ========== XP Granting via ProgressionService ==========
+
+	describe("XP integration", function()
+		local xpGrants
+
+		before_each(function()
+			xpGrants = {}
+			DailyRewardService._SetXPSink(function(player, amount, reason)
+				table.insert(xpGrants, { player = player, amount = amount, reason = reason })
+			end)
+		end)
+
+		it("grants XP via sink on claim", function()
+			DailyRewardService.ClaimReward("player1")
+			assert.equals(1, #xpGrants)
+			assert.equals(15, xpGrants[1].amount) -- Day 1 XP
+			assert.equals("DailyReward", xpGrants[1].reason)
+		end)
+
+		it("grants escalating XP through the cycle", function()
+			local expectedXP = { 15, 20, 30, 35, 45, 55, 80 }
+			for day = 1, 7 do
+				DailyRewardService.ClaimReward("player1")
+				if day < 7 then
+					currentTime = currentTime + (21 * HOUR)
+				end
+			end
+			assert.equals(7, #xpGrants)
+			for i, grant in ipairs(xpGrants) do
+				-- Day 7 includes milestone bonus: 80 + 50 = 130
+				if i == 7 then
+					assert.equals(130, grant.amount)
+				else
+					assert.equals(expectedXP[i], grant.amount)
+				end
+			end
+		end)
+
+		it("does not grant XP when sink is nil", function()
+			DailyRewardService._SetXPSink(nil)
+			assert.has_no.errors(function()
+				DailyRewardService.ClaimReward("player1")
+			end)
+		end)
+	end)
 end)

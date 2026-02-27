@@ -15,6 +15,8 @@ local ReputationUI = require(script.Parent.ReputationUI)
 local ProfileUI = require(script.Parent.ProfileUI)
 local BillUI = require(script.Parent.BillUI)
 local AchievementUI = require(script.Parent.AchievementUI)
+local DailyRewardUI = require(script.Parent.DailyRewardUI)
+local SeasonalEventUI = require(script.Parent.SeasonalEventUI)
 local PlotExpansion = require(script.Parent.Parent.Modules.PlotExpansion)
 
 local Player = Players.LocalPlayer
@@ -43,9 +45,9 @@ local function ensureQueryBool(name: string, defaultValue: boolean): BoolValue
 	return value
 end
 
-local HUDBottomRightEnabled = ActiveQueryFolder:FindFirstChild("HUDBottomRightEnabled") :: BoolValue
-local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled") :: BoolValue
-local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled") :: BoolValue?
+local HUDBottomRightEnabled = ensureQueryBool("HUDBottomRightEnabled", true)
+local PlotBuilderEnabled = ensureQueryBool("PlotBuilderEnabled", false)
+local PlotExpansionEnabled = ensureQueryBool("PlotExpansionEnabled", false)
 local LevelUpOverlayActive = ensureQueryBool("LevelUpOverlayActive", false)
 
 local MainHUDGui = PlayerGui:WaitForChild("MainHUD") :: ScreenGui
@@ -83,6 +85,30 @@ local AchievementsButton = (function(): TextButton
 	button.Parent = BottomRight
 	return button
 end)()
+local DailyRewardsButton = (function(): TextButton
+	local existing = BottomRight:FindFirstChild("DailyRewardsButton")
+	if existing and existing:IsA("TextButton") then
+		return existing
+	end
+	local button = ReviewsButton:Clone()
+	button.Name = "DailyRewardsButton"
+	button.Text = "Daily Rewards"
+	button.LayoutOrder = AchievementsButton.LayoutOrder + 1
+	button.Parent = BottomRight
+	return button
+end)()
+local SeasonsButton = (function(): TextButton
+	local existing = BottomRight:FindFirstChild("SeasonsButton")
+	if existing and existing:IsA("TextButton") then
+		return existing
+	end
+	local button = ReviewsButton:Clone()
+	button.Name = "SeasonsButton"
+	button.Text = "Seasons"
+	button.LayoutOrder = DailyRewardsButton.LayoutOrder + 1
+	button.Parent = BottomRight
+	return button
+end)()
 local NotifierSymbol = BillsButton:FindFirstChild("NotifierSymbol") :: ImageLabel? -- Notifier for bill due
 local ProgressionBar = MainHUDGui:WaitForChild("ProgressionBar") :: Frame
 local ProgressionForeground = ProgressionBar:WaitForChild("Foreground") :: Frame
@@ -107,7 +133,7 @@ local function setBottomRightEnabled(enabled: boolean)
 end
 
 local function isPlotExpansionActive(): boolean
-	return PlotExpansionEnabled ~= nil and PlotExpansionEnabled.Value == true
+	return PlotExpansionEnabled.Value == true
 end
 
 local function shouldMainHudBeEnabled(): boolean
@@ -545,14 +571,10 @@ function MainHUD.Init()
 	LevelUpOverlayActive.Changed:Connect(syncLevelUpSuppression)
 
 	syncPlotExpansionCancelState()
-	if PlotExpansionEnabled then
-		PlotExpansionEnabled.Changed:Connect(function()
-			syncMainHudEnabledState()
-			syncPlotExpansionCancelState()
-		end)
-	else
-		warn("[MainHUD] PlotExpansionEnabled BoolValue missing; HUD suppression may be incorrect.")
-	end
+	PlotExpansionEnabled.Changed:Connect(function()
+		syncMainHudEnabledState()
+		syncPlotExpansionCancelState()
+	end)
 
 	local currentCash = Player:GetAttribute(CASH_ATTRIBUTE_NAME)
 	if typeof(currentCash) ~= "number" then
@@ -595,6 +617,14 @@ function MainHUD.Init()
 
 	AchievementsButton.Activated:Connect(function()
 		AchievementUI.Toggle()
+	end)
+
+	DailyRewardsButton.Activated:Connect(function()
+		DailyRewardUI.Toggle()
+	end)
+
+	SeasonsButton.Activated:Connect(function()
+		SeasonalEventUI.Toggle()
 	end)
 
 	PlotBuilderEnabled.Changed:Connect(function()
@@ -661,7 +691,7 @@ function MainHUD.Init()
 		Player:GetAttributeChangedSignal(attributeName):Connect(updateProgressionDisplay)
 	end
 
-	for _, button in ipairs({ BuildButton, ReviewsButton, ReputationButton, ProfileButton, BillsButton, AchievementsButton }) do
+	for _, button in ipairs({ BuildButton, ReviewsButton, ReputationButton, ProfileButton, BillsButton, AchievementsButton, DailyRewardsButton, SeasonsButton }) do
 		configureButtonVisuals(button)
 	end
 

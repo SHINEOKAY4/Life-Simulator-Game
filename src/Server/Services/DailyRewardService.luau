@@ -17,6 +17,7 @@ local PlayerSession = nil
 local CurrencyService = nil
 local NotificationService = nil
 local AchievementService = nil
+local ProgressionService = nil
 local DailyRewardDefinitions = nil
 local DailyRewardPackets = nil
 
@@ -31,6 +32,7 @@ if IS_ROBLOX then
 	CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
 	NotificationService = require(ServerScriptService.Server.Services.NotificationService)
 	AchievementService = require(ServerScriptService.Server.Services.AchievementService)
+	ProgressionService = require(ServerScriptService.Server.Services.ProgressionService)
 end
 
 -- ============ Inline definitions for test mode ============
@@ -207,6 +209,18 @@ local function computeStreakStatus(state, now)
 	}
 end
 
+-- Injectable XP sink for test mode (replaces ProgressionService.AwardExperience)
+local xpSink = nil
+
+local function grantXP(player, amount)
+	if amount <= 0 then return end
+	if IS_ROBLOX and ProgressionService then
+		ProgressionService.AwardExperience(player, amount, "DailyReward")
+	elseif xpSink then
+		xpSink(player, amount, "DailyReward")
+	end
+end
+
 local function sendNotification(playerId, title, body, metadata)
 	if IS_ROBLOX and NotificationService then
 		NotificationService.Send(playerId, "Reward", title, body, metadata)
@@ -331,6 +345,9 @@ function DailyRewardService.ClaimReward(player)
 		end
 	end
 
+	-- Grant XP via ProgressionService (or injectable sink in tests)
+	grantXP(player, xpReward)
+
 	-- Build result
 	local result = {
 		Streak = newStreak,
@@ -425,6 +442,7 @@ function DailyRewardService._ResetForTests()
 	testStateByPlayerId = {}
 	DailyRewardService._testNotifications = {}
 	AchievementService = nil
+	xpSink = nil
 end
 
 function DailyRewardService._SetClock(fn)
@@ -445,6 +463,14 @@ function DailyRewardService._GetConstants()
 		StreakGraceSeconds = STREAK_GRACE_SECONDS,
 		CycleLength = CYCLE_LENGTH,
 	}
+end
+
+function DailyRewardService._SetXPSink(fn)
+	if type(fn) == "function" then
+		xpSink = fn
+	else
+		xpSink = nil
+	end
 end
 
 -- Initialize test notifications table

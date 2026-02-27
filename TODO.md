@@ -45,19 +45,22 @@ Last updated: 2026-02-18
 
 ## Next Work (Product/Code Depth)
 
-- [ ] Seasonal Event System follow-ups
-  - [ ] Wire SeasonalEventService into WeatherService for automatic season transitions
-  - [ ] Build client-side SeasonalEventUI (season banner, challenge tracker, buff display)
-  - [ ] Add seasonal achievements to AchievementDefinitions
-  - [ ] Integrate seasonal buffs into ProgressionService (XP multiplier) and BillingService (cash multiplier)
+- [x] Seasonal Event System follow-ups
+  - [x] Wire SeasonalEventService into WeatherService for automatic season transitions
+  - [x] Build client-side SeasonalEventUI (season banner, challenge tracker, buff display, milestone rewards, per-challenge/milestone reward claiming, MainHUD button)
+  - [x] Add seasonal achievements to AchievementDefinitions
+  - [x] Integrate seasonal buffs into ProgressionService (XP multiplier) and BillingService (cash multiplier)
 - [ ] Daily Reward System follow-ups
-  - [ ] Build client-side DailyRewardUI (claim button, streak calendar, countdown timer)
-  - [ ] Wire DailyRewardService into ProgressionService for XP grants
-  - [ ] Add Daily Reward achievements to AchievementDefinitions
+  - [x] Build client-side DailyRewardUI (claim button, streak calendar, countdown timer)
+  - [x] Wire DailyRewardService into ProgressionService for XP grants
+  - [x] Add Daily Reward achievements to AchievementDefinitions
   - [ ] Add daily challenge variant (rotating objectives using QuestService)
 - [ ] Replace stub-heavy tests with behavior tests against production service logic
   - Focus first on `PlotService` and `TenantService` edge cases
-- [ ] Integrate NotificationService into AchievementService, BillingService, TradeService
-- [ ] Add CI lint step for Luau source (`selene`)
+- [x] Integrate NotificationService into core economy/services
+  - [x] AchievementService
+  - [x] TradeService
+  - [x] BillingService
+- [x] Add CI lint step for Luau source (`selene`)
 - [ ] Expand public docs with gameplay/system overviews and contributor setup guidance
 - [ ] Enable release process that updates `CHANGELOG.md` from merged PR metadata

@@ -14,10 +14,13 @@ end
 local IS_ROBLOX = hasRobloxRuntime()
 local Players = nil
 local SeasonalEventPackets = nil
+local AchievementService = nil
 if IS_ROBLOX then
 	Players = game:GetService("Players")
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local ServerScriptService = game:GetService("ServerScriptService")
 	SeasonalEventPackets = require(ReplicatedStorage.Network.SeasonalEventPackets)
+	AchievementService = require(ServerScriptService.Server.Services.AchievementService)
 end
 
 -- ============ Inline definitions for test mode ============
@@ -183,6 +186,26 @@ local activeDistributionsByPlayerKey = {}
 local notificationSink = nil
 local weatherServiceRef = nil
 local weatherInitToken = 0
+
+-- Achievement recording helper: forwards to AchievementService in Roblox,
+-- or to an injectable sink in test mode.
+local achievementSink = nil
+
+local function recordAchievementSeasonalChallenge(player)
+	if IS_ROBLOX and AchievementService then
+		AchievementService.RecordSeasonalChallengeCompleted(player)
+	elseif achievementSink then
+		achievementSink(player, "SeasonalChallengesCompleted", 1)
+	end
+end
+
+local function recordAchievementSeasonCompleted(player, totalSeasonsCompleted)
+	if IS_ROBLOX and AchievementService then
+		AchievementService.RecordSeasonCompleted(player, totalSeasonsCompleted)
+	elseif achievementSink then
+		achievementSink(player, "SeasonsCompleted", totalSeasonsCompleted)
+	end
+end
 
 local function pushSeasonTransition(player, result)
 	if not IS_ROBLOX or not SeasonalEventPackets then
@@ -400,6 +423,8 @@ function SeasonalEventService.TransitionSeason(player, seasonId)
 	-- If transitioning from a real previous season, increment completed count
 	if not isFirstSeason and previousSeason ~= seasonId then
 		state.SeasonsCompleted = state.SeasonsCompleted + 1
+		-- Record season completion toward seasonal achievements
+		recordAchievementSeasonCompleted(player, state.SeasonsCompleted)
 	end
 
 	-- Reset seasonal challenge progress for the new season
@@ -510,6 +535,9 @@ function SeasonalEventService.RecordProgress(player, statKey, amount)
 					Season = state.CurrentSeason,
 				})
 
+				-- Record toward seasonal achievements
+				recordAchievementSeasonalChallenge(player)
+
 				pushChallengeCompleted(player, {
 					Id = challenge.Id,
 					Name = challenge.Name,
@@ -518,6 +546,7 @@ function SeasonalEventService.RecordProgress(player, statKey, amount)
 					CurrentValue = math.min(progress, challenge.TargetValue),
 					TargetValue = challenge.TargetValue,
 					Completed = true,
+					RewardClaimed = false,
 					RewardCash = challenge.RewardCash,
 					RewardExperience = challenge.RewardExperience,
 				})
@@ -573,6 +602,15 @@ function SeasonalEventService.GetStatus(player)
 		claimedMilestonesCount = claimedMilestonesCount + 1
 	end
 
+	local claimedMilestoneRewardSeasons = {}
+	for key in pairs(state.ClaimedMilestoneRewards) do
+		local seasonCount = tonumber(key)
+		if seasonCount then
+			table.insert(claimedMilestoneRewardSeasons, math.floor(seasonCount + 0.5))
+		end
+	end
+	table.sort(claimedMilestoneRewardSeasons)
+
 	return {
 		CurrentSeason = state.CurrentSeason,
 		SeasonName = seasonDef.Name,
@@ -586,6 +624,7 @@ function SeasonalEventService.GetStatus(player)
 		TotalCashDistributed = state.TotalCashDistributed,
 		TotalExperienceDistributed = state.TotalExperienceDistributed,
 		SeasonStartTime = state.SeasonStartTime,
+		ClaimedMilestoneRewardSeasons = claimedMilestoneRewardSeasons,
 		ClaimedMilestonesCount = claimedMilestonesCount,
 	}
 end
@@ -1327,6 +1366,7 @@ function SeasonalEventService._ResetForTests()
 	weatherServiceRef = nil
 	weatherInitToken = weatherInitToken + 1
 	rewardExecutor = nil
+	achievementSink = nil
 end
 
 function SeasonalEventService._SetClock(fn)
@@ -1350,6 +1390,14 @@ function SeasonalEventService._SetRewardExecutor(fn)
 		rewardExecutor = fn
 	else
 		rewardExecutor = nil
+	end
+end
+
+function SeasonalEventService._SetAchievementSink(fn)
+	if type(fn) == "function" then
+		achievementSink = fn
+	else
+		achievementSink = nil
 	end
 end
 

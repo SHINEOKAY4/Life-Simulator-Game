@@ -10,6 +10,7 @@ describe("TradeService", function()
 		TradeService._SetClock(function() return 1000 end)
 		TradeService._SetItemValidator(nil)
 		TradeService._SetTransferExecutor(nil)
+		TradeService._SetNotificationSink(nil)
 	end)
 
 	-- ============ RequestTrade ============
@@ -45,6 +46,18 @@ describe("TradeService", function()
 			local tradeId, err = TradeService.RequestTrade(1, nil, {"itemA"}, {})
 			assert.is_nil(tradeId)
 			assert.equals("InvalidPlayer", err)
+		end)
+
+		it("should reject non-table initiator items", function()
+			local tradeId, err = TradeService.RequestTrade(1, 2, nil, {})
+			assert.is_nil(tradeId)
+			assert.equals("InvalidItems", err)
+		end)
+
+		it("should reject non-table recipient items", function()
+			local tradeId, err = TradeService.RequestTrade(1, 2, {}, "not-table")
+			assert.is_nil(tradeId)
+			assert.equals("InvalidItems", err)
 		end)
 
 		it("should reject when both item lists are empty", function()
@@ -86,6 +99,25 @@ describe("TradeService", function()
 			assert.equals(10, firedInit)
 			assert.equals(20, firedRecip)
 			assert.equals(tradeId, firedId)
+		end)
+
+		it("should notify recipient when trade is requested", function()
+			local sent = {}
+			TradeService._SetNotificationSink(function(playerId, title, body, metadata)
+				table.insert(sent, {
+					playerId = playerId,
+					title = title,
+					body = body,
+					metadata = metadata,
+				})
+			end)
+
+			local tradeId = TradeService.RequestTrade(10, 20, {"x"}, {"y"})
+			assert.equals(1, #sent)
+			assert.equals(20, sent[1].playerId)
+			assert.equals("New Trade Offer", sent[1].title)
+			assert.equals(tradeId, sent[1].metadata.TradeId)
+			assert.equals("Requested", sent[1].metadata.Event)
 		end)
 
 		it("should reject when item validator fails", function()
@@ -151,6 +183,29 @@ describe("TradeService", function()
 			TradeService.AcceptTrade(tradeId, 2)
 			assert.is_true(acceptedFired)
 			assert.is_true(completedFired)
+		end)
+
+		it("should notify both players when trade completes", function()
+			local sent = {}
+			TradeService._SetNotificationSink(function(playerId, title, body, metadata)
+				table.insert(sent, {
+					playerId = playerId,
+					title = title,
+					body = body,
+					metadata = metadata,
+				})
+			end)
+
+			local tradeId = TradeService.RequestTrade(1, 2, {"itemA"}, {"itemB"})
+			TradeService.AcceptTrade(tradeId, 2)
+
+			assert.equals(3, #sent) -- request + completion to each side
+			assert.equals(1, sent[2].playerId)
+			assert.equals(2, sent[3].playerId)
+			assert.equals("Trade Completed", sent[2].title)
+			assert.equals("Trade Completed", sent[3].title)
+			assert.equals("Completed", sent[2].metadata.Event)
+			assert.equals("Completed", sent[3].metadata.Event)
 		end)
 
 		it("should call transfer executor on accept", function()
@@ -264,6 +319,27 @@ describe("TradeService", function()
 			TradeService.DeclineTrade(tradeId, 2)
 			assert.is_true(declinedFired)
 		end)
+
+		it("should notify initiator when trade is declined", function()
+			local sent = {}
+			TradeService._SetNotificationSink(function(playerId, title, body, metadata)
+				table.insert(sent, {
+					playerId = playerId,
+					title = title,
+					body = body,
+					metadata = metadata,
+				})
+			end)
+
+			local tradeId = TradeService.RequestTrade(1, 2, {"itemA"}, {"itemB"})
+			TradeService.DeclineTrade(tradeId, 2)
+
+			assert.equals(2, #sent) -- request + decline
+			assert.equals(1, sent[2].playerId)
+			assert.equals("Trade Declined", sent[2].title)
+			assert.equals("Declined", sent[2].metadata.Event)
+			assert.equals(tradeId, sent[2].metadata.TradeId)
+		end)
 	end)
 
 	-- ============ CancelTrade ============
@@ -295,6 +371,27 @@ describe("TradeService", function()
 			local tradeId = TradeService.RequestTrade(1, 2, {"itemA"}, {"itemB"})
 			TradeService.CancelTrade(tradeId, 1)
 			assert.is_true(cancelledFired)
+		end)
+
+		it("should notify recipient when trade is cancelled", function()
+			local sent = {}
+			TradeService._SetNotificationSink(function(playerId, title, body, metadata)
+				table.insert(sent, {
+					playerId = playerId,
+					title = title,
+					body = body,
+					metadata = metadata,
+				})
+			end)
+
+			local tradeId = TradeService.RequestTrade(1, 2, {"itemA"}, {"itemB"})
+			TradeService.CancelTrade(tradeId, 1)
+
+			assert.equals(2, #sent) -- request + cancel
+			assert.equals(2, sent[2].playerId)
+			assert.equals("Trade Cancelled", sent[2].title)
+			assert.equals("Cancelled", sent[2].metadata.Event)
+			assert.equals(tradeId, sent[2].metadata.TradeId)
 		end)
 	end)
 
