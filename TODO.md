@@ -1,5 +1,7 @@
 # TODO - Life-Simulator-Game
 
+See the docs https://shineokay4.github.io/Life-Simulator-Game/generated/api/
+
 Last updated: 2026-02-18
 
 ## Completed Infrastructure
