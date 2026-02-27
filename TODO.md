@@ -1,5 +1,7 @@
 # TODO - Life-Simulator-Game
 
+See the docs https://shineokay4.github.io/Life-Simulator-Game/generated/api/
+
 Last updated: 2026-02-18
 
 ## Completed Infrastructure
@@ -63,4 +65,4 @@ Last updated: 2026-02-18
   - [x] BillingService
 - [x] Add CI lint step for Luau source (`selene`)
 - [x] Expand public docs with gameplay/system overviews and contributor setup guidance
-- [ ] Enable release process that updates `CHANGELOG.md` from merged PR metadata
+- [x] Enable release process that updates `CHANGELOG.md` from merged PR metadata

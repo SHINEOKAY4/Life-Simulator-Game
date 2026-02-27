@@ -3,6 +3,9 @@
 ## Project Overview
 Life Simulator is a Roblox game built with a strict client-server architecture using Luau. Players manage plots, place objects, interact with residents/tenants, and simulate life activities. The codebase uses **Rojo** for project management and follows a packet-based networking pattern.
 
+**FOR REFERENCES ON MAIN BRANCH -- ALWAYS REVIEW https://shineokay4.github.io/Life-Simulator-Game/generated/api/ ** 
+- These docs are built every 10 iterations but have TONS of infomration as long as you navigate it for what YOU are working on!
+
 ## Architecture Fundamentals
 
 ### Rojo Project Structure
