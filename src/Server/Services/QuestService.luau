@@ -309,6 +309,9 @@ end
 
 -- Start a quest if it is available
 function QuestService.StartQuest(player, questId)
+    if player == nil then
+        return false, "PlayerRequired"
+    end
     local quest = ensureQuestExists(questId)
     if not quest then
         return false, "UnknownQuest"
@@ -338,6 +341,12 @@ end
 
 -- Generic progress update for an objective by numeric delta
 function QuestService.ProgressObjective(player, questId, objectiveId, delta)
+    if player == nil then
+        return false, "PlayerRequired"
+    end
+    if type(delta) ~= "number" then
+        return false, "InvalidDelta"
+    end
     if delta < 0 then delta = 0 end
     local quest = ensureQuestExists(questId)
     if not quest then return false, "UnknownQuest" end
@@ -371,6 +380,10 @@ end
 
 -- Report a produced item collection for an objective
 function QuestService.ReportItemCollected(player, questId, itemDefId, qty)
+    if player == nil then return false, "PlayerRequired" end
+    if qty ~= nil and (type(qty) ~= "number" or qty <= 0) then
+        return false, "InvalidQuantity"
+    end
     local quest = ensureQuestExists(questId)
     if not quest then return false, "UnknownQuest" end
     local state = getStateForQuest(player, questId)

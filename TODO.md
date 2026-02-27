@@ -52,7 +52,7 @@ Last updated: 2026-02-18
   - [x] Build client-side SeasonalEventUI (season banner, challenge tracker, buff display, milestone rewards, per-challenge/milestone reward claiming, MainHUD button)
   - [x] Add seasonal achievements to AchievementDefinitions
   - [x] Integrate seasonal buffs into ProgressionService (XP multiplier) and BillingService (cash multiplier)
-- [ ] Daily Reward System follow-ups
+- [x] Daily Reward System follow-ups
   - [x] Build client-side DailyRewardUI (claim button, streak calendar, countdown timer)
   - [x] Wire DailyRewardService into ProgressionService for XP grants
   - [x] Add Daily Reward achievements to AchievementDefinitions
