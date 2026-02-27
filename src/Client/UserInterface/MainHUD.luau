@@ -44,9 +44,9 @@ local function ensureQueryBool(name: string, defaultValue: boolean): BoolValue
 	return value
 end
 
-local HUDBottomRightEnabled = ActiveQueryFolder:FindFirstChild("HUDBottomRightEnabled") :: BoolValue
-local PlotBuilderEnabled = ActiveQueryFolder:FindFirstChild("PlotBuilderEnabled") :: BoolValue
-local PlotExpansionEnabled = ActiveQueryFolder:FindFirstChild("PlotExpansionEnabled") :: BoolValue?
+local HUDBottomRightEnabled = ensureQueryBool("HUDBottomRightEnabled", true)
+local PlotBuilderEnabled = ensureQueryBool("PlotBuilderEnabled", false)
+local PlotExpansionEnabled = ensureQueryBool("PlotExpansionEnabled", false)
 local LevelUpOverlayActive = ensureQueryBool("LevelUpOverlayActive", false)
 
 local MainHUDGui = PlayerGui:WaitForChild("MainHUD") :: ScreenGui
@@ -120,7 +120,7 @@ local function setBottomRightEnabled(enabled: boolean)
 end
 
 local function isPlotExpansionActive(): boolean
-	return PlotExpansionEnabled ~= nil and PlotExpansionEnabled.Value == true
+	return PlotExpansionEnabled.Value == true
 end
 
 local function shouldMainHudBeEnabled(): boolean
@@ -558,14 +558,10 @@ function MainHUD.Init()
 	LevelUpOverlayActive.Changed:Connect(syncLevelUpSuppression)
 
 	syncPlotExpansionCancelState()
-	if PlotExpansionEnabled then
-		PlotExpansionEnabled.Changed:Connect(function()
-			syncMainHudEnabledState()
-			syncPlotExpansionCancelState()
-		end)
-	else
-		warn("[MainHUD] PlotExpansionEnabled BoolValue missing; HUD suppression may be incorrect.")
-	end
+	PlotExpansionEnabled.Changed:Connect(function()
+		syncMainHudEnabledState()
+		syncPlotExpansionCancelState()
+	end)
 
 	local currentCash = Player:GetAttribute(CASH_ATTRIBUTE_NAME)
 	if typeof(currentCash) ~= "number" then

@@ -65,8 +65,12 @@ local function calculateBill(player: Player): {
 
 	-- Count occupied cells for property tax
 	local occupiedCells = 0
-	for _ in pairs(plotState.Save.PlacedObjects) do
-		occupiedCells += 1
+	local save = plotState.Save
+	local placedObjects = if type(save) == "table" then save.PlacedObjects else nil
+	if type(placedObjects) == "table" then
+		for _ in pairs(placedObjects) do
+			occupiedCells += 1
+		end
 	end
 
 	-- Calculate property tax
@@ -82,7 +86,8 @@ local function calculateBill(player: Player): {
 	local water = BillingCalculator.CalculateWater(residentCount)
 
 	-- Calculate internet
-	local internet = BillingCalculator.CalculateInternet(billingState.Save.InternetTier)
+	local internetTier = if type(billingState.Save) == "table" then billingState.Save.InternetTier else nil
+	local internet = BillingCalculator.CalculateInternet(internetTier or "Basic")
 
 	local total = propertyTax + electricity + water + internet
 
@@ -236,15 +241,19 @@ function BillingService.LoadPlayer(player: Player)
 
 	if hasBillDue then
 		-- Restore unpaid bill state
-		local breakdown = billingData.CurrentCycle
-		local total = math.round(breakdown.PropertyTax + breakdown.Electricity + breakdown.Water + breakdown.Internet)
+		local breakdown = if type(billingData.CurrentCycle) == "table" then billingData.CurrentCycle else {}
+		local propertyTax = tonumber(breakdown.PropertyTax) or 0
+		local electricity = tonumber(breakdown.Electricity) or 0
+		local water = tonumber(breakdown.Water) or 0
+		local internet = tonumber(breakdown.Internet) or 0
+		local total = math.round(propertyTax + electricity + water + internet)
 
 		player:SetAttribute(BillingConstants.BillDueAttribute, true)
 		updatePlayerAttributes(player, {
-			PropertyTax = breakdown.PropertyTax,
-			Electricity = breakdown.Electricity,
-			Water = breakdown.Water,
-			Internet = breakdown.Internet,
+			PropertyTax = propertyTax,
+			Electricity = electricity,
+			Water = water,
+			Internet = internet,
 			Total = total,
 		})
 
@@ -289,8 +298,12 @@ function BillingService.PayBill(player: Player): (boolean, string)
 		return false, "No bill due"
 	end
 
-	local breakdown = billingState.Save.CurrentCycle
-	local total = math.round(breakdown.PropertyTax + breakdown.Electricity + breakdown.Water + breakdown.Internet)
+	local breakdown = if type(billingState.Save.CurrentCycle) == "table" then billingState.Save.CurrentCycle else {}
+	local propertyTax = tonumber(breakdown.PropertyTax) or 0
+	local electricity = tonumber(breakdown.Electricity) or 0
+	local water = tonumber(breakdown.Water) or 0
+	local internet = tonumber(breakdown.Internet) or 0
+	local total = math.round(propertyTax + electricity + water + internet)
 
 	-- Check if player has enough cash
 	local currencyData = PlayerSession.GetDataAwait(player, "CurrencyState")

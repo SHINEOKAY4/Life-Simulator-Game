@@ -48,6 +48,18 @@ describe("TradeService", function()
 			assert.equals("InvalidPlayer", err)
 		end)
 
+		it("should reject non-table initiator items", function()
+			local tradeId, err = TradeService.RequestTrade(1, 2, nil, {})
+			assert.is_nil(tradeId)
+			assert.equals("InvalidItems", err)
+		end)
+
+		it("should reject non-table recipient items", function()
+			local tradeId, err = TradeService.RequestTrade(1, 2, {}, "not-table")
+			assert.is_nil(tradeId)
+			assert.equals("InvalidItems", err)
+		end)
+
 		it("should reject when both item lists are empty", function()
 			local tradeId, err = TradeService.RequestTrade(1, 2, {}, {})
 			assert.is_nil(tradeId)

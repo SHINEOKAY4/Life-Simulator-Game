@@ -65,7 +65,7 @@ local GoodSignal = loadGoodSignal()
 
 --==============================[ Types ]==============================
 -- TradeStatus: "Pending" | "Accepted" | "Declined" | "Cancelled" | "Completed" | "Expired"
--- ErrCode: "InvalidPlayer" | "SelfTrade" | "NoItems" | "TradeNotFound"
+-- ErrCode: "InvalidPlayer" | "SelfTrade" | "NoItems" | "InvalidItems" | "TradeNotFound"
 --          | "NotParticipant" | "AlreadyResolved" | "ItemValidationFailed"
 --          | "InventoryFull" | "DuplicatePending"
 --
@@ -206,6 +206,9 @@ function TradeService.RequestTrade(initiatorId, recipientId, initiatorItemIds, r
 	end
 	if not isValidId(recipientId) then
 		return nil, "InvalidPlayer"
+	end
+	if type(initiatorItemIds) ~= "table" or type(recipientItemIds) ~= "table" then
+		return nil, "InvalidItems"
 	end
 	if initiatorId == recipientId then
 		return nil, "SelfTrade"
