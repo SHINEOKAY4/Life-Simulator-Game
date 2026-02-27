@@ -60,7 +60,7 @@ Last updated: 2026-02-18
 - [ ] Integrate NotificationService into core economy/services
   - [x] AchievementService
   - [x] TradeService
-  - [ ] BillingService
+  - [x] BillingService
 - [ ] Add CI lint step for Luau source (`selene`)
 - [ ] Expand public docs with gameplay/system overviews and contributor setup guidance
 - [ ] Enable release process that updates `CHANGELOG.md` from merged PR metadata

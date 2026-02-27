@@ -13,6 +13,7 @@ local PlayerSession = require(script.Parent.PlayerSession)
 local PlotService = require(script.Parent.PlotService)
 local CurrencyService = require(script.Parent.CurrencyService)
 local ResidentService = require(script.Parent.ResidentService)
+local NotificationService = require(script.Parent.NotificationService)
 local EnergyUsageTracker = require(ServerScriptService.Server.Utilities.EnergyUsageTracker)
 local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
 
@@ -20,6 +21,10 @@ local BillingService = {}
 
 -- Active billing states per player
 local PlayerStates: { [number]: BillingState.BillingState } = {}
+
+local function sendBillingNotification(player: Player, title: string, body: string, metadata: { [string]: any }?)
+	NotificationService.Send(player.UserId, "Billing", title, body, metadata or { Source = "BillingService" })
+end
 
 -- Update player attributes with current bill breakdown
 local function updatePlayerAttributes(
@@ -117,6 +122,20 @@ local function processBillingCycle(player: Player)
 	billingState:MarkUnpaid()
 	player:SetAttribute(BillingConstants.BillDueAttribute, true)
 	updatePlayerAttributes(player, breakdown)
+	sendBillingNotification(
+		player,
+		"Bill Due",
+		string.format("A new utility bill of $%d is now due.", math.round(breakdown.Total)),
+		{
+			Source = "BillingService",
+			Event = "BillDue",
+			Total = math.round(breakdown.Total),
+			PropertyTax = math.round(breakdown.PropertyTax),
+			Electricity = math.round(breakdown.Electricity),
+			Water = math.round(breakdown.Water),
+			Internet = math.round(breakdown.Internet),
+		}
+	)
 
 	print(string.format("[BillingService] Bill due for %s: $%.2f", player.Name, breakdown.Total))
 end
@@ -144,6 +163,16 @@ local function enforceConsequences(player: Player)
 		if player:GetAttribute(BillingConstants.PowerOutageAttribute) ~= true then
 			player:SetAttribute(BillingConstants.PowerOutageAttribute, true)
 			local unpaidDuration = billingState:GetUnpaidDuration()
+			sendBillingNotification(
+				player,
+				"Power Shut Off",
+				"Your grace period has expired. Pay your bill to restore power.",
+				{
+					Source = "BillingService",
+					Event = "PowerOutageActivated",
+					UnpaidDurationSeconds = unpaidDuration,
+				}
+			)
 			print(
 				string.format(
 					"[BillingService] Power outage activated for %s (unpaid for %d seconds)",
@@ -285,6 +314,16 @@ function BillingService.PayBill(player: Player): (boolean, string)
 	player:SetAttribute(BillingConstants.BillDueAttribute, false)
 	player:SetAttribute(BillingConstants.PowerOutageAttribute, false)
 	updatePlayerAttributes(player, { PropertyTax = 0, Electricity = 0, Water = 0, Internet = 0, Total = 0 })
+	sendBillingNotification(
+		player,
+		"Bill Paid",
+		string.format("Payment received: $%d. Utilities are up to date.", total),
+		{
+			Source = "BillingService",
+			Event = "BillPaid",
+			Total = total,
+		}
+	)
 
 	print(string.format("[BillingService] %s paid bill: $%.2f", player.Name, total))
 	return true, string.format("Bill paid: $%.2f", total)
