@@ -7,6 +7,22 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Aftman
+        uses: ok-nick/setup-aftman@v0.4.2
+      - name: Install toolchain
+        run: |
+          echo "$HOME/.aftman/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.aftman/bin:$PATH"
+          aftman install
+      - name: Lint Luau source with Selene
+        run: |
+          export PATH="$HOME/.aftman/bin:$PATH"
+          selene --allow-warnings src
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -26,7 +42,7 @@ jobs:
         run: ./run_tests.sh
 
   build:
-    needs: test
+    needs: [test, lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,7 +83,7 @@ jobs:
           path: Life-Simulator.rbxl
 
   docs:
-    needs: test
+    needs: [test, lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

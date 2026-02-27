@@ -1,3 +1,5 @@
+-- selene: allow(global_usage, incorrect_standard_library_use, undefined_variable)
+
 local function ensureTaskSpawn()
 	local function spawnImpl(executable, ...)
 		if type(executable) == "thread" then
@@ -42,8 +44,13 @@ local function loadGoodSignal()
 	end
 
 	ensureTaskSpawn()
+	local dynamicLoadfile = nil
+	if type(_G) == "table" then
+		dynamicLoadfile = _G.loadfile
+	end
 	ok, signalModule = pcall(function()
-		return assert(loadfile("Packages/GoodSignal/init.luau"))()
+		assert(type(dynamicLoadfile) == "function", "loadfile is unavailable in this runtime")
+		return assert(dynamicLoadfile("Packages/GoodSignal/init.luau"))()
 	end)
 	if ok and signalModule then
 		return signalModule
