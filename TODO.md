@@ -57,7 +57,7 @@ Last updated: 2026-02-18
   - [x] Wire DailyRewardService into ProgressionService for XP grants
   - [x] Add Daily Reward achievements to AchievementDefinitions
   - [x] Add daily challenge variant (rotating objectives using QuestService)
-- [ ] Replace stub-heavy tests with behavior tests against production service logic
+- [x] Replace stub-heavy tests with behavior tests against production service logic
   - [x] Replace `TenantSpec` stubs with behavior tests for `TenantService/ValidationUtils` edge cases
   - Focus first on `PlotService` and `TenantService` edge cases
 - [x] Integrate NotificationService into core economy/services
