@@ -62,5 +62,5 @@ Last updated: 2026-02-18
   - [x] TradeService
   - [x] BillingService
 - [x] Add CI lint step for Luau source (`selene`)
-- [ ] Expand public docs with gameplay/system overviews and contributor setup guidance
+- [x] Expand public docs with gameplay/system overviews and contributor setup guidance
 - [ ] Enable release process that updates `CHANGELOG.md` from merged PR metadata

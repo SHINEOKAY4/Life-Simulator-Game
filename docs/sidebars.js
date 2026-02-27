@@ -1,6 +1,8 @@
 const sidebars = {
   docsSidebar: [
     "intro",
+    "GameplayOverview",
+    "ContributorSetup",
     "SeasonalEvents",
     {
       type: "category",
