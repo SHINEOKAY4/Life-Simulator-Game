@@ -30,6 +30,9 @@ Last updated: 2026-02-18
 
 ## Completed Features
 
+- [x] Iteration 7 issue triage: close GitHub issue #11 after validating startup warning fixes
+  - Confirmed the reported stack-frame paths are now guarded (`ItemFinder`, `PlotSelector`) with bounded startup resolution
+  - Posted fix summary/validation on issue #11 and closed it
 - [x] Iteration 7 bugfix: suppress runtime infinite-yield warnings for required startup instances
   - `src/Shared/Utilities/ItemFinder.luau` now resolves `ReplicatedStorage.Assets`/`Catalog` with bounded waits and explicit errors
   - `src/Client/Modules/PlotSelector.luau` now resolves `MainHUD`/plot selector UI with bounded waits to avoid noisy `WaitForChild` warnings
