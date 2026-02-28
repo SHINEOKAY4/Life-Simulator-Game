@@ -36,6 +36,10 @@ Last updated: 2026-02-28
 
 ## Completed Features
 
+- [x] Iteration 7 bugfix: restore missing `ReplicatedStorage.Shared.Modules.PropConfig` compatibility (GitHub issue #14)
+  - Added `src/Shared/Definitions/PropConfig.luau` as an aggregate over catalog definition modules
+  - Added `src/Shared/Modules/PropConfig.luau` shim so legacy `Shared.Modules.PropConfig` requires resolve again
+  - Added `Tests/Specs/LegacyModuleCompatSpec.lua` assertions for `PropConfig` compatibility paths
 - [x] Iteration 3 bugfix: restore `ReplicatedStorage.Shared.Modules` compatibility for legacy DUO scripts (GitHub issue #12)
   - Added `src/Shared/Modules/` shim modules that re-export current `Shared/Utilities`, `Shared/Configurations`, `Shared/Definitions`, and `Shared/Services` modules
   - Added/kept Lemur source-tree smoke assertion for the `Shared/Modules` folder to prevent folder-level regressions
@@ -72,6 +76,7 @@ Last updated: 2026-02-28
 
 ## Next Work (Product/Code Depth)
 
+- [ ] Add startup diagnostics/logging standards for Roblox Studio issue triage (service/module load boundaries + key dependency resolution points)
 - [x] Seasonal Event System follow-ups
   - [x] Wire SeasonalEventService into WeatherService for automatic season transitions
   - [x] Build client-side SeasonalEventUI (season banner, challenge tracker, buff display, milestone rewards, per-challenge/milestone reward claiming, MainHUD button)
