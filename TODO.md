@@ -30,6 +30,9 @@ Last updated: 2026-02-18
 
 ## Completed Features
 
+- [x] Iteration 7 bugfix: suppress runtime infinite-yield warnings for required startup instances
+  - `src/Shared/Utilities/ItemFinder.luau` now resolves `ReplicatedStorage.Assets`/`Catalog` with bounded waits and explicit errors
+  - `src/Client/Modules/PlotSelector.luau` now resolves `MainHUD`/plot selector UI with bounded waits to avoid noisy `WaitForChild` warnings
 - [x] Seasonal Event System (Iteration 1)
   - `src/Shared/Definitions/SeasonalEventDefinitions.luau` -- 4 seasons with challenges, buffs, milestones
   - `src/Server/Services/SeasonalEventService.luau` -- season transitions, challenge tracking, buff multipliers

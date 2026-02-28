@@ -12,10 +12,45 @@ local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
-local MainHUD = PlayerGui:WaitForChild("MainHUD") :: ScreenGui
-local PlotSelectorGui = PlayerGui:WaitForChild("PlotSelectorGui")
-local MainFrame = PlotSelectorGui:WaitForChild("Main")
-local PlotSelectorContext = PlotSelectorGui:WaitForChild("PlotSelectorContext")
+local REQUIRED_CHILD_TIMEOUT_SECONDS = 15
+
+local function requireChild(parent: Instance, childName: string): Instance
+	local child = parent:FindFirstChild(childName)
+	if child then
+		return child
+	end
+
+	local waited = parent:WaitForChild(childName, REQUIRED_CHILD_TIMEOUT_SECONDS)
+	assert(
+		waited,
+		("[PlotSelector] Missing required child '%s' under %s after %ds")
+			:format(childName, parent:GetFullName(), REQUIRED_CHILD_TIMEOUT_SECONDS)
+	)
+
+	return waited
+end
+
+local function requireChildOfClass(parent: Instance, childName: string, className: string): Instance
+	local child = parent:FindFirstChild(childName)
+	if child and child:IsA(className) then
+		return child
+	end
+
+	local waited = parent:WaitForChild(childName, REQUIRED_CHILD_TIMEOUT_SECONDS)
+	assert(
+		waited and waited:IsA(className),
+		("[PlotSelector] Missing required %s '%s' under %s after %ds")
+			:format(className, childName, parent:GetFullName(), REQUIRED_CHILD_TIMEOUT_SECONDS)
+	)
+
+	return waited
+end
+
+local MainHUD = requireChildOfClass(PlayerGui, "MainHUD", "ScreenGui") :: ScreenGui
+local PlotSelectorGui = requireChildOfClass(PlayerGui, "PlotSelectorGui", "ScreenGui")
+	:: ScreenGui
+local MainFrame = requireChildOfClass(PlotSelectorGui, "Main", "Frame") :: Frame
+local PlotSelectorContext = requireChild(PlotSelectorGui, "PlotSelectorContext")
 
 local Camera = workspace.CurrentCamera
 

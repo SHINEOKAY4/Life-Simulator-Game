@@ -6,11 +6,29 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CatalogFolder = ReplicatedStorage.Shared.Definitions:FindFirstChild("Catalog")
 assert(CatalogFolder and CatalogFolder:IsA("Folder"), "Replicated catalog folder not found")
 
-local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
-assert(AssetsFolder and AssetsFolder:IsA("Folder"), "Replicated assets folder not found")
+local REQUIRED_CHILD_TIMEOUT_SECONDS = 15
 
-local CatalogModelsFolder = AssetsFolder:WaitForChild("Catalog")
-assert(CatalogModelsFolder and CatalogModelsFolder:IsA("Folder"), "Replicated catalog models folder not found")
+local function requireChildOfClass(parent: Instance, childName: string, className: string): Instance
+	local child = parent:FindFirstChild(childName)
+	if child and child:IsA(className) then
+		return child
+	end
+
+	local waited = parent:WaitForChild(childName, REQUIRED_CHILD_TIMEOUT_SECONDS)
+	assert(
+		waited and waited:IsA(className),
+		("[ItemFinder] Missing required %s '%s' under %s after %ds")
+			:format(className, childName, parent:GetFullName(), REQUIRED_CHILD_TIMEOUT_SECONDS)
+	)
+
+	return waited
+end
+
+local AssetsFolder = requireChildOfClass(ReplicatedStorage, "Assets", "Folder")
+	:: Folder
+
+local CatalogModelsFolder = requireChildOfClass(AssetsFolder, "Catalog", "Folder")
+	:: Folder
 
 local function loadCatalogModule(name: string): { [string]: any }
 	local moduleScript = CatalogFolder:FindFirstChild(name)
