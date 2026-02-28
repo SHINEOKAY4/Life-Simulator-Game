@@ -2,7 +2,7 @@
 
 See the docs https://shineokay4.github.io/Life-Simulator-Game/generated/api/
 
-Last updated: 2026-02-18
+Last updated: 2026-02-28
 
 ## Completed Infrastructure
 
@@ -17,6 +17,11 @@ Last updated: 2026-02-18
   - `Tests/Specs/ExampleSpec.lua`
   - `Tests/Specs/PlotSpec.lua`
   - `Tests/Specs/TenantSpec.lua`
+- [x] Add Roblox-like CI smoke test lane via Lemur + TestEZ
+  - `vendor/lemur` and `vendor/testez` submodules
+  - `Tests/Lemur/lemur_runner.lua`
+  - `Tests/Lemur/Specs/SourceTreeSmoke.spec.lua`
+  - `.github/workflows/build.yml` updated to install Lemur deps and run smoke suite
 - [x] Scaffold dynamic docs site and source-driven generation
   - `docs/` (Docusaurus + `docs/scripts/generate-docs.mjs`)
 - [x] Add initial changelog scaffold
@@ -26,6 +31,7 @@ Last updated: 2026-02-18
 
 - [x] `./run_tests.sh` passes
 - [x] `busted Tests/Specs/*.lua` passes
+- [x] `lua5.1 Tests/Lemur/lemur_runner.lua` passes
 - [x] `npm run build --prefix docs` passes
 
 ## Completed Features

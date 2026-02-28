@@ -27,6 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Install Lua and Luarocks
         run: |
           sudo apt-get update
@@ -36,8 +38,13 @@ jobs:
             LUA_DEV_PACKAGE=liblua5.1-0-dev
           fi
           sudo apt-get install -y lua5.1 "$LUA_DEV_PACKAGE" luarocks build-essential libreadline-dev unzip
-      - name: Install busted
-        run: luarocks --lua-version=5.1 --tree="$HOME/.luarocks" install busted
+      - name: Install test dependencies
+        run: |
+          luarocks --lua-version=5.1 --tree="$HOME/.luarocks" install busted
+          luarocks --lua-version=5.1 --tree="$HOME/.luarocks" install luafilesystem
+          luarocks --lua-version=5.1 --tree="$HOME/.luarocks" install dkjson
+          luarocks --lua-version=5.1 --tree="$HOME/.luarocks" install luasocket
+          luarocks --lua-version=5.1 --tree="$HOME/.luarocks" install bit32
       - name: Run test suite
         run: ./run_tests.sh
 
