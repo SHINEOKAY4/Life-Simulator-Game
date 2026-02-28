@@ -45,6 +45,10 @@ Last updated: 2026-02-28
   - Added `src/Shared/Modules/RNGUtil.luau` shim so legacy `Shared.Modules.RNGUtil` requires resolve again
   - Added `Tests/Specs/LegacyModuleCompatSpec.lua` to prevent `RNGUtil` shim regressions
   - Validation: `./run_tests.sh` (603 successes, 0 failures)
+- [x] Iteration 5 review fix: prevent zero-weight entries from being selected in weighted RNG picks
+  - Updated `src/Shared/Utilities/RNGUtil.luau` weighted pick boundary condition to skip zero-weight entries
+  - Added `Tests/Specs/RNGUtilSpec.lua` regression coverage for the weighted-boundary guard
+  - Validation: `./run_tests.sh` (604 successes, 0 failures)
 - [x] Iteration 7 issue triage: close GitHub issue #11 after validating startup warning fixes
   - Confirmed the reported stack-frame paths are now guarded (`ItemFinder`, `PlotSelector`) with bounded startup resolution
   - Posted fix summary/validation on issue #11 and closed it

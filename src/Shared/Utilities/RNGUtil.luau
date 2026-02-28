@@ -62,7 +62,7 @@ function RNGUtil.PickWeighted<T>(items: { WeightedEntry<T> }, randomObject: Rand
 	local runningWeight = 0
 	for _, item in ipairs(items) do
 		runningWeight += item.weight
-		if target <= runningWeight then
+		if item.weight > 0 and target < runningWeight then
 			return item.value
 		end
 	end
