@@ -36,6 +36,10 @@ Last updated: 2026-02-28
 
 ## Completed Features
 
+- [x] Iteration 3 bugfix: restore `ReplicatedStorage.Shared.Modules` compatibility for legacy DUO scripts (GitHub issue #12)
+  - Added `src/Shared/Modules/` shim modules that re-export current `Shared/Utilities`, `Shared/Configurations`, `Shared/Definitions`, and `Shared/Services` modules
+  - Added/kept Lemur source-tree smoke assertion for the `Shared/Modules` folder to prevent folder-level regressions
+  - Validation: `./run_tests.sh` (601 successes, 0 failures)
 - [x] Iteration 7 issue triage: close GitHub issue #11 after validating startup warning fixes
   - Confirmed the reported stack-frame paths are now guarded (`ItemFinder`, `PlotSelector`) with bounded startup resolution
   - Posted fix summary/validation on issue #11 and closed it
