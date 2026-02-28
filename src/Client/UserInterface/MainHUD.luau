@@ -56,55 +56,67 @@ local TopRight = MainHUDGui:WaitForChild("TopRight")
 local TextFrame = TopRight:WaitForChild("TextFrame") :: Frame
 local CashLabel = TextFrame:WaitForChild("CashLabel") :: TextLabel
 local IncomePerSecondLabel = TopRight:WaitForChild("IncomePerSecondLabel") :: TextLabel
-local BuildButton = BottomRight:WaitForChild("BuildButton") :: TextButton
+local function setButtonText(button: GuiButton, text: string)
+	if button:IsA("TextButton") then
+		button.Text = text
+		return
+	end
+
+	local textLabel = button:FindFirstChild("Text")
+	if textLabel and textLabel:IsA("TextLabel") then
+		textLabel.Text = text
+	end
+end
+
+local BuildButton = BottomRight:WaitForChild("BuildButton") :: GuiButton
 -- ExpandButton moved into PlotBuilder menu; this slot now hosts ProfileButton
-local ProfileButton = BottomRight:WaitForChild("ProfileButton") :: TextButton
-local ReviewsButton = BottomRight:WaitForChild("ReviewsButton") :: TextButton
-local BillsButton = BottomRight:WaitForChild("BillsButton") :: TextButton
-local ReputationButton = (function(): TextButton
+local ProfileButton = BottomRight:WaitForChild("ProfileButton") :: GuiButton
+local ReviewsButton = BottomRight:WaitForChild("ReviewsButton") :: GuiButton
+local BillsButton = BottomRight:WaitForChild("BillsButton") :: GuiButton
+local ReputationButton = (function(): GuiButton
 	local existing = BottomRight:FindFirstChild("ReputationButton")
-	if existing and existing:IsA("TextButton") then
+	if existing and existing:IsA("GuiButton") then
 		return existing
 	end
 	local button = ReviewsButton:Clone()
 	button.Name = "ReputationButton"
-	button.Text = "Reputation"
+	setButtonText(button, "Reputation")
 	button.LayoutOrder = ReviewsButton.LayoutOrder + 1
 	button.Parent = BottomRight
 	return button
 end)()
-local AchievementsButton = (function(): TextButton
+local AchievementsButton = (function(): GuiButton
 	local existing = BottomRight:FindFirstChild("AchievementsButton")
-	if existing and existing:IsA("TextButton") then
+	if existing and existing:IsA("GuiButton") then
 		return existing
 	end
 	local button = ReviewsButton:Clone()
 	button.Name = "AchievementsButton"
-	button.Text = "Achievements"
+	setButtonText(button, "Achievements")
 	button.LayoutOrder = math.max(BillsButton.LayoutOrder, ReputationButton.LayoutOrder) + 1
 	button.Parent = BottomRight
 	return button
 end)()
-local DailyRewardsButton = (function(): TextButton
+local DailyRewardsButton = (function(): GuiButton
 	local existing = BottomRight:FindFirstChild("DailyRewardsButton")
-	if existing and existing:IsA("TextButton") then
+	if existing and existing:IsA("GuiButton") then
 		return existing
 	end
 	local button = ReviewsButton:Clone()
 	button.Name = "DailyRewardsButton"
-	button.Text = "Daily Rewards"
+	setButtonText(button, "Daily Rewards")
 	button.LayoutOrder = AchievementsButton.LayoutOrder + 1
 	button.Parent = BottomRight
 	return button
 end)()
-local SeasonsButton = (function(): TextButton
+local SeasonsButton = (function(): GuiButton
 	local existing = BottomRight:FindFirstChild("SeasonsButton")
-	if existing and existing:IsA("TextButton") then
+	if existing and existing:IsA("GuiButton") then
 		return existing
 	end
 	local button = ReviewsButton:Clone()
 	button.Name = "SeasonsButton"
-	button.Text = "Seasons"
+	setButtonText(button, "Seasons")
 	button.LayoutOrder = DailyRewardsButton.LayoutOrder + 1
 	button.Parent = BottomRight
 	return button
@@ -497,7 +509,7 @@ local function scaleUDim2(size: UDim2, scaleX: number, scaleY: number): UDim2
 	return UDim2.new(size.X.Scale * scaleX, size.X.Offset * scaleX, size.Y.Scale * scaleY, size.Y.Offset * scaleY)
 end
 
-local function configureButtonVisuals(button: TextButton)
+local function configureButtonVisuals(button: GuiButton)
 	local imageFrame = button:FindFirstChild("Image")
 	if not imageFrame or not imageFrame:IsA("Frame") then
 		return
