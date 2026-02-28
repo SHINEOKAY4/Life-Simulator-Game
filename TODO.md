@@ -40,6 +40,11 @@ Last updated: 2026-02-28
   - Added `src/Shared/Modules/` shim modules that re-export current `Shared/Utilities`, `Shared/Configurations`, `Shared/Definitions`, and `Shared/Services` modules
   - Added/kept Lemur source-tree smoke assertion for the `Shared/Modules` folder to prevent folder-level regressions
   - Validation: `./run_tests.sh` (601 successes, 0 failures)
+- [x] Iteration 5 bugfix: restore missing `ReplicatedStorage.Shared.Modules.RNGUtil` compatibility (GitHub issue #13)
+  - Added `src/Shared/Utilities/RNGUtil.luau` with deterministic helper APIs and legacy aliases
+  - Added `src/Shared/Modules/RNGUtil.luau` shim so legacy `Shared.Modules.RNGUtil` requires resolve again
+  - Added `Tests/Specs/LegacyModuleCompatSpec.lua` to prevent `RNGUtil` shim regressions
+  - Validation: `./run_tests.sh` (603 successes, 0 failures)
 - [x] Iteration 7 issue triage: close GitHub issue #11 after validating startup warning fixes
   - Confirmed the reported stack-frame paths are now guarded (`ItemFinder`, `PlotSelector`) with bounded startup resolution
   - Posted fix summary/validation on issue #11 and closed it
