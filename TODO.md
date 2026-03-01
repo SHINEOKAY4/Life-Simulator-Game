@@ -30,6 +30,10 @@ Last updated: 2026-03-01
 
 ## Completed Features
 
+- [x] Iteration 2 feature: wire BillboardRadialUI move action into full move flow
+  - Updated `src/Client/UserInterface/BillboardRadialUI.luau` move action to capture the selected model, close the radial UI, and start `ObjectAction.Move` using the model pivot position
+  - Removed stale in-file move-action TODO placeholder in radial UI input handler
+  - Added `Tests/Specs/BillboardRadialUISpec.lua` regression coverage for TODO removal and hide-before-move behavior wiring
 - [x] Iteration 6 feature: implement resident weather reaction animations (shiver + heat sway)
   - Updated `src/Client/Modules/ResidentReactions.luau` with TweenService-driven waist Motor6D animations
   - Cold (<55F): rapid shiver oscillation via CFrameValue proxy tween on waist joint (+-2deg Z, +-0.8deg X at 0.12s)
