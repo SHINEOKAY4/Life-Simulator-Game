@@ -466,6 +466,10 @@ function ItemFinder.SearchCatalog(normalizedQuery: string): { SearchResultEntry 
 		return cloneSearchResults(SearchEntries)
 	end
 
+	-- Defensively lowercase the query for blob matching; SearchBlob components are
+	-- already lowered via sanitizeComponent, so matching must be case-insensitive.
+	local loweredQuery = string.lower(normalizedQuery)
+
 	local tokens = extractQueryTokens(normalizedQuery)
 	local candidateMap: { [string]: SearchEntryInternal }? = nil
 
@@ -514,7 +518,7 @@ function ItemFinder.SearchCatalog(normalizedQuery: string): { SearchResultEntry 
 
 	local matches = table.create(#scanList)
 	for _, entry in ipairs(scanList) do
-		if string.find(entry.SearchBlob, normalizedQuery, 1, true) then
+		if string.find(entry.SearchBlob, loweredQuery, 1, true) then
 			matches[#matches + 1] = entry
 		end
 	end

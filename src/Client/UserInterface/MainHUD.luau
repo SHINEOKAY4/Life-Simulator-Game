@@ -746,7 +746,10 @@ function MainHUD.Init()
 			)
 
 			notifierTween = TweenService:Create(NotifierSymbol, tweenInfo, {
-				Size = UDim2.fromScale(notifierOriginalSize.X.Scale * 1.2, notifierOriginalSize.Y.Scale * 1.2),
+				Size = UDim2.new(
+					notifierOriginalSize.X.Scale * 1.2, math.round(notifierOriginalSize.X.Offset * 1.2),
+					notifierOriginalSize.Y.Scale * 1.2, math.round(notifierOriginalSize.Y.Offset * 1.2)
+				),
 				Rotation = 15,
 			})
 			notifierTween:Play()

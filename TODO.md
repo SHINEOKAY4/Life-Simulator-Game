@@ -37,6 +37,11 @@ Last updated: 2026-03-01
   - Added nil-callback assertion to `StartupDiagnostics:Boundary` before incrementing sequence counter
   - Added `Tests/Specs/Iter5ReviewSpec.lua` with 13 regression tests covering all fixes
   - Validation: `busted Tests/Specs/*.lua` (623 successes, 0 failures)
+- [x] Iteration 5b review sweep: fix SearchCatalog case mismatch, notifier tween Offset drop
+  - Fixed `ItemFinder.SearchCatalog` to lowercase the query before `string.find` against the already-lowered `SearchBlob`; previously the token index was case-insensitive but the blob verification was case-sensitive, causing mixed-case queries to silently return zero results
+  - Fixed `MainHUD` bill notifier tween target to use `UDim2.new()` instead of `UDim2.fromScale()`, preserving Offset components so Offset-based NotifierSymbol sizing doesn't collapse to zero
+  - Added `Tests/Specs/Iter5bReviewSpec.lua` with 26 regression tests covering both fixes plus edge cases for StartupDiagnostics, client startup ordering, server player lifecycle, ItemFinder model fallback, cash delta handling, and income NaN guard
+  - Validation: `busted Tests/Specs/*.lua` (649 successes, 0 failures)
 - [x] Iteration 4 feature: add startup diagnostics/logging standards for startup triage
   - Added `src/Shared/Utilities/StartupDiagnostics.luau` with standardized startup boundary timing + dependency resolution logging
   - Instrumented `src/Server/Main.server.luau` and `src/Client/Main.client.luau` startup steps with explicit `Init`/`Start` boundaries
