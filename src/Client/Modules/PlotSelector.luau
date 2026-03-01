@@ -9,6 +9,7 @@ local Players = game:GetService("Players")
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
+local Notification = require(script.Parent.Parent.UserInterface.Notification)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -63,6 +64,21 @@ local INPUT_DEBOUNCE_SECONDS = 0.25
 local function runDebounced(actionName: string, callback: () -> ()): ()
 	local key = string.format("PlotSelector/%s", actionName)
 	Debounce.RunIfAvailable(key, INPUT_DEBOUNCE_SECONDS, callback, Player.UserId)
+end
+
+local function showClaimNotification(title: string, text: string, backgroundColor: Color3)
+	local ok, err = pcall(function()
+		Notification.Show({
+			Title = title,
+			Text = text,
+			Duration = 3,
+			BackgroundColor = backgroundColor,
+		})
+	end)
+
+	if not ok then
+		warn(("[PlotSelector] Failed to show claim notification: %s"):format(tostring(err)))
+	end
 end
 
 local function MoveCamera()
@@ -171,6 +187,7 @@ end
 function PlotSelector.Select()
 	local currentPlot = PlotFinder.FindPlot(CurrentIndex)
 	if not currentPlot then
+		showClaimNotification("Plot Claim Failed", "The selected plot no longer exists.", Color3.fromRGB(132, 64, 64))
 		warn("Failed to claim plot: plot not found")
 		return
 	end
@@ -179,7 +196,12 @@ function PlotSelector.Select()
 	local responseMessage = message
 
 	if not success then
-		--#TODO: Toast notification for failure
+		local failureMessage = "Could not claim this plot right now. Try another one."
+		if type(responseMessage) == "string" and responseMessage ~= "" then
+			failureMessage = responseMessage
+		end
+
+		showClaimNotification("Plot Claim Failed", failureMessage, Color3.fromRGB(132, 64, 64))
 		warn(("Failed to claim plot: %s"):format(responseMessage or "Unknown error"))
 		return
 	end
@@ -199,7 +221,12 @@ function PlotSelector.Select()
 	end
 
 	SetPlayerMovement(true)
-	--#TODO: Toast notification for success
+	local successMessage = "Your plot has been claimed."
+	if type(responseMessage) == "string" and responseMessage ~= "" then
+		successMessage = responseMessage
+	end
+
+	showClaimNotification("Plot Claimed", successMessage, Color3.fromRGB(52, 130, 90))
 	--CameraModule.EnableTopDownCamera()
 	MainHUD.Enabled = true
 	print(("Successfully claimed plot: %s"):format(responseMessage or ""))

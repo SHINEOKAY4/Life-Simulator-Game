@@ -30,6 +30,10 @@ Last updated: 2026-03-01
 
 ## Completed Features
 
+- [x] Iteration 6 feature: add PlotSelector claim success/failure toast notifications
+  - Updated `src/Client/Modules/PlotSelector.luau` to show `Notification` toasts for claim failures (missing plot, server rejection) and successful claims
+  - Removed in-file TODO placeholders for success/failure toast handling in plot selection flow
+  - Validation: `./run_tests.sh` (649 successes, 0 failures)
 - [x] Iteration 5 review sweep: fix compounding bill notifier tween, collision group race condition, server iterator, StartupDiagnostics nil guard
   - Fixed MainHUD bill notifier tween capturing original size once instead of re-reading mid-animation (compounding growth bug)
   - Fixed client `SetCollisionGroup` to connect `CharacterAdded` for all other players even if they have no character at loop time
