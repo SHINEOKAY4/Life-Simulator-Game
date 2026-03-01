@@ -104,7 +104,6 @@ function ObjectSelector.Init()
 	--end)
 
 	SelectObjectAction.Pressed:Connect(function()
-		--#TODO: Add a debounce here to prevent multiple rapid clicks
 		if RadialBillboardButtonEnabled.Value then
 			return
 		end

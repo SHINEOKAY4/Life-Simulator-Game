@@ -30,6 +30,15 @@ Last updated: 2026-03-01
 
 ## Completed Features
 
+- [x] Iteration 6 feature: implement resident weather reaction animations (shiver + heat sway)
+  - Updated `src/Client/Modules/ResidentReactions.luau` with TweenService-driven waist Motor6D animations
+  - Cold (<55F): rapid shiver oscillation via CFrameValue proxy tween on waist joint (+-2deg Z, +-0.8deg X at 0.12s)
+  - Hot (>85F): slow heat-exhaustion sway with forward droop (4deg X, 2.5deg Z at 1.2s)
+  - Proper lifecycle: stops tweens + restores original C0 on mood neutralize or Unregister
+  - Supports both R15 (UpperTorso.Waist) and R6 (Torso.Root Joint) rigs
+  - Removed stale TODO in `src/Client/Modules/ObjectSelector.luau` (debounce already implemented)
+  - Added `Tests/Specs/ResidentReactionsSpec.lua` with 25 structural tests
+  - Validation: `./run_tests.sh` (674 successes, 0 failures)
 - [x] Iteration 6 feature: add PlotExpansion purchase success/failure toast notifications
   - Updated `src/Client/Modules/PlotExpansion.luau` to show user-facing notifications for successful and failed expansion purchases
   - Replaced placeholder print and removed in-file TODO for expansion purchase toast handling
