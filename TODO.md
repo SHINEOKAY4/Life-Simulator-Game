@@ -30,6 +30,10 @@ Last updated: 2026-03-01
 
 ## Completed Features
 
+- [x] Iteration 6 feature: add PlotExpansion purchase success/failure toast notifications
+  - Updated `src/Client/Modules/PlotExpansion.luau` to show user-facing notifications for successful and failed expansion purchases
+  - Replaced placeholder print and removed in-file TODO for expansion purchase toast handling
+  - Validation: `./run_tests.sh` (649 successes, 0 failures)
 - [x] Iteration 6 feature: add PlotSelector claim success/failure toast notifications
   - Updated `src/Client/Modules/PlotSelector.luau` to show `Notification` toasts for claim failures (missing plot, server rejection) and successful claims
   - Removed in-file TODO placeholders for success/failure toast handling in plot selection flow
