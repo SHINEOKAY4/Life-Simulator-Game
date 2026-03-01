@@ -149,3 +149,9 @@ Last updated: 2026-03-01
   - Fixed `src/Server/Services/WorldEventService.luau` so `GetActiveEvent()` returns a defensive copy instead of internal mutable state
   - Added regression test in `Tests/Specs/WorldEventSpec.lua` to verify callers cannot mutate live buff multipliers via returned event table
   - Validation: `./run_tests.sh` (714 successes, 0 failures)
+- [x] Iteration 3 feature: wire QuestService into the game with network packets and server init
+  - Added `src/Network/QuestPackets.luau` with 5 packets: `GetQuestSnapshot`, `StartQuest`, `ClaimQuest`, `QuestSnapshotUpdated` (push), `QuestCompleted` (push)
+  - Updated `src/Server/Services/QuestService.luau` Init() to register packet handlers (`OnServerInvoke` for snapshot/start/claim), push snapshot updates to client after progress, and notify client on quest completion
+  - Added `QuestService.Init()` and `DailyRewardService.Init()` to `src/Server/Main.server.luau` startup sequence (QuestService before DailyRewardService since DailyRewardService consumes it for daily challenges)
+  - Added `Tests/Specs/QuestServiceWiringSpec.lua` with 21 structural + behavioral tests covering packet definitions, service wiring, server init ordering, and full quest lifecycle regression
+  - Validation: `./run_tests.sh` (737 successes, 0 failures)

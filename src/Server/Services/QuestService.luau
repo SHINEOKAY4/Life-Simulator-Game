@@ -48,6 +48,17 @@ if IS_ROBLOX then
     end
 end
 
+local QuestPackets = nil
+
+if IS_ROBLOX then
+    local ok, packets = pcall(function()
+        return require(game:GetService("ReplicatedStorage").Network.QuestPackets)
+    end)
+    if ok and type(packets) == "table" then
+        QuestPackets = packets
+    end
+end
+
 local QuestService = {}
 
 -- Type definitions (Luau export types not used to keep loadfile() compatibility)
@@ -254,6 +265,29 @@ local function evaluateQuestCompletion(state, quest)
     return allDone
 end
 
+-- Push a quest state snapshot to the client player via QuestPackets.
+local function pushSnapshotToClient(player)
+    if not IS_ROBLOX or not QuestPackets then
+        return
+    end
+    local quests = QuestService.GetPlayerQuests(player)
+    if quests then
+        QuestPackets.QuestSnapshotUpdated:FireClient(player, quests)
+    end
+end
+
+-- Notify the client that a specific quest was completed.
+local function notifyQuestCompleted(player, questId)
+    if not IS_ROBLOX or not QuestPackets then
+        return
+    end
+    local def = QuestCatalog[questId]
+    QuestPackets.QuestCompleted:FireClient(player, {
+        QuestId = questId,
+        QuestName = def and def.name or questId,
+    })
+end
+
 -- Public API
 function QuestService.Init()
     loadCatalogIfNeeded()
@@ -263,6 +297,41 @@ function QuestService.Init()
             -- Initialize on-demand; tests may call manually too
             HydratePlayer(p)
         end)
+    end
+
+    -- Wire network packet handlers when running in Roblox
+    if IS_ROBLOX and QuestPackets then
+        QuestPackets.GetQuestSnapshot.OnServerInvoke = function(player)
+            local quests = QuestService.GetPlayerQuests(player)
+            if quests then
+                return true, quests
+            end
+            return false, nil
+        end
+
+        QuestPackets.StartQuest.OnServerInvoke = function(player, questId)
+            if type(questId) ~= "string" then
+                return false, "InvalidQuestId"
+            end
+            local ok, err = QuestService.StartQuest(player, questId)
+            if ok then
+                pushSnapshotToClient(player)
+            end
+            return ok, err or ""
+        end
+
+        QuestPackets.ClaimQuest.OnServerInvoke = function(player, questId)
+            if type(questId) ~= "string" then
+                return false, "InvalidQuestId"
+            end
+            local ok, err = QuestService.ClaimQuest(player, questId)
+            if ok then
+                -- Refresh prerequisites after claiming so chained quests unlock
+                QuestService.RefreshPlayerStates(player)
+                pushSnapshotToClient(player)
+            end
+            return ok, err or ""
+        end
     end
 end
 
@@ -364,6 +433,7 @@ function QuestService.ProgressObjective(player, questId, objectiveId, delta)
     -- If all objectives are completed, auto-complete if configured or mark completed
     if allDone then
         state.State = "completed"
+        notifyQuestCompleted(player, questId)
         -- if quest has auto-claim, immediately award rewards and mark claimed
         if quest.AutoClaim == true then
             QuestService.ClaimQuest(player, questId)
@@ -375,10 +445,12 @@ function QuestService.ProgressObjective(player, questId, objectiveId, delta)
     local pstore = PlayerQuests[tonumber(key) or key] or {}
     pstore[questId] = state
     PlayerQuests[tonumber(key) or key] = pstore
+
+    -- Push updated snapshot to client
+    pushSnapshotToClient(player)
+
     return true
 end
-
--- Report a produced item collection for an objective
 function QuestService.ReportItemCollected(player, questId, itemDefId, qty)
     if player == nil then return false, "PlayerRequired" end
     if qty ~= nil and (type(qty) ~= "number" or qty <= 0) then
@@ -408,6 +480,7 @@ function QuestService.ReportItemCollected(player, questId, itemDefId, qty)
 
     if evaluateQuestCompletion(state, quest) then
         state.State = "completed"
+        notifyQuestCompleted(player, questId)
         if quest.AutoClaim == true then
             QuestService.ClaimQuest(player, questId)
         end
@@ -417,6 +490,10 @@ function QuestService.ReportItemCollected(player, questId, itemDefId, qty)
     local pstore = PlayerQuests[tonumber(key) or key] or {}
     pstore[questId] = state
     PlayerQuests[tonumber(key) or key] = pstore
+
+    -- Push updated snapshot to client
+    pushSnapshotToClient(player)
+
     return true
 end
 
