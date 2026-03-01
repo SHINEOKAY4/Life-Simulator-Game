@@ -30,6 +30,11 @@ Last updated: 2026-03-01
 
 ## Completed Features
 
+- [x] Iteration 4 feature: add startup diagnostics/logging standards for startup triage
+  - Added `src/Shared/Utilities/StartupDiagnostics.luau` with standardized startup boundary timing + dependency resolution logging
+  - Instrumented `src/Server/Main.server.luau` and `src/Client/Main.client.luau` startup steps with explicit `Init`/`Start` boundaries
+  - Added bounded+logged dependency resolution for `ReplicatedStorage.Network` (client) and `ReplicatedStorage.Assets.Catalog` path checks via `ItemFinder`
+  - Added `Tests/Specs/StartupDiagnosticsSpec.lua` coverage for diagnostics wiring
 - [x] Iteration 1 bugfix: resolve MainHUD startup crash when `DailyRewardsButton` is an `ImageButton` (GitHub issue #16)
   - Updated `src/Client/UserInterface/MainHUD.luau` button bindings to use `GuiButton` instead of assuming `TextButton`
   - Added safe button-label assignment so `.Text` is only written when supported
@@ -78,7 +83,7 @@ Last updated: 2026-03-01
 
 ## Next Work (Product/Code Depth)
 
-- [ ] Add startup diagnostics/logging standards for Roblox Studio issue triage (service/module load boundaries + key dependency resolution points)
+- [x] Add startup diagnostics/logging standards for Roblox Studio issue triage (service/module load boundaries + key dependency resolution points)
 - [x] Seasonal Event System follow-ups
   - [x] Wire SeasonalEventService into WeatherService for automatic season transitions
   - [x] Build client-side SeasonalEventUI (season banner, challenge tracker, buff display, milestone rewards, per-challenge/milestone reward claiming, MainHUD button)
