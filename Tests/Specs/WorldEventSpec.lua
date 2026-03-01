@@ -314,6 +314,24 @@ describe("WorldEventService", function()
 			assert.equals(snap.ActiveEvents[1].Id, event.Id)
 			assert.equals(snap.ActiveEvents[1].Name, event.Name)
 		end)
+
+		it("returns a defensive copy so callers cannot mutate active rotation state", function()
+			WorldEventService.GetStateSnapshot()
+			local event = WorldEventService.GetActiveEvent()
+			assert.is_not_nil(event)
+			assert.is_true(#event.Buffs >= 1)
+
+			local buffType = event.Buffs[1].Type
+			local originalValue = WorldEventService.GetBuffMultiplier(buffType)
+
+			event.Buffs[1].Value = 999
+			event.Name = "Mutated Client Value"
+
+			assert.equals(originalValue, WorldEventService.GetBuffMultiplier(buffType))
+
+			local freshEvent = WorldEventService.GetActiveEvent()
+			assert.is_true(freshEvent.Name ~= "Mutated Client Value")
+		end)
 	end)
 
 	-- ========== ForceExpire ==========

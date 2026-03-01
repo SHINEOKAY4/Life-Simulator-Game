@@ -141,3 +141,7 @@ Last updated: 2026-03-01
   - Updated `src/Client/Modules/WorldEventController.luau` with `GetBuffMultiplier`, `GetActiveBuffs`, `GetActiveEvent` for client-side buff display
   - Added `Tests/Specs/WorldEventSpec.lua` with 39 behavioral + structural tests
   - Validation: `./run_tests.sh` (713 successes, 0 failures)
+- [x] Iteration 10 review sweep: fix WorldEventService active-event mutation leak
+  - Fixed `src/Server/Services/WorldEventService.luau` so `GetActiveEvent()` returns a defensive copy instead of internal mutable state
+  - Added regression test in `Tests/Specs/WorldEventSpec.lua` to verify callers cannot mutate live buff multipliers via returned event table
+  - Validation: `./run_tests.sh` (714 successes, 0 failures)

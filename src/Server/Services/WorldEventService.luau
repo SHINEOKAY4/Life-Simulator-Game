@@ -236,7 +236,24 @@ end
 function WorldEventService.GetActiveEvent()
 	ensureRotation()
 	if #currentRotation.Events > 0 then
-		return currentRotation.Events[1]
+		local event = currentRotation.Events[1]
+		local buffsCopy = {}
+		for _, buff in ipairs(event.Buffs) do
+			buffsCopy[#buffsCopy + 1] = {
+				Type = buff.Type,
+				Value = buff.Value,
+				Label = buff.Label,
+			}
+		end
+		return {
+			Id = event.Id,
+			Name = event.Name,
+			Description = event.Description,
+			Kind = event.Kind,
+			StartsAt = event.StartsAt,
+			EndsAt = event.EndsAt,
+			Buffs = buffsCopy,
+		}
 	end
 	return nil
 end
