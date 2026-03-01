@@ -717,6 +717,8 @@ function MainHUD.Init()
 
 	-- Billing system: Listen to BillDue attribute
 	local notifierTween = nil
+	local notifierOriginalSize: UDim2 = if NotifierSymbol then NotifierSymbol.Size else UDim2.fromScale(1, 1)
+	local notifierOriginalRotation: number = if NotifierSymbol then NotifierSymbol.Rotation else 0
 	local function updateBillNotifier()
 		if not NotifierSymbol then
 			return
@@ -730,6 +732,11 @@ function MainHUD.Init()
 				notifierTween:Cancel()
 			end
 
+			-- Always reset to the original size before creating a new tween to prevent
+			-- compounding growth when updateBillNotifier is called multiple times.
+			NotifierSymbol.Size = notifierOriginalSize
+			NotifierSymbol.Rotation = notifierOriginalRotation
+
 			local tweenInfo = TweenInfo.new(
 				0.6, -- Duration
 				Enum.EasingStyle.Quad,
@@ -739,7 +746,7 @@ function MainHUD.Init()
 			)
 
 			notifierTween = TweenService:Create(NotifierSymbol, tweenInfo, {
-				Size = UDim2.fromScale(NotifierSymbol.Size.X.Scale * 1.2, NotifierSymbol.Size.Y.Scale * 1.2),
+				Size = UDim2.fromScale(notifierOriginalSize.X.Scale * 1.2, notifierOriginalSize.Y.Scale * 1.2),
 				Rotation = 15,
 			})
 			notifierTween:Play()
@@ -747,8 +754,8 @@ function MainHUD.Init()
 			-- Stop tween and reset when bill is paid
 			if notifierTween then
 				notifierTween:Cancel()
-				NotifierSymbol.Size = UDim2.fromScale(1, 1)
-				NotifierSymbol.Rotation = 0
+				NotifierSymbol.Size = notifierOriginalSize
+				NotifierSymbol.Rotation = notifierOriginalRotation
 			end
 		end
 	end

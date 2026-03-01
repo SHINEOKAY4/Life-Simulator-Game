@@ -254,8 +254,10 @@ SetCollisionGroup(Character)
 LocalPlayer.CharacterAdded:Connect(SetCollisionGroup)
 
 for _, player in ipairs(Players:GetPlayers()) do
-	if player ~= LocalPlayer and player.Character then
-		SetCollisionGroup(player.Character)
+	if player ~= LocalPlayer then
+		if player.Character then
+			SetCollisionGroup(player.Character)
+		end
 		player.CharacterAdded:Connect(SetCollisionGroup)
 	end
 end

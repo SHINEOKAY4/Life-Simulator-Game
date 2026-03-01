@@ -124,7 +124,7 @@ local function OnPlayerAdded(player: Player)
 		end)
 		--PlayerSession.ClearData(player)
 		local character = player.Character or player.CharacterAdded:Wait()
-		for _, part in pairs(character:GetDescendants()) do
+		for _, part in ipairs(character:GetDescendants()) do
 			if part:IsA("BasePart") then
 				part.CollisionGroup = "Players"
 			end

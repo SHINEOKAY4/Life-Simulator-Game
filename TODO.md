@@ -30,6 +30,13 @@ Last updated: 2026-03-01
 
 ## Completed Features
 
+- [x] Iteration 5 review sweep: fix compounding bill notifier tween, collision group race condition, server iterator, StartupDiagnostics nil guard
+  - Fixed MainHUD bill notifier tween capturing original size once instead of re-reading mid-animation (compounding growth bug)
+  - Fixed client `SetCollisionGroup` to connect `CharacterAdded` for all other players even if they have no character at loop time
+  - Fixed server `OnPlayerAdded` to use `ipairs` (not `pairs`) for `GetDescendants` array iteration
+  - Added nil-callback assertion to `StartupDiagnostics:Boundary` before incrementing sequence counter
+  - Added `Tests/Specs/Iter5ReviewSpec.lua` with 13 regression tests covering all fixes
+  - Validation: `busted Tests/Specs/*.lua` (623 successes, 0 failures)
 - [x] Iteration 4 feature: add startup diagnostics/logging standards for startup triage
   - Added `src/Shared/Utilities/StartupDiagnostics.luau` with standardized startup boundary timing + dependency resolution logging
   - Instrumented `src/Server/Main.server.luau` and `src/Client/Main.client.luau` startup steps with explicit `Init`/`Start` boundaries

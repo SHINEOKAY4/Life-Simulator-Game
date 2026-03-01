@@ -75,6 +75,7 @@ function StartupDiagnostics:_emit(
 end
 
 function StartupDiagnostics:Boundary<T...>(name: string, callback: (T...) -> ...any, ...: T...): ...any
+	assert(type(callback) == "function", ("[StartupDiagnostics][%s] Boundary '%s' received a nil callback"):format(self.Channel, name))
 	self:_emit("BEGIN", name, nil, nil)
 
 	local startedAt = self._clock()
