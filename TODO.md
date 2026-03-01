@@ -30,6 +30,10 @@ Last updated: 2026-03-01
 
 ## Completed Features
 
+- [x] Iteration 4 feature: complete PlotSelector input debounce wiring cleanup
+  - Removed stale in-file TODO in `src/Client/Modules/PlotSelector.luau` now that `runDebounced` guards are in place for next/previous/select actions
+  - Added `Tests/Specs/PlotSelectorDebounceSpec.lua` to enforce debounce wiring and prevent TODO regression
+  - Validation: `./run_tests.sh` (739 successes, 0 failures)
 - [x] Iteration 2 feature: wire BillboardRadialUI move action into full move flow
   - Updated `src/Client/UserInterface/BillboardRadialUI.luau` move action to capture the selected model, close the radial UI, and start `ObjectAction.Move` using the model pivot position
   - Removed stale in-file move-action TODO placeholder in radial UI input handler
