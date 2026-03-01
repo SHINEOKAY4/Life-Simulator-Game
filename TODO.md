@@ -133,3 +133,11 @@ Last updated: 2026-03-01
 - [x] Add CI lint step for Luau source (`selene`)
 - [x] Expand public docs with gameplay/system overviews and contributor setup guidance
 - [x] Enable release process that updates `CHANGELOG.md` from merged PR metadata
+- [x] Expand WorldEventService with diverse event pool, random rotation, and buff system
+  - Added `src/Shared/Definitions/WorldEventDefinitions.luau` with 6 events (Community Festival, Builder's Bazaar, Tenant Appreciation Week, Craft Fair, Property Showcase, Neighborhood Cleanup) across 6 distinct kinds
+  - Each event has gameplay buffs: XPMultiplier, CashMultiplier, CraftSpeedMultiplier, ChoreRewardMultiplier, TipMultiplier
+  - Rewrote `src/Server/Services/WorldEventService.luau` with random event selection, no-repeat logic (avoids back-to-back same event), injectable clock/RNG for testing, and buff query API (`GetBuffMultiplier`, `GetActiveBuffs`, `GetActiveEvent`)
+  - Updated `src/Network/WorldEventPackets.luau` to include buff payload in state snapshots
+  - Updated `src/Client/Modules/WorldEventController.luau` with `GetBuffMultiplier`, `GetActiveBuffs`, `GetActiveEvent` for client-side buff display
+  - Added `Tests/Specs/WorldEventSpec.lua` with 39 behavioral + structural tests
+  - Validation: `./run_tests.sh` (713 successes, 0 failures)
