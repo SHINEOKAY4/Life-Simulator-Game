@@ -2,7 +2,7 @@
 
 See the docs https://shineokay4.github.io/Life-Simulator-Game/generated/api/
 
-Last updated: 2026-02-28
+Last updated: 2026-03-01
 
 ## Completed Infrastructure
 
@@ -17,11 +17,6 @@ Last updated: 2026-02-28
   - `Tests/Specs/ExampleSpec.lua`
   - `Tests/Specs/PlotSpec.lua`
   - `Tests/Specs/TenantSpec.lua`
-- [x] Add Roblox-like CI smoke test lane via Lemur + TestEZ
-  - `vendor/lemur` and `vendor/testez` submodules
-  - `Tests/Lemur/lemur_runner.lua`
-  - `Tests/Lemur/Specs/SourceTreeSmoke.spec.lua`
-  - `.github/workflows/build.yml` updated to install Lemur deps and run smoke suite
 - [x] Scaffold dynamic docs site and source-driven generation
   - `docs/` (Docusaurus + `docs/scripts/generate-docs.mjs`)
 - [x] Add initial changelog scaffold
@@ -31,7 +26,6 @@ Last updated: 2026-02-28
 
 - [x] `./run_tests.sh` passes
 - [x] `busted Tests/Specs/*.lua` passes
-- [x] `lua5.1 Tests/Lemur/lemur_runner.lua` passes
 - [x] `npm run build --prefix docs` passes
 
 ## Completed Features
@@ -40,6 +34,10 @@ Last updated: 2026-02-28
   - Updated `src/Client/UserInterface/MainHUD.luau` button bindings to use `GuiButton` instead of assuming `TextButton`
   - Added safe button-label assignment so `.Text` is only written when supported
   - Reused existing HUD buttons regardless of `ImageButton`/`TextButton` class to prevent class-mismatch crashes
+- [x] Iteration 1 bugfix: remove deprecated `lemur` and `testez` submodule dependencies (GitHub issue #15)
+  - Removed `.gitmodules` entries and deleted `vendor/lemur` + `vendor/testez` git submodules
+  - Removed `Tests/Lemur/` smoke runner/spec and eliminated Lemur lane from `run_tests.sh`
+  - Updated CI checkout in `.github/workflows/build.yml` to stop fetching submodules
 - [x] Iteration 7 bugfix: restore missing `ReplicatedStorage.Shared.Modules.PropConfig` compatibility (GitHub issue #14)
   - Added `src/Shared/Definitions/PropConfig.luau` as an aggregate over catalog definition modules
   - Added `src/Shared/Modules/PropConfig.luau` shim so legacy `Shared.Modules.PropConfig` requires resolve again
