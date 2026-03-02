@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local Formatter = require(ReplicatedStorage.Shared.Utilities.Formatter)
 local ReviewPackets = require(ReplicatedStorage.Network.ReviewPackets)
 local SoundtrackManager = require(script.Parent.Parent.Modules.SoundtrackManager)
 
@@ -23,6 +24,8 @@ local OverallRatingLabel: TextLabel?
 local isVisible = false
 local isFetching = false
 local cachedReviews = {}
+
+local MAX_DISPLAY_REVIEWS = 20
 
 local function createStarRating(rating: number): Frame
 	local frame = Instance.new("Frame")
@@ -47,6 +50,16 @@ local function createStarRating(rating: number): Frame
 	end
 
 	return frame
+end
+
+local function formatReviewTimestamp(timestamp: number?): string
+	if typeof(timestamp) ~= "number" then
+		return ""
+	end
+	return Formatter.formatDateTime(timestamp, "MMM d, yyyy h:mm a", {
+		locale = "en-us",
+		useLocalTime = true,
+	})
 end
 
 local function getAvatarColor(name: string): Color3
@@ -132,6 +145,19 @@ local function createReviewCard(review: { [string]: any }): Frame
 	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
 	nameLabel.Parent = content
 
+	-- Timestamp
+	local timestampLabel = Instance.new("TextLabel")
+	timestampLabel.Name = "Timestamp"
+	timestampLabel.BackgroundTransparency = 1
+	timestampLabel.Position = UDim2.fromOffset(0, 22)
+	timestampLabel.Size = UDim2.new(1, -90, 0, 16)
+	timestampLabel.Font = Enum.Font.Gotham
+	timestampLabel.Text = formatReviewTimestamp(review.Timestamp)
+	timestampLabel.TextColor3 = Color3.fromRGB(130, 140, 155)
+	timestampLabel.TextSize = 12
+	timestampLabel.TextXAlignment = Enum.TextXAlignment.Left
+	timestampLabel.Parent = content
+
 	-- Stars
 	local stars = createStarRating(review.Rating or 0)
 	stars.AnchorPoint = Vector2.new(1, 0)
@@ -141,7 +167,7 @@ local function createReviewCard(review: { [string]: any }): Frame
 	-- Comment
 	local commentLabel = Instance.new("TextLabel")
 	commentLabel.BackgroundTransparency = 1
-	commentLabel.Position = UDim2.fromOffset(0, 24)
+	commentLabel.Position = UDim2.fromOffset(0, 42)
 	commentLabel.Size = UDim2.fromScale(1, 0)
 	commentLabel.AutomaticSize = Enum.AutomaticSize.Y
 	commentLabel.Font = Enum.Font.GothamMedium
@@ -174,6 +200,22 @@ local function updateOverallRating(reviews: { [any]: any })
 	OverallRatingLabel.Text = string.format("%.1f ★", average)
 end
 
+local function getLatestReviews(reviews: { [any]: any }): { [any]: any }
+	local sorted = {}
+	for _, review in ipairs(reviews) do
+		table.insert(sorted, review)
+	end
+	if #sorted > 1 then
+		table.sort(sorted, function(a, b)
+			return (a.Timestamp or 0) > (b.Timestamp or 0)
+		end)
+	end
+	while #sorted > MAX_DISPLAY_REVIEWS do
+		table.remove(sorted)
+	end
+	return sorted
+end
+
 local function populateList(reviews: { [any]: any })
 	if not Container or not EmptyLabel then
 		return
@@ -186,20 +228,16 @@ local function populateList(reviews: { [any]: any })
 		end
 	end
 
-	updateOverallRating(reviews)
+	local displayReviews = getLatestReviews(reviews)
+	updateOverallRating(displayReviews)
 
-	if #reviews == 0 then
+	if #displayReviews == 0 then
 		EmptyLabel.Visible = true
 		return
 	end
 	EmptyLabel.Visible = false
 
-	-- Sort by timestamp descending
-	table.sort(reviews, function(a, b)
-		return (a.Timestamp or 0) > (b.Timestamp or 0)
-	end)
-
-	for _, review in ipairs(reviews) do
+	for _, review in ipairs(displayReviews) do
 		local card = createReviewCard(review)
 		card.Parent = Container
 	end

@@ -27,7 +27,7 @@ Status: refresh for Iteration 8 (2026-03-02)
    - UI shows mailbox balance + next payout time.
    - Tests cover income rate calculations and packet payloads.
 
-5. [ ] Add tenant review history UI.
+5. [x] Add tenant review history UI.
    Acceptance:
    - `ReviewPackets` supports fetching and pushing new reviews.
    - UI lists the last 20 reviews with rating, comment, and timestamp.
