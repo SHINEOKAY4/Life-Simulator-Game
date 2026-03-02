@@ -2,7 +2,14 @@
 
 See the docs https://shineokay4.github.io/Life-Simulator-Game/generated/api/
 
-Last updated: 2026-03-01
+Last updated: 2026-03-02
+
+## Agent Context
+
+Before starting work, read these files to understand the codebase:
+
+- **`CLAUDE.md`** (repo root) — commands (tests, lint, rojo), source-to-Roblox path mapping, architecture overview, and key conventions. Created 2026-03-01.
+- **`.github/copilot-instructions.md`** — detailed architecture fundamentals, critical patterns (Packet system, service init, grid placement, custom packages), common workflows for adding features, and a reference file index. Read this for code examples and "avoid these mistakes" guidance.
 
 ## Completed Infrastructure
 
@@ -153,6 +160,13 @@ Last updated: 2026-03-01
   - Fixed `src/Server/Services/WorldEventService.luau` so `GetActiveEvent()` returns a defensive copy instead of internal mutable state
   - Added regression test in `Tests/Specs/WorldEventSpec.lua` to verify callers cannot mutate live buff multipliers via returned event table
   - Validation: `./run_tests.sh` (714 successes, 0 failures)
+- [x] Iteration 7 feature: build client-side QuestUI (quest panel with filter bar, objective progress, start/claim actions)
+  - Added `src/Client/UserInterface/QuestUI.luau` — scrollable quest panel with All/Active/Available/Done filter tabs, quest cards showing state-coloured accent bars, objective progress bars (for in_progress), reward summaries, and Start/Claim action buttons
+  - Connects to `QuestPackets.QuestSnapshotUpdated` (server push) and `QuestPackets.QuestCompleted` (completion toast); fetches snapshot via `GetQuestSnapshot` on open
+  - Wired `QuestsButton` into `MainHUD.luau` (same cloned-button pattern as Achievements/DailyRewards/Seasons)
+  - Registered `QuestUI.Init()` in `Main.client.luau` startup sequence after `DailyRewardUI`
+  - Added `Tests/Specs/QuestUISpec.lua` with 32 structural + behavioral tests; updated `SeasonalEventUISpec.lua` configureButtonVisuals assertion to accommodate the expanded button list
+  - Validation: `./run_tests.sh` (771 successes, 0 failures)
 - [x] Iteration 3 feature: wire QuestService into the game with network packets and server init
   - Added `src/Network/QuestPackets.luau` with 5 packets: `GetQuestSnapshot`, `StartQuest`, `ClaimQuest`, `QuestSnapshotUpdated` (push), `QuestCompleted` (push)
   - Updated `src/Server/Services/QuestService.luau` Init() to register packet handlers (`OnServerInvoke` for snapshot/start/claim), push snapshot updates to client after progress, and notify client on quest completion
