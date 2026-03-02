@@ -4,7 +4,7 @@
 -- Works both in Roblox runtime and in Busted tests loaded via loadfile().
 
 local function hasRobloxRuntime()
-	if type(game) ~= "userdata" and type(game) ~= "table" then
+	if type(game) ~= "userdata" then
 		return false
 	end
 	return pcall(function()
@@ -20,8 +20,18 @@ local WorldEventDefinitions = nil
 if IS_ROBLOX then
 	Players = game:GetService("Players")
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
-	WorldEventPackets = require(ReplicatedStorage.Network.WorldEventPackets)
-	WorldEventDefinitions = require(ReplicatedStorage.Shared.Definitions.WorldEventDefinitions)
+	local okPackets, packets = pcall(function()
+		return require(ReplicatedStorage.Network.WorldEventPackets)
+	end)
+	if okPackets and type(packets) == "table" then
+		WorldEventPackets = packets
+	end
+	local okDefs, defs = pcall(function()
+		return require(ReplicatedStorage.Shared.Definitions.WorldEventDefinitions)
+	end)
+	if okDefs and type(defs) == "table" then
+		WorldEventDefinitions = defs
+	end
 else
 	-- In test environment, load definitions via loadfile
 	WorldEventDefinitions = assert(loadfile("src/Shared/Definitions/WorldEventDefinitions.luau"))()
