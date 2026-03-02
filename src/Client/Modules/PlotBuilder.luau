@@ -51,6 +51,10 @@ local FLOOR_INPUT_SUPPRESS_SECONDS = 0.12
 local previewRestoreToken = 0
 local floorInputSuppressUntil = 0
 
+local deleteObjectHandler: ((Model) -> ())?
+local rotateObjectHandler: ((Model) -> ())?
+local selectObjectHandler: ((Model) -> ())?
+
 local function syncInputContextPriorities()
 	if not ObjectPreviewEnabled then
 		return
@@ -730,5 +734,40 @@ function PlotBuilder.PlaceRoofSelection(selection: RoofSelectionInfo)
 	PlacementCelebration.ShowSuccess(placementPosition, itemId)
 end
 
---#TODO: More functions for rotating, selecting already placed items, deleting placed items, etc.
+function PlotBuilder.SetDeleteObjectHandler(handler: (Model) -> ())
+	deleteObjectHandler = handler
+end
+
+function PlotBuilder.SetRotateObjectHandler(handler: (Model) -> ())
+	rotateObjectHandler = handler
+end
+
+function PlotBuilder.SetSelectObjectHandler(handler: (Model) -> ())
+	selectObjectHandler = handler
+end
+
+function PlotBuilder.DeleteObject(object: Model)
+	if deleteObjectHandler then
+		deleteObjectHandler(object)
+	else
+		warn("PlotBuilder.DeleteObject: no handler registered")
+	end
+end
+
+function PlotBuilder.RotateObject(object: Model)
+	if rotateObjectHandler then
+		rotateObjectHandler(object)
+	else
+		warn("PlotBuilder.RotateObject: no handler registered")
+	end
+end
+
+function PlotBuilder.SelectObject(object: Model)
+	if selectObjectHandler then
+		selectObjectHandler(object)
+	else
+		warn("PlotBuilder.SelectObject: no handler registered")
+	end
+end
+
 return PlotBuilder

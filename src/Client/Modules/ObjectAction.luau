@@ -255,6 +255,12 @@ local function PlaceSelectedPreview(object: Model)
 end
 
 function ObjectAction.Init()
+	PlotBuilder.SetDeleteObjectHandler(ObjectAction.Delete)
+	PlotBuilder.SetRotateObjectHandler(ObjectAction.Rotate)
+	PlotBuilder.SetSelectObjectHandler(function(object: Model)
+		ObjectAction.Move(object, object:GetPivot().Position)
+	end)
+
 	ObjectPreviewEnabled.Changed:Connect(function()
 		-- if object previewing is cancelled while in the middle of a move action, cancel the move action and reparent the object back to its original parent
 		if not ObjectPreviewEnabled.Value and ObjectActionContext.ClickMoveRequest.Enabled then
