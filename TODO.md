@@ -9,7 +9,7 @@ Status: refresh for Iteration 8 (2026-03-02)
    - BadgeServiceSpec covers Daily/Seasonal categories and updated totals.
    - Achievement UI renders Daily/Seasonal badges (manual smoke).
 
-2. [ ] Add NotificationPackets and server-to-client push for NotificationService.
+2. [x] Add NotificationPackets and server-to-client push for NotificationService.
    Acceptance:
    - `src/Network/NotificationPackets.luau` defines snapshot and delta packets.
    - `NotificationService.Init` registers remotes and pushes queue updates.
