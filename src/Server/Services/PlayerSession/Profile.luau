@@ -52,6 +52,9 @@ local Profile = {
 		OutageActive = false,
 	},
 	InventoryState = {},
+	StashState = {
+		Items = {}, -- { [itemId: string]: number } count map
+	},
 	CraftingState = {
 		Skills = {},
 		StarterResourcesGranted = false,

@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
+local StashPackets = require(ReplicatedStorage.Network.StashPackets)
 local ObjectPreview = require(script.Parent.ObjectPreview)
 local PlotBuilder = require(script.Parent.PlotBuilder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
@@ -473,6 +474,55 @@ function ObjectAction.Copy(object: Model)
 	local facing = object:GetAttribute("Facing") :: string
 	IsInCopyMode = true
 	PlotBuilder.PreviewSelected(itemId, facing)
+end
+
+-- Picks up a placed item from the plot and sends it to the player's stash.
+function ObjectAction.PickUp(object: Model)
+	local itemId = getObjectItemId(object)
+	if not itemId then
+		warn("Cannot pick up object without item id")
+		return
+	end
+
+	local placementTypeAttr = object:GetAttribute("PlacementType")
+	if placementTypeAttr == "SurfaceMounted" then
+		warn("[ObjectAction.PickUp] Surface-mounted items cannot be stashed directly")
+		return
+	end
+
+	local cellXValue = tonumber(object:GetAttribute("CellX"))
+	local cellZValue = tonumber(object:GetAttribute("CellZ"))
+	if not cellXValue or not cellZValue then
+		warn("Cannot pick up object without cell coordinates")
+		return
+	end
+
+	local facingAttr = object:GetAttribute("Facing")
+	local facing = if typeof(facingAttr) == "string" and facingAttr ~= "" then facingAttr else "North"
+
+	local levelAttr = object:GetAttribute("Level")
+	local levelNumber = if typeof(levelAttr) == "number" then levelAttr else PlotStateStore.GetActiveLevel()
+	if typeof(levelNumber) ~= "number" then
+		levelNumber = 0
+	end
+	levelNumber = math.clamp(levelNumber, 0, 255)
+
+	local subSlotAttr = object:GetAttribute("SubSlotId")
+	local subSlotId = if typeof(subSlotAttr) == "string" and subSlotAttr ~= "" then subSlotAttr else ""
+
+	local success, message = StashPackets.StashItem:Fire({
+		ItemId = itemId,
+		CellX = cellXValue,
+		CellZ = cellZValue,
+		Facing = facing,
+		Level = levelNumber,
+		SubSlotId = subSlotId,
+	})
+	if not success then
+		warn("[ObjectAction.PickUp] Stash failed:", message)
+	else
+		print("[ObjectAction.PickUp] Stashed", itemId)
+	end
 end
 
 function ObjectAction.Close()

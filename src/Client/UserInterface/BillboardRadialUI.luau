@@ -138,12 +138,12 @@ function BillboardRadialUI.Init()
 		if not UiClickGuard() then
 			return
 		end
-		print("CopyObject action triggered")
+		print("PickUp (stash) action triggered")
 		if not AdorneeModel then
-			warn("No model selected for copy action.")
+			warn("No model selected for pick-up action.")
 			return
 		end
-		ObjectAction.Copy(AdorneeModel)
+		ObjectAction.PickUp(AdorneeModel)
 	end)
 end
 

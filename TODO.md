@@ -193,3 +193,16 @@ Before starting work, read these files to understand the codebase:
   - Removed "stub for now" limitation from internet billing — players can now choose their internet plan in-game
   - Added `Tests/Specs/InternetTierSpec.lua` with 41 structural + logical tests covering packet definitions, service wiring, BillingCalculator cost constants, BillingState tier guard logic, and BillUI structural assertions
   - Validation: `./run_tests.sh` (853 successes, 0 failures)
+- [x] Iteration 4 (duo): implement player stash system (Storage Inventory)
+  - Added `src/Network/StashPackets.luau` with 4 packets: `StashItem` (pick up from plot → stash), `GetStash` (fetch stash contents), `PlaceFromStash` (place from stash, free), `StashUpdated` (server push)
+  - Added `StashState = { Items = {} }` to `src/Server/Services/PlayerSession/Profile.luau`
+  - Added `src/Server/Services/BuildService/Actions/StashAction.luau` — removes item from plot (via DestroyAction) and adds to stash; exports `AddToStash`, `DeductFromStash`, `GetStashItems`, `PushStashUpdate` helpers
+  - Added `SkipCost: boolean?` to `Build.luau` Payload type and passed to `Helpers.ensurePlacementFunds`; added `free` param to `ensurePlacementFunds` in Helpers so PlaceFromStash bypasses currency charge
+  - Wired `StashItem`, `GetStash`, `PlaceFromStash` handlers in `BuildService.Init()` with rate limiting; PlaceFromStash deducts from stash first and restores on build failure
+  - Added `ObjectAction.PickUp(object)` to client, wired from BillboardRadialUI's CopyObject action (previously a stub)
+  - Created `src/Client/UserInterface/StorageInventoryUI.luau` — scrollable panel showing stashed items with counts and "Place" buttons; Place closes panel, calls `PlotBuilder.SetStashMode(itemId) + PreviewSelected(itemId)`; subscribes to `StashUpdated` for live updates
+  - Added `PlotBuilder.SetStashMode(itemId?)` and stash-mode detection in `PlaceSelectedPreview` to route through `StashPackets.PlaceFromStash` instead of `PlacementPackets.PlaceRequest`
+  - Implemented `toggleStorageInventory()` in `PlotBuilderUI/init.luau` (previously warned "not implemented"), now toggles `StorageInventoryUI.Show()/Hide()`
+  - Registered `StorageInventoryUI.Init()` in `Main.client.luau` startup sequence
+  - Added `Tests/Specs/StashSpec.lua` with 75 structural tests covering all layers of the feature
+  - Validation: `./run_tests.sh` (928 successes, 0 failures)

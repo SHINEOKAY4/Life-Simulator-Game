@@ -21,6 +21,7 @@ local PlotStateStore = require(ClientStoresFolder.PlotStateStore)
 local MenuController = require(script.Controllers.MenuController)
 local CatalogController = require(script.Controllers.CatalogController)
 local PreviewController = require(script.Controllers.PreviewController)
+local StorageInventoryUI = require(UserInterfaceFolder.StorageInventoryUI)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -477,7 +478,13 @@ local function toggleBuildPalette()
 end
 
 local function toggleStorageInventory()
-	warn("[PlotBuilderUI] Storage inventory UI is not implemented yet.")
+	if StorageInventoryUI.IsOpen() then
+		StorageInventoryUI.Hide()
+		storageMenuActive = false
+	else
+		storageMenuActive = true
+		StorageInventoryUI.Show()
+	end
 end
 
 local function togglePlotExpansionMode()

@@ -49,6 +49,7 @@ type Payload = {
 	WindowEnabled: boolean?,
 	WindowHeightOffset: number?,
 	SubSlotId: string?,
+	SkipCost: boolean?,
 }
 
 -- Derives authoritative world pose metadata for wall-mounted items using the plot grid.
@@ -390,7 +391,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		local floorSurfaceId = Helpers.resolveSurfaceId(itemData, payload.SurfaceId)
 
 		local canAfford, failureReason, totalCost, currencyState =
-			Helpers.ensurePlacementFunds(player, itemData, totalCells)
+			Helpers.ensurePlacementFunds(player, itemData, totalCells, payload.SkipCost)
 		if not canAfford then
 			return false, failureReason or "Not enough cash"
 		end
@@ -459,7 +460,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 		end
 		local wallFacing: Facing = wallFacingValue :: any
 
-		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1)
+		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1, payload.SkipCost)
 		if not canAfford then
 			return false, failureReason or "Not enough cash"
 		end
@@ -549,7 +550,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			then state:NormalizeLevel(ceilingLevelValue)
 			else level
 
-		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1)
+		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1, payload.SkipCost)
 		if not canAfford then
 			return false, failureReason or "Not enough cash"
 		end
@@ -675,7 +676,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 			end
 		end
 
-		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1)
+		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1, payload.SkipCost)
 		if not canAfford then
 			return false, failureReason or "Not enough cash"
 		end
@@ -727,7 +728,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 	elseif itemData.PlacementType == "Wall" then
 		local requiresFloorOnBothSides = itemData.RequiresFloorOnBothSides or false
 		local incomingSurfaceId = Helpers.resolveSurfaceId(itemData, payload.SurfaceId)
-		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1)
+		local canAfford, failureReason, totalCost, currencyState = Helpers.ensurePlacementFunds(player, itemData, 1, payload.SkipCost)
 		if not canAfford then
 			return false, failureReason or "Not enough cash"
 		end
@@ -1045,7 +1046,7 @@ local function Build(player: Player, payload: Payload): (boolean, string)
 
 		local totalCells = widthCells * depthCells
 		local canAfford, failureReason, totalCost, currencyState =
-			Helpers.ensurePlacementFunds(player, itemData, totalCells)
+			Helpers.ensurePlacementFunds(player, itemData, totalCells, payload.SkipCost)
 		if not canAfford then
 			return false, failureReason or "Not enough cash"
 		end
