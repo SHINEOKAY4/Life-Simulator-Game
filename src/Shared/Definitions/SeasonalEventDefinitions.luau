@@ -9,6 +9,7 @@ export type SeasonalBuff = {
 	Type: string, -- "XPMultiplier" | "CashMultiplier" | "CraftSpeedMultiplier"
 	Value: number,
 	Label: string,
+	Description: string,
 }
 
 export type SeasonalChallenge = {
@@ -45,7 +46,7 @@ local SEASONS: { SeasonDefinition } = {
 		Description = "Renewal and growth. Building rewards are increased.",
 		DurationDays = 5,
 		Buffs = {
-			{ Type = "XPMultiplier", Value = 1.15, Label = "+15% Build XP" },
+			{ Type = "XPMultiplier", Value = 1.15, Label = "+15% Build XP", Description = "Build XP is increased by 15% during Spring." },
 		},
 		Challenges = {
 			{
@@ -74,7 +75,7 @@ local SEASONS: { SeasonDefinition } = {
 		Description = "Peak season for tenants. Rental income is boosted.",
 		DurationDays = 5,
 		Buffs = {
-			{ Type = "CashMultiplier", Value = 1.20, Label = "+20% Rental Income" },
+			{ Type = "CashMultiplier", Value = 1.20, Label = "+20% Rental Income", Description = "Rental income payouts are increased by 20% during Summer." },
 		},
 		Challenges = {
 			{
@@ -103,7 +104,7 @@ local SEASONS: { SeasonDefinition } = {
 		Description = "Crafting efficiency increases. Prepare for Winter.",
 		DurationDays = 5,
 		Buffs = {
-			{ Type = "CraftSpeedMultiplier", Value = 1.25, Label = "+25% Craft Speed" },
+			{ Type = "CraftSpeedMultiplier", Value = 1.25, Label = "+25% Craft Speed", Description = "Crafting jobs finish 25% faster during Autumn." },
 		},
 		Challenges = {
 			{
@@ -132,7 +133,7 @@ local SEASONS: { SeasonDefinition } = {
 		Description = "Harsh conditions test your property. Repair bonuses active.",
 		DurationDays = 5,
 		Buffs = {
-			{ Type = "XPMultiplier", Value = 1.20, Label = "+20% Repair XP" },
+			{ Type = "XPMultiplier", Value = 1.20, Label = "+20% Repair XP", Description = "Repair XP is increased by 20% during Winter." },
 		},
 		Challenges = {
 			{

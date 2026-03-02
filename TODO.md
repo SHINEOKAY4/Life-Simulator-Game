@@ -39,7 +39,7 @@ Status: refresh for Iteration 8 (2026-03-02)
    - UI shows per-skill progress bars and next-level XP.
    - Craft completion updates the panel in real time.
 
-7. [ ] Add seasonal buff detail tooltip.
+7. [x] Add seasonal buff detail tooltip.
    Acceptance:
    - Seasonal packets include active buff details and multipliers.
    - UI shows active multipliers with descriptions.

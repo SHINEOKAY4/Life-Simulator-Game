@@ -11,6 +11,7 @@ local BuffSchema = {
 	Type = Packet.String,
 	Value = Packet.Float32,
 	Label = Packet.String,
+	Description = Packet.String,
 }
 
 local ChallengeStatusSchema = {

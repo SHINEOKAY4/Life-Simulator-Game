@@ -11,6 +11,7 @@ local TweenService = game:GetService("TweenService")
 local SeasonalEventPackets = require(ReplicatedStorage.Network.SeasonalEventPackets)
 local SeasonalEventDefinitions = require(ReplicatedStorage.Shared.Definitions.SeasonalEventDefinitions)
 local Notification = require(script.Parent.Notification)
+local Tooltip = require(script.Parent.Tooltip)
 
 local SeasonalEventUI = {}
 
@@ -235,6 +236,13 @@ local function createChallengeRow(challenge: { [string]: any }, index: number): 
 	return row
 end
 
+local function formatBuffValue(value: any): string
+	if typeof(value) ~= "number" then
+		return "x1.00"
+	end
+	return string.format("x%.2f", value)
+end
+
 local function createBuffRow(buff: { [string]: any }, index: number): Frame
 	local row = Instance.new("Frame")
 	row.Name = "Buff_" .. tostring(index)
@@ -250,13 +258,51 @@ local function createBuffRow(buff: { [string]: any }, index: number): Frame
 	local label = Instance.new("TextLabel")
 	label.BackgroundTransparency = 1
 	label.Position = UDim2.fromOffset(10, 0)
-	label.Size = UDim2.new(1, -20, 1, 0)
+	label.Size = UDim2.new(1, -90, 1, 0)
 	label.Font = Enum.Font.GothamMedium
 	label.TextSize = 13
 	label.TextColor3 = Color3.fromRGB(212, 233, 255)
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.Text = tostring(buff.Label or buff.Type or "Buff")
 	label.Parent = row
+
+	local valueLabel = Instance.new("TextLabel")
+	valueLabel.BackgroundTransparency = 1
+	valueLabel.AnchorPoint = Vector2.new(1, 0.5)
+	valueLabel.Position = UDim2.new(1, -10, 0.5, 0)
+	valueLabel.Size = UDim2.fromOffset(70, 18)
+	valueLabel.Font = Enum.Font.GothamBold
+	valueLabel.TextSize = 12
+	valueLabel.TextColor3 = Color3.fromRGB(120, 230, 175)
+	valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+	valueLabel.Text = formatBuffValue(buff.Value)
+	valueLabel.Parent = row
+
+	local description = ""
+	if typeof(buff.Description) == "string" then
+		description = buff.Description
+	end
+	if description == "" then
+		description = string.format("%s active this season.", tostring(buff.Label or buff.Type or "Buff"))
+	end
+
+	local tooltip = Tooltip.new(row, {
+		title = tostring(buff.Label or buff.Type or "Seasonal Buff"),
+		description = description,
+		delay = 0.05,
+		maxWidth = 260,
+		allowMultiple = true,
+	})
+	tooltip:SetItemContent({
+		Title = tostring(buff.Label or buff.Type or "Seasonal Buff"),
+		Description = description,
+		Stats = {
+			{ Label = "Multiplier", Value = formatBuffValue(buff.Value), Color = Color3.fromRGB(120, 230, 175) },
+		},
+	})
+	row.Destroying:Connect(function()
+		tooltip:Destroy()
+	end)
 
 	return row
 end
