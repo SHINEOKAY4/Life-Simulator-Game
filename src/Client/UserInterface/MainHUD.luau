@@ -18,6 +18,7 @@ local AchievementUI = require(script.Parent.AchievementUI)
 local DailyRewardUI = require(script.Parent.DailyRewardUI)
 local SeasonalEventUI = require(script.Parent.SeasonalEventUI)
 local QuestUI = require(script.Parent.QuestUI)
+local WorldEventUI = require(script.Parent.WorldEventUI)
 local PlotExpansion = require(script.Parent.Parent.Modules.PlotExpansion)
 
 local Player = Players.LocalPlayer
@@ -131,6 +132,18 @@ local QuestsButton = (function(): GuiButton
 	button.Name = "QuestsButton"
 	setButtonText(button, "Quests")
 	button.LayoutOrder = SeasonsButton.LayoutOrder + 1
+	button.Parent = BottomRight
+	return button
+end)()
+local WorldEventsButton = (function(): GuiButton
+	local existing = BottomRight:FindFirstChild("WorldEventsButton")
+	if existing and existing:IsA("GuiButton") then
+		return existing
+	end
+	local button = ReviewsButton:Clone()
+	button.Name = "WorldEventsButton"
+	setButtonText(button, "World Events")
+	button.LayoutOrder = QuestsButton.LayoutOrder + 1
 	button.Parent = BottomRight
 	return button
 end)()
@@ -656,6 +669,10 @@ function MainHUD.Init()
 		QuestUI.Toggle()
 	end)
 
+	WorldEventsButton.Activated:Connect(function()
+		WorldEventUI.Toggle()
+	end)
+
 	PlotBuilderEnabled.Changed:Connect(function()
 		if PlotBuilderEnabled.Value then
 			MainHUD.Hide()
@@ -720,7 +737,7 @@ function MainHUD.Init()
 		Player:GetAttributeChangedSignal(attributeName):Connect(updateProgressionDisplay)
 	end
 
-	for _, button in ipairs({ BuildButton, ReviewsButton, ReputationButton, ProfileButton, BillsButton, AchievementsButton, DailyRewardsButton, SeasonsButton, QuestsButton }) do
+	for _, button in ipairs({ BuildButton, ReviewsButton, ReputationButton, ProfileButton, BillsButton, AchievementsButton, DailyRewardsButton, SeasonsButton, QuestsButton, WorldEventsButton }) do
 		configureButtonVisuals(button)
 	end
 

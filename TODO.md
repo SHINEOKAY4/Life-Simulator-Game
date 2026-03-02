@@ -2,7 +2,7 @@
 
 See the docs https://shineokay4.github.io/Life-Simulator-Game/generated/api/
 
-Last updated: 2026-03-02
+Last updated: 2026-03-02 (Iter 9)
 
 ## Agent Context
 
@@ -167,6 +167,13 @@ Before starting work, read these files to understand the codebase:
   - Registered `QuestUI.Init()` in `Main.client.luau` startup sequence after `DailyRewardUI`
   - Added `Tests/Specs/QuestUISpec.lua` with 32 structural + behavioral tests; updated `SeasonalEventUISpec.lua` configureButtonVisuals assertion to accommodate the expanded button list
   - Validation: `./run_tests.sh` (771 successes, 0 failures)
+- [x] Iteration 9 feature: build client-side WorldEventUI (event panel, buff display, countdown, MainHUD wiring)
+  - Added `src/Client/UserInterface/WorldEventUI.luau` — scrollable overlay showing active event name/kind/description, buff rows (label + percentage), and a live countdown
+  - Subscribes to `WorldEventController.StateChanged` for real-time updates without polling
+  - Wired `WorldEventsButton` into `MainHUD.luau` (cloned-button pattern, added to configureButtonVisuals loop)
+  - Registered `WorldEventUI.Init()` in `Main.client.luau` startup sequence after QuestUI
+  - Added `Tests/Specs/WorldEventUISpec.lua` with 39 structural + behavioral tests covering API shape, MainHUD wiring, Main.client init ordering, and controller structural assertions
+  - Validation: `./run_tests.sh` (810 successes, 0 failures)
 - [x] Iteration 3 feature: wire QuestService into the game with network packets and server init
   - Added `src/Network/QuestPackets.luau` with 5 packets: `GetQuestSnapshot`, `StartQuest`, `ClaimQuest`, `QuestSnapshotUpdated` (push), `QuestCompleted` (push)
   - Updated `src/Server/Services/QuestService.luau` Init() to register packet handlers (`OnServerInvoke` for snapshot/start/claim), push snapshot updates to client after progress, and notify client on quest completion
