@@ -75,9 +75,16 @@ local function restoreDetachedPreview(): boolean
 		return false
 	end
 
-	object.Parent = originalParent --#TODO: Bug (The Parent property of 2:15:South:Wall is locked, current parent: NULL, new parent Container )
+	local restored = false
+	local ok, err = pcall(function()
+		object.Parent = originalParent
+		restored = true
+	end)
+	if not ok or not restored then
+		warn("Failed to restore detached preview:", err)
+		return false
+	end
 
-	-- Currently harmless but unsightly, ideally should be fixed properly
 	clearDetachedPreviewState()
 	return true
 end
