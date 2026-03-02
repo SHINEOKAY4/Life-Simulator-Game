@@ -920,6 +920,14 @@ function AchievementService.Init()
 		return handleGetSnapshot(player)
 	end
 
+	AchievementPackets.GetStatsSummary.OnServerInvoke = function(player)
+		local summary = AchievementService.GetStatsSummary(player)
+		if summary == nil then
+			return false, "Profile unavailable.", nil
+		end
+		return true, "", summary
+	end
+
 	AchievementPackets.ClaimAchievement.OnServerInvoke = function(player, achievementId)
 		return AchievementService.ClaimAchievement(player, achievementId)
 	end

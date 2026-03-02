@@ -6,6 +6,8 @@ local Packet = require(ReplicatedStorage.Packages.Packet)
 local AchievementPackets = {}
 
 AchievementPackets.GetSnapshot = Packet("GetAchievementSnapshot"):Response(Packet.Boolean8, Packet.StringLong, Packet.Any)
+AchievementPackets.GetStatsSummary =
+	Packet("GetAchievementStatsSummary"):Response(Packet.Boolean8, Packet.StringLong, Packet.Any)
 AchievementPackets.ClaimAchievement = Packet("ClaimAchievement", Packet.String):Response(
 	Packet.Boolean8,
 	Packet.StringLong,

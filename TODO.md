@@ -15,7 +15,7 @@ Status: refresh for Iteration 8 (2026-03-02)
    - `NotificationService.Init` registers remotes and pushes queue updates.
    - Client listens and renders toasts via `src/Client/UserInterface/Notification.luau`.
 
-3. [ ] Add achievement stats summary packet + UI widget.
+3. [x] Add achievement stats summary packet + UI widget.
    Acceptance:
    - `AchievementPackets` exposes stats summary request/response.
    - `AchievementService.GetStatsSummary` is wired to the packet.
