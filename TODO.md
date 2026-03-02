@@ -33,7 +33,7 @@ Status: refresh for Iteration 8 (2026-03-02)
    - UI lists the last 20 reviews with rating, comment, and timestamp.
    - New review events update the UI without re-open.
 
-6. [ ] Add crafting skill progression panel.
+6. [x] Add crafting skill progression panel.
    Acceptance:
    - Crafting packets include skill level/XP summary per skill.
    - UI shows per-skill progress bars and next-level XP.

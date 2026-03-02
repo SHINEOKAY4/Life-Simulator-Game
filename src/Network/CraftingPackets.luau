@@ -35,4 +35,10 @@ CraftingPackets.CraftFailed = Packet("CraftFailed", {
 	Reason = Packet.StringLong,
 })
 
+CraftingPackets.GetSkillSummary = Packet("GetSkillSummary"):Response(Packet.Boolean8, Packet.StringLong, Packet.Any)
+
+CraftingPackets.SkillSummaryUpdated = Packet("SkillSummaryUpdated", {
+	Skills = Packet.Any,
+})
+
 return CraftingPackets
