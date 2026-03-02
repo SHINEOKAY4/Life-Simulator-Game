@@ -21,7 +21,7 @@ Status: refresh for Iteration 8 (2026-03-02)
    - `AchievementService.GetStatsSummary` is wired to the packet.
    - `AchievementUI` shows completion percent and per-category counts.
 
-4. [ ] Add mailbox income summary to the HUD.
+4. [x] Add mailbox income summary to the HUD.
    Acceptance:
    - Mailbox packets expose balance, income rate, and next rent tick.
    - UI shows mailbox balance + next payout time.

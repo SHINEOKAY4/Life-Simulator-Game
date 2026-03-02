@@ -18,4 +18,11 @@ MailboxPackets.CollectionEffect = Packet("MailboxCollectionEffect", {
 MailboxPackets.CollectRequest =
 	Packet("MailboxCollectRequest"):Response(Packet.Boolean8, Packet.NumberU32, Packet.StringLong)
 
+-- Server-to-client: full income summary (balance + rate + seconds until next payout drip).
+MailboxPackets.IncomeSummary = Packet("MailboxIncomeSummary", {
+	Balance = Packet.NumberU32,
+	IncomePerSecond = Packet.NumberF32,
+	NextRentTick = Packet.NumberU32,
+})
+
 return MailboxPackets
