@@ -27,7 +27,7 @@ local BillingConstants = {
 	BaseWaterUsage = 5, -- Base water consumption per cycle
 	WaterPerResident = 3, -- Additional water per resident per cycle
 
-	-- Internet: Tiered subscription (stub for now)
+	-- Internet: Tiered subscription (None/Basic/Standard/Premium)
 	InternetTiers = {
 		None = 0,
 		Basic = 25,

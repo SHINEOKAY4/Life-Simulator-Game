@@ -42,7 +42,6 @@ function TutorialService.OnPlayerAdded(player: Player)
 		-- Give 1000 cash
 		CurrencyService.Add(player, "Cash", 1000, profile.CurrencyState, { Source = "TutorialStartingCash" })
 		tutorialState.HasReceivedStartingCash = true
-		print("Given starting cash to " .. player.Name)
 	end
 end
 
