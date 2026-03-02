@@ -2,7 +2,7 @@
 
 See the docs https://shineokay4.github.io/Life-Simulator-Game/generated/api/
 
-Last updated: 2026-03-02 (Iter 2 duo)
+Last updated: 2026-03-02 (Iter 6 duo)
 
 ## Agent Context
 
@@ -193,6 +193,16 @@ Before starting work, read these files to understand the codebase:
   - Removed "stub for now" limitation from internet billing — players can now choose their internet plan in-game
   - Added `Tests/Specs/InternetTierSpec.lua` with 41 structural + logical tests covering packet definitions, service wiring, BillingCalculator cost constants, BillingState tier guard logic, and BillUI structural assertions
   - Validation: `./run_tests.sh` (853 successes, 0 failures)
+- [x] Iteration 6 (duo): build full emote system (packets + server service + client UI + MainHUD button)
+  - Added `src/Network/EmotePackets.luau` with `GetEmotes`, `PerformEmote` (request/response), and `EmotePerformed` (server→all-clients broadcast)
+  - Extended `src/Server/Services/EmoteService.luau` with `Init()`: auto-unlocks all 5 base emotes on join, wires `GetEmotes`/`PerformEmote` packet handlers, cleans up on `PlayerRemoving`; uses `IS_ROBLOX` guard so existing `loadfile` tests still run
+  - Added `GetUnlockedEmoteInfos()` returning ordered emote definitions (respects `EmoteOrder` for consistent UI ordering)
+  - Created `src/Client/UserInterface/EmoteUI.luau`: scrollable card panel with emoji icon, name, description, and "Do it!" button per emote; fetches live from server on open; closes panel after performing
+  - Wired `EmoteService.Init()` in `Main.server.luau` startup sequence after `DailyRewardService`
+  - Wired `EmoteUI.Init()` in `Main.client.luau` startup sequence after `StorageInventoryUI`
+  - Added `EmotesButton` to `MainHUD.luau` (cloned-button pattern, LayoutOrder after WorldEventsButton, included in `configureButtonVisuals` loop)
+  - Expanded `Tests/Specs/EmoteSpec.lua` from 8 → 45 tests covering service logic, packet structure, UI structure, server/client init ordering, and MainHUD wiring
+  - Validation: `./run_tests.sh` (973 successes, 0 failures)
 - [x] Iteration 4 (duo): implement player stash system (Storage Inventory)
   - Added `src/Network/StashPackets.luau` with 4 packets: `StashItem` (pick up from plot → stash), `GetStash` (fetch stash contents), `PlaceFromStash` (place from stash, free), `StashUpdated` (server push)
   - Added `StashState = { Items = {} }` to `src/Server/Services/PlayerSession/Profile.luau`
