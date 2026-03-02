@@ -227,4 +227,15 @@ describe("QuestService behavioral (QuestUI scenario)", function()
 		local progress = QuestService.GetPlayerQuests(fakePlayer)["quest_basic"].Progress
 		assert.equals(5, progress["collect_coins"])
 	end)
+
+	it("GetQuestSnapshot includes display metadata for UI", function()
+		QuestService.StartQuest(fakePlayer, "quest_basic")
+		local snapshot = QuestService.GetQuestSnapshot(fakePlayer)
+		assert.is_truthy(snapshot)
+		local entry = snapshot["quest_basic"]
+		assert.is_truthy(entry)
+		assert.is_truthy(entry.Name ~= nil)
+		assert.is_truthy(type(entry.Objectives) == "table")
+		assert.is_truthy(type(entry.Progress) == "table")
+	end)
 end)

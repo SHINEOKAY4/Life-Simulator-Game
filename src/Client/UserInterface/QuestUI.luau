@@ -26,6 +26,7 @@ local emptyLabel: TextLabel? = nil
 
 local open = false
 local initialized = false
+local renderToken = 0
 
 -- Cached snapshot from server: { [questId]: { State, Progress } }
 local cachedSnapshot: { [string]: any } = {}
@@ -298,7 +299,7 @@ local function createQuestCard(questInfo: { [string]: any }): Frame
 			then Color3.fromRGB(56, 140, 88)
 			else Color3.fromRGB(181, 134, 52)
 
-		local actionBtn = Instance.new("TextButton")
+    local actionBtn = Instance.new("TextButton")
 		actionBtn.Name = "ActionButton"
 		actionBtn.AnchorPoint = Vector2.new(0.5, 0)
 		actionBtn.Position = UDim2.new(0.5, 0, 0, 98)
@@ -315,15 +316,15 @@ local function createQuestCard(questInfo: { [string]: any }): Frame
 		btnCorner.CornerRadius = UDim.new(0, 8)
 		btnCorner.Parent = actionBtn
 
-		actionBtn.Activated:Connect(function()
-			actionBtn.Active = false
-			actionBtn.Text = if state == "available" then "Starting..." else "Claiming..."
-			if state == "available" then
-				QuestUI._StartQuest(questId)
-			else
-				QuestUI._ClaimQuest(questId)
-			end
-		end)
+    actionBtn.Activated:Connect(function()
+        actionBtn.Active = false
+        actionBtn.Text = if state == "available" then "Starting..." else "Claiming..."
+        if state == "available" then
+            QuestUI._StartQuest(questId, actionBtn)
+        else
+            QuestUI._ClaimQuest(questId, actionBtn)
+        end
+    end)
 	end
 
 	return card
@@ -531,6 +532,8 @@ end
 function QuestUI._RenderList()
 	local list = questListFrame
 	if not list then return end
+	renderToken += 1
+	local currentToken = renderToken
 
 	-- Clear existing quest cards
 	for _, child in ipairs(list:GetChildren()) do
@@ -558,6 +561,9 @@ function QuestUI._RenderList()
 	-- Build cards for quests that pass the current filter
 	local count = 0
 	for questId, qstate in pairs(cachedSnapshot) do
+		if currentToken ~= renderToken then
+			return
+		end
 		local state = tostring(qstate.State or "locked")
 		if not stateInFilter(state) then
 			continue
@@ -585,46 +591,65 @@ end
 
 -- ── Network actions ────────────────────────────────────────────────────────────
 
-function QuestUI._StartQuest(questId: string)
+function QuestUI._StartQuest(questId: string, actionButton: TextButton?)
 	task.spawn(function()
-		local ok, errMsg = pcall(function()
+		local ok, success, errMsg = pcall(function()
 			return QuestPackets.StartQuest:Fire(questId)
 		end)
-		if not ok or errMsg == false then
+		if not ok or success == false then
+			local message = "Could not start quest. It may have prerequisites."
+			if typeof(errMsg) == "string" and errMsg ~= "" then
+				message = errMsg
+			end
 			Notification.Show({
 				Title = "Quest Unavailable",
-				Text = "Could not start quest. It may have prerequisites.",
+				Text = message,
 				Duration = 3,
 				BackgroundColor = Color3.fromRGB(130, 64, 64),
 			})
+		end
+		if actionButton then
+			actionButton.Active = true
+			actionButton.Text = "Start Quest"
 		end
 		-- Snapshot update will be pushed by server; re-render on receipt.
 	end)
 end
 
-function QuestUI._ClaimQuest(questId: string)
+function QuestUI._ClaimQuest(questId: string, actionButton: TextButton?)
 	task.spawn(function()
-		local ok, errMsg = pcall(function()
+		local ok, success, errMsg = pcall(function()
 			return QuestPackets.ClaimQuest:Fire(questId)
 		end)
-		if not ok or errMsg == false then
+		if not ok or success == false then
+			local message = "Could not claim quest reward. Try again."
+			if typeof(errMsg) == "string" and errMsg ~= "" then
+				message = errMsg
+			end
 			Notification.Show({
 				Title = "Claim Failed",
-				Text = "Could not claim quest reward. Try again.",
+				Text = message,
 				Duration = 3,
 				BackgroundColor = Color3.fromRGB(130, 64, 64),
 			})
+		end
+		if actionButton then
+			actionButton.Active = true
+			actionButton.Text = "Claim Reward"
 		end
 	end)
 end
 
 function QuestUI._FetchSnapshot()
 	task.spawn(function()
-		local ok, payload = pcall(function()
+		local ok, success, payload = pcall(function()
 			return QuestPackets.GetQuestSnapshot:Fire()
 		end)
-		if ok and typeof(payload) == "table" then
+		if ok and success == true and typeof(payload) == "table" then
 			cachedSnapshot = payload
+			QuestUI._RenderList()
+		elseif ok and success == true and payload == nil then
+			cachedSnapshot = {}
 			QuestUI._RenderList()
 		end
 	end)

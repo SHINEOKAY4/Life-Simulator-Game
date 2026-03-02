@@ -266,11 +266,51 @@ local function evaluateQuestCompletion(state, quest)
 end
 
 -- Push a quest state snapshot to the client player via QuestPackets.
+local function copyShallow(source)
+    local clone = {}
+    if type(source) ~= "table" then
+        return clone
+    end
+    for key, value in pairs(source) do
+        clone[key] = value
+    end
+    return clone
+end
+
+-- Build a client-facing snapshot that includes quest display data.
+local function buildQuestSnapshot(player)
+    loadCatalogIfNeeded()
+    if not player then
+        return nil
+    end
+    local snapshot = {}
+    local states = HydratePlayer(player)
+    for questId, def in pairs(QuestCatalog) do
+        local state = states[questId] or { State = "locked", Progress = {} }
+        local progressCopy = copyShallow(state.Progress)
+        local objectivesCopy = {}
+        if type(def.objectives) == "table" then
+            for index, obj in ipairs(def.objectives) do
+                objectivesCopy[index] = obj
+            end
+        end
+        local rewardsCopy = copyShallow(def.rewards)
+        snapshot[questId] = {
+            State = state.State or "locked",
+            Progress = progressCopy,
+            Name = def.name or def.Name or questId,
+            Objectives = objectivesCopy,
+            Rewards = rewardsCopy,
+        }
+    end
+    return snapshot
+end
+
 local function pushSnapshotToClient(player)
     if not IS_ROBLOX or not QuestPackets then
         return
     end
-    local quests = QuestService.GetPlayerQuests(player)
+    local quests = buildQuestSnapshot(player)
     if quests then
         QuestPackets.QuestSnapshotUpdated:FireClient(player, quests)
     end
@@ -302,7 +342,7 @@ function QuestService.Init()
     -- Wire network packet handlers when running in Roblox
     if IS_ROBLOX and QuestPackets then
         QuestPackets.GetQuestSnapshot.OnServerInvoke = function(player)
-            local quests = QuestService.GetPlayerQuests(player)
+            local quests = buildQuestSnapshot(player)
             if quests then
                 return true, quests
             end
@@ -333,6 +373,11 @@ function QuestService.Init()
             return ok, err or ""
         end
     end
+end
+
+-- Client snapshot for UI rendering (includes quest definition metadata).
+function QuestService.GetQuestSnapshot(player)
+    return buildQuestSnapshot(player)
 end
 
 -- Recompute all quest states for a player based on prerequisites and current completion

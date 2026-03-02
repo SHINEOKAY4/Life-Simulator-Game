@@ -2,7 +2,7 @@
 
 See the docs https://shineokay4.github.io/Life-Simulator-Game/generated/api/
 
-Last updated: 2026-03-02 (Iter 9)
+Last updated: 2026-03-02 (Iter 10)
 
 ## Agent Context
 
@@ -180,3 +180,9 @@ Before starting work, read these files to understand the codebase:
   - Added `QuestService.Init()` and `DailyRewardService.Init()` to `src/Server/Main.server.luau` startup sequence (QuestService before DailyRewardService since DailyRewardService consumes it for daily challenges)
   - Added `Tests/Specs/QuestServiceWiringSpec.lua` with 21 structural + behavioral tests covering packet definitions, service wiring, server init ordering, and full quest lifecycle regression
   - Validation: `./run_tests.sh` (737 successes, 0 failures)
+
+- [x] Iteration 10 review sweep: QuestService snapshot/UI/WorldEventUI fixes
+  - Fixed QuestService to provide UI-friendly snapshots containing quest names, objectives, and rewards via `GetQuestSnapshot` and server pushes
+  - Fixed QuestUI to parse packet response signatures correctly and re-enable action buttons after async calls
+  - Throttled WorldEventUI countdown updates to once per second and cleared ticker on close
+  - Added regression coverage for quest snapshot metadata + countdown throttle

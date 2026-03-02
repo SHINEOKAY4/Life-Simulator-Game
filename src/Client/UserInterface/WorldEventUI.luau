@@ -26,6 +26,7 @@ local initialized = false
 
 -- Countdown ticker connection
 local countdownConnection: RBXScriptConnection? = nil
+local countdownAccumulator = 0
 
 local PANEL_BG = Color3.fromRGB(18, 22, 30)
 local HEADER_BG = Color3.fromRGB(30, 80, 140)
@@ -140,9 +141,14 @@ local function refreshCountdown(endsAt: number)
 		countdownLabel.Text = formatCountdown(left)
 	end
 
+	countdownAccumulator = 0
 	tick()
-	countdownConnection = game:GetService("RunService").Heartbeat:Connect(function()
-		tick()
+	countdownConnection = game:GetService("RunService").Heartbeat:Connect(function(dt)
+		countdownAccumulator += dt
+		if countdownAccumulator >= 1 then
+			countdownAccumulator = 0
+			tick()
+		end
 	end)
 end
 
@@ -482,6 +488,7 @@ function WorldEventUI.SetVisible(visible: boolean)
 		refreshUI()
 		animateOpen()
 	else
+		refreshCountdown(0)
 		animateClose()
 	end
 end

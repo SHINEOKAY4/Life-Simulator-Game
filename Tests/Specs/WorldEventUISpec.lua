@@ -82,6 +82,11 @@ describe("WorldEventUI file structure", function()
 		assert.is_truthy(string.find(src, "formatBuffValue", 1, true))
 	end)
 
+	it("throttles countdown updates to once per second", function()
+		assert.is_truthy(string.find(src, "countdownAccumulator", 1, true))
+		assert.is_truthy(string.find(src, ">= 1", 1, true))
+	end)
+
 	it("formats countdown with hours/minutes/seconds", function()
 		assert.is_truthy(string.find(src, "formatCountdown", 1, true))
 	end)
