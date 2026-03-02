@@ -2,7 +2,7 @@
 
 See the docs https://shineokay4.github.io/Life-Simulator-Game/generated/api/
 
-Last updated: 2026-03-02 (Iter 10)
+Last updated: 2026-03-02 (Iter 2 duo)
 
 ## Agent Context
 
@@ -186,3 +186,10 @@ Before starting work, read these files to understand the codebase:
   - Fixed QuestUI to parse packet response signatures correctly and re-enable action buttons after async calls
   - Throttled WorldEventUI countdown updates to once per second and cleared ticker on close
   - Added regression coverage for quest snapshot metadata + countdown throttle
+- [x] Iteration 2 (duo): wire internet tier selection into billing system
+  - Added `GetInternetTier` + `SetInternetTier` packets to `src/Network/BillingPackets.luau`
+  - Wired `GetInternetTier.OnServerInvoke` and `SetInternetTier.OnServerInvoke` in `BillingService.Init()` with tier validation (None/Basic/Standard/Premium) and change notification
+  - Extended `src/Client/UserInterface/BillUI.luau` with a tier-selector row inside the Internet bill frame: four plan buttons (None $0 / Basic $25 / Standard $50 / Premium $100), active tier highlighted, debounced `SetInternetTier` packet fire, tier refreshed on panel open via `GetInternetTier`
+  - Removed "stub for now" limitation from internet billing — players can now choose their internet plan in-game
+  - Added `Tests/Specs/InternetTierSpec.lua` with 41 structural + logical tests covering packet definitions, service wiring, BillingCalculator cost constants, BillingState tier guard logic, and BillUI structural assertions
+  - Validation: `./run_tests.sh` (853 successes, 0 failures)

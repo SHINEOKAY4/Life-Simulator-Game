@@ -194,10 +194,39 @@ local function enforceConsequences(player: Player)
 	end
 end
 
+local VALID_INTERNET_TIERS: { string } = { "None", "Basic", "Standard", "Premium" }
+
 function BillingService.Init()
 	-- Listen for payment requests
 	BillingPackets.PayBill.OnServerInvoke = function(player: Player)
 		return BillingService.PayBill(player)
+	end
+
+	-- Return the player's current internet tier name
+	BillingPackets.GetInternetTier.OnServerInvoke = function(player: Player)
+		local state = PlayerStates[player.UserId]
+		if not state then
+			return false, "None"
+		end
+		return true, state.Save.InternetTier or "None"
+	end
+
+	-- Allow the player to switch their internet tier
+	BillingPackets.SetInternetTier.OnServerInvoke = function(player: Player, tier: string)
+		if not table.find(VALID_INTERNET_TIERS, tier) then
+			return false, "Invalid tier"
+		end
+		local ok = BillingService.SetInternetTier(player, tier)
+		if not ok then
+			return false, "No billing state"
+		end
+		sendBillingNotification(
+			player,
+			"Internet Plan Updated",
+			string.format("Your internet plan has been changed to %s.", tier),
+			{ Source = "BillingService", Event = "InternetTierChanged", Tier = tier }
+		)
+		return true, tier
 	end
 
 	-- Subscribe to world update for periodic checks
