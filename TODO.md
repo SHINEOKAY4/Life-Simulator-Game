@@ -15,7 +15,7 @@ Status: refresh for Iteration 9 (2026-03-02)
    - `DailyRewardUI` renders the current daily challenge with quest name and state.
    - `DailyRewardSpec` verifies daily challenge payload wiring.
 
-3. [ ] Add quest daily challenge rotation regression tests.
+3. [x] Add quest daily challenge rotation regression tests.
    Acceptance:
    - New spec verifies quest rotation across consecutive UTC days.
    - Ensures repeatable quest assignment remains consistent across resets.

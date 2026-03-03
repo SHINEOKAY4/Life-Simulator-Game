@@ -386,6 +386,41 @@ describe("DailyRewardService", function()
 		assert.equals(expectedDayId, status.DailyChallenge.DayId)
 	end)
 
+	it("rotates daily challenge quests deterministically across consecutive UTC days", function()
+		local constants = DailyRewardService._GetConstants()
+		local questIds = constants.DailyChallengeQuestIds
+		local baseDayId = math.floor(currentTime / (24 * HOUR))
+
+		for offset = 0, #questIds - 1 do
+			local status = DailyRewardService.GetStatus("player1")
+			local expectedDayId = baseDayId + offset
+			local expectedIndex = (expectedDayId % #questIds) + 1
+
+			assert.equals(expectedDayId, status.DailyChallenge.DayId)
+			assert.equals(questIds[expectedIndex], status.DailyChallenge.QuestId)
+
+			if offset < #questIds - 1 then
+				currentTime = currentTime + (24 * HOUR)
+			end
+		end
+	end)
+
+	it("keeps repeatable daily challenge assignment consistent across resets", function()
+		local firstStatus = DailyRewardService.GetStatus("player1")
+		local expectedDayId = firstStatus.DailyChallenge.DayId
+		local expectedQuestId = firstStatus.DailyChallenge.QuestId
+
+		DailyRewardService._ResetForTests()
+		DailyRewardService._SetClock(function()
+			return currentTime
+		end)
+
+		local secondStatus = DailyRewardService.GetStatus("player1")
+		assert.equals(expectedDayId, secondStatus.DailyChallenge.DayId)
+		assert.equals(expectedQuestId, secondStatus.DailyChallenge.QuestId)
+		assert.equals("in_progress", secondStatus.DailyChallenge.QuestState)
+	end)
+
 	it("reports pending milestone when approaching milestone day", function()
 		for day = 1, 6 do
 			DailyRewardService.ClaimReward("player1")
