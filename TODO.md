@@ -67,7 +67,7 @@ Acceptance Checks:
 Regression Checks:
 - NPC seating still succeeds under normal conditions.
 
-6) [ ] Iter 6 Goal - BuildService Action Dispatch Cache
+6) [x] Iter 6 Goal - BuildService Action Dispatch Cache
 Goal: reduce repeated action lookup overhead by caching action modules.
 Acceptance Checks:
 - Action module lookup cached after first require.
@@ -128,3 +128,5 @@ Review Log
 - Iter 5: added SEAT_CHECK_INTERVAL=0.05 to ClientResidentMovement; replaced Heartbeat:Wait() with
   task.wait(SEAT_CHECK_INTERVAL) in waitForSeatAvailability and attemptSeat (~3x fewer wakeups);
   added SeatAcquisitionSpec (5 structural checks); ./run_tests.sh 1344 successes; selene 0 errors, 0 warnings.
+- Iter 6: cached BuildService action module resolution with dispatch helpers; added BuildServiceActionCacheSpec
+  structural checks for cached resolution; ./run_tests.sh (see latest run); selene 0 errors, 0 warnings.

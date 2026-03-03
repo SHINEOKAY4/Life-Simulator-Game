@@ -6,19 +6,60 @@ local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local StashPackets = require(ReplicatedStorage.Network.StashPackets)
 local RateLimiter = require(ReplicatedStorage.Shared.Utilities.RateLimiter)
 
-local Build = require(script.Actions.Build)
-local DestroyAction = require(script.Actions.DestroyAction)
-local StashAction = require(script.Actions.StashAction)
-local Move = require(script.Actions.Move)
-local PlaceFloorArea = require(script.Actions.PlaceFloorArea)
-local PlaceRoofArea = require(script.Actions.PlaceRoofArea)
-local PlaceWallStrip = require(script.Actions.PlaceWallStrip)
-local PlaceSurfaceMount = require(script.Actions.PlaceSurfaceMount)
-local DestroySurfaceMount = require(script.Actions.DestroySurfaceMount)
-local Rotate = require(script.Actions.Rotate)
-local PaintSurface = require(script.Actions.PaintSurface)
-local ConnectUtility = require(script.Actions.ConnectUtility)
-local DisconnectUtility = require(script.Actions.DisconnectUtility)
+local ActionsFolder = script.Actions
+
+local ActionModules = {
+	Build = ActionsFolder.Build,
+	DestroyAction = ActionsFolder.DestroyAction,
+	StashAction = ActionsFolder.StashAction,
+	Move = ActionsFolder.Move,
+	PlaceFloorArea = ActionsFolder.PlaceFloorArea,
+	PlaceRoofArea = ActionsFolder.PlaceRoofArea,
+	PlaceWallStrip = ActionsFolder.PlaceWallStrip,
+	PlaceSurfaceMount = ActionsFolder.PlaceSurfaceMount,
+	DestroySurfaceMount = ActionsFolder.DestroySurfaceMount,
+	Rotate = ActionsFolder.Rotate,
+	PaintSurface = ActionsFolder.PaintSurface,
+	ConnectUtility = ActionsFolder.ConnectUtility,
+	DisconnectUtility = ActionsFolder.DisconnectUtility,
+}
+
+local ActionCache: { [string]: any } = {}
+
+local function resolveAction(actionName: string)
+	local cached = ActionCache[actionName]
+	if cached ~= nil then
+		return cached
+	end
+	local actionModule = ActionModules[actionName]
+	if not actionModule then
+		error(("Unknown build action '%s'"):format(actionName))
+	end
+	local resolved = require(actionModule)
+	ActionCache[actionName] = resolved
+	return resolved
+end
+
+local function dispatchAction(actionName: string)
+	local resolved: any = nil
+	return function(player: Player, payload: any): (boolean, string)
+		if resolved == nil then
+			resolved = resolveAction(actionName)
+		end
+		return resolved(player, payload)
+	end
+end
+
+local function dispatchActionMethod(actionName: string, methodName: string)
+	local resolved: any = nil
+	return function(player: Player, payload: any): (boolean, string)
+		if resolved == nil then
+			resolved = resolveAction(actionName)
+		end
+		local method = resolved[methodName]
+		return method(player, payload)
+	end
+end
 
 local BuildService = {}
 
@@ -36,19 +77,19 @@ local function withRateLimit(handler: (Player, any) -> (boolean, string))
 	end
 end
 
-BuildService.PlaceFloorArea = PlaceFloorArea
-BuildService.PlaceRoofArea = PlaceRoofArea
-BuildService.PlaceWallStrip = PlaceWallStrip
-BuildService.Build = Build
-BuildService.Destroy = DestroyAction
-BuildService.Move = Move
-BuildService.Rotate = Rotate
-BuildService.PlaceSurfaceMount = PlaceSurfaceMount
-BuildService.DestroySurfaceMount = DestroySurfaceMount
-BuildService.PaintSurface = PaintSurface.PaintSurface
-BuildService.PaintSurfaceBatch = PaintSurface.PaintSurfaceBatch
-BuildService.ConnectUtility = ConnectUtility
-BuildService.DisconnectUtility = DisconnectUtility
+BuildService.PlaceFloorArea = dispatchAction("PlaceFloorArea")
+BuildService.PlaceRoofArea = dispatchAction("PlaceRoofArea")
+BuildService.PlaceWallStrip = dispatchAction("PlaceWallStrip")
+BuildService.Build = dispatchAction("Build")
+BuildService.Destroy = dispatchAction("DestroyAction")
+BuildService.Move = dispatchAction("Move")
+BuildService.Rotate = dispatchAction("Rotate")
+BuildService.PlaceSurfaceMount = dispatchAction("PlaceSurfaceMount")
+BuildService.DestroySurfaceMount = dispatchAction("DestroySurfaceMount")
+BuildService.PaintSurface = dispatchActionMethod("PaintSurface", "PaintSurface")
+BuildService.PaintSurfaceBatch = dispatchActionMethod("PaintSurface", "PaintSurfaceBatch")
+BuildService.ConnectUtility = dispatchAction("ConnectUtility")
+BuildService.DisconnectUtility = dispatchAction("DisconnectUtility")
 
 function BuildService.Init()
 	Packets.PlaceRequest.OnServerInvoke = withRateLimit(BuildService.Build)
@@ -66,10 +107,11 @@ function BuildService.Init()
 	Packets.DisconnectUtilityRequest.OnServerInvoke = withRateLimit(BuildService.DisconnectUtility)
 
 	-- Stash packet handlers
-	StashPackets.StashItem.OnServerInvoke = withRateLimit(StashAction)
+	StashPackets.StashItem.OnServerInvoke = withRateLimit(dispatchAction("StashAction"))
 
 	StashPackets.GetStash.OnServerInvoke = function(player: Player): (boolean, string, any)
-		local items = StashAction.GetStashItems(player)
+		local stashAction = resolveAction("StashAction")
+		local items = stashAction.GetStashItems(player)
 		if not items then
 			return false, "Unable to load stash", nil
 		end
@@ -81,15 +123,16 @@ function BuildService.Init()
 		if not itemId or itemId == "" then
 			return false, "Invalid item ID"
 		end
-		if not StashAction.DeductFromStash(player, itemId) then
+		local stashAction = resolveAction("StashAction")
+		if not stashAction.DeductFromStash(player, itemId) then
 			return false, "Item not in stash"
 		end
 		local buildPayload = table.clone(payload)
 		buildPayload.SkipCost = true
-		local success, message = Build(player, buildPayload)
+		local success, message = BuildService.Build(player, buildPayload)
 		if not success then
 			-- Restore the deducted count on failure.
-			StashAction.AddToStash(player, itemId, 1)
+			stashAction.AddToStash(player, itemId, 1)
 		end
 		return success, message
 	end)
