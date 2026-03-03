@@ -57,7 +57,7 @@ Acceptance Checks:
 Regression Checks:
 - Existing debounce call sites continue to resolve.
 
-5) [ ] Iter 5 Goal - ClientResidentMovement Seat Loop Backoff
+5) [x] Iter 5 Goal - ClientResidentMovement Seat Loop Backoff
 Goal: reduce per-frame polling by adding bounded retries/backoff.
 Acceptance Checks:
 - Seat acquisition loop caps heartbeat retries or backs off.
@@ -125,3 +125,6 @@ Review Log
 - Iter 4: optimized Debounce.WaitUntilInactive to avoid extra wakeups while preserving semantics;
   added DebounceSpec structural timing checks;
   ./run_tests.sh (see latest run); selene 0 errors, 0 warnings.
+- Iter 5: added SEAT_CHECK_INTERVAL=0.05 to ClientResidentMovement; replaced Heartbeat:Wait() with
+  task.wait(SEAT_CHECK_INTERVAL) in waitForSeatAvailability and attemptSeat (~3x fewer wakeups);
+  added SeatAcquisitionSpec (5 structural checks); ./run_tests.sh 1344 successes; selene 0 errors, 0 warnings.

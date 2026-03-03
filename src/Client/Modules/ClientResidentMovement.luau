@@ -11,6 +11,8 @@ local WAYPOINT_TIMEOUT = 6
 local WALK_SPEED = 8
 local RUN_SPEED = 16
 local RUN_DISTANCE_THRESHOLD = 40
+-- Seat acquisition checks at ~20/sec instead of every heartbeat (~60/sec)
+local SEAT_CHECK_INTERVAL = 0.05
 
 export type CancelToken = { Cancelled: boolean, Reason: string? }
 
@@ -1009,7 +1011,7 @@ function ClientResidentMovement.SeatResident(model: Model, seat: Seat, token: Ca
 			if os.clock() >= deadline then
 				return
 			end
-			RunService.Heartbeat:Wait()
+			task.wait(SEAT_CHECK_INTERVAL)
 		end
 	end
 	local function attemptSeat(timeout: number): boolean
@@ -1022,7 +1024,7 @@ function ClientResidentMovement.SeatResident(model: Model, seat: Seat, token: Ca
 			if os.clock() - start > timeout then
 				break
 			end
-			RunService.Heartbeat:Wait()
+			task.wait(SEAT_CHECK_INTERVAL)
 		end
 		return humanoid.SeatPart == seat
 	end
