@@ -346,6 +346,50 @@ describe("WorldEventService", function()
 			assert.is_true(snap2.RotationId ~= id1)
 		end)
 	end)
+
+	-- ========== Schedule math ==========
+
+	describe("next-expiry scheduling", function()
+		-- Use a deterministic RNG for all schedule-math tests so they do not
+		-- advance the global math.random state (which could cause RNG-dependent
+		-- tests in other spec files to pick different events).
+		local fixedRng = function(min, _max) return min end
+
+		it("_GetNextWaitSeconds returns approximately full rotation duration right after rotation starts", function()
+			WorldEventService._SetRng(fixedRng)
+			WorldEventService.GetStateSnapshot() -- triggers ensureRotation
+			local wait = WorldEventService._GetNextWaitSeconds()
+			local duration = WorldEventService._GetRotationDuration()
+			-- Allow 1 second of slack for sequential clock calls
+			assert.is_true(wait >= duration - 1 and wait <= duration,
+				"wait should equal duration, got " .. tostring(wait))
+		end)
+
+		it("_GetNextWaitSeconds returns 1 (minimum) when rotation has expired", function()
+			WorldEventService._SetRng(fixedRng)
+			WorldEventService.GetStateSnapshot()
+			WorldEventService._ForceExpire()
+			local wait = WorldEventService._GetNextWaitSeconds()
+			assert.equals(1, wait)
+		end)
+
+		it("_GetNextWaitSeconds returns 1 (minimum) when clock is at rotation expiry", function()
+			WorldEventService._SetRng(fixedRng)
+			local snap = WorldEventService.GetStateSnapshot()
+			currentTime = snap.RotationEndsAt
+			local wait = WorldEventService._GetNextWaitSeconds()
+			assert.equals(1, wait)
+		end)
+
+		it("_GetNextWaitSeconds decreases as time advances", function()
+			WorldEventService._SetRng(fixedRng)
+			WorldEventService.GetStateSnapshot()
+			local wait1 = WorldEventService._GetNextWaitSeconds()
+			currentTime = currentTime + 100
+			local wait2 = WorldEventService._GetNextWaitSeconds()
+			assert.equals(wait1 - 100, wait2)
+		end)
+	end)
 end)
 
 -- ====================================================================
@@ -398,6 +442,14 @@ describe("WorldEventService: source structure", function()
 		assert.is_truthy(string.find(src, "craft_fair", 1, true))
 		assert.is_truthy(string.find(src, "property_showcase", 1, true))
 		assert.is_truthy(string.find(src, "neighborhood_cleanup", 1, true))
+	end)
+
+	it("WorldEventService.luau schedules next wake at rotation expiry rather than polling every 30s", function()
+		local src = readFile("src/Server/Services/WorldEventService.luau")
+		assert.is_nil(string.find(src, "task.wait(30)", 1, true),
+			"should not use fixed 30s polling")
+		assert.is_truthy(string.find(src, "EndsAt - clockFn()", 1, true),
+			"should compute wait from next expiry timestamp")
 	end)
 
 	it("WorldEventPackets.luau includes buff payload", function()

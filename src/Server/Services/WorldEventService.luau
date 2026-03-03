@@ -190,10 +190,11 @@ function WorldEventService.Init()
 			sendSnapshotToPlayer(player)
 		end
 
-		-- Periodic check: rotate events when the current cycle expires.
+		-- Schedule next wake at rotation expiry instead of polling every 30s.
 		task.defer(function()
 			while true do
-				task.wait(30)
+				local waitSeconds = math.max(1, currentRotation.EndsAt - clockFn())
+				task.wait(waitSeconds)
 				local now = clockFn()
 				if currentRotation.EndsAt <= now then
 					ensureRotation()
@@ -315,6 +316,10 @@ end
 
 function WorldEventService._GetRotationDuration()
 	return ROTATION_DURATION_SECONDS
+end
+
+function WorldEventService._GetNextWaitSeconds()
+	return math.max(1, currentRotation.EndsAt - clockFn())
 end
 
 return WorldEventService

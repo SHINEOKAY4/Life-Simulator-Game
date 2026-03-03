@@ -1,7 +1,7 @@
 # TODO - Life-Simulator-Game
 
 Optimization Sprint Roadmap (Iter 1–10, refreshed 2026-03-03)
-Status: Iter 2 complete — shim cleanup executed; tests and selene green.
+Status: Iter 3 complete — WorldEventService next-expiry scheduling; tests and selene green.
 
 Guiding Principles
 - Preserve all shipped behavior; no feature removal.
@@ -37,7 +37,7 @@ Acceptance Checks:
 Regression Checks:
 - Rojo tree still builds with Shared/Utilities as canonical.
 
-3) [ ] Iter 3 Goal - WorldEventService Scheduling Efficiency
+3) [x] Iter 3 Goal - WorldEventService Scheduling Efficiency
 Goal: replace fixed 30s polling loop with next-expiry scheduling logic.
 Acceptance Checks:
 - WorldEvent rotation schedule computed from next expiry timestamp.
@@ -119,3 +119,6 @@ Review Log
   ./run_tests.sh 1332 successes; selene 0 errors, 0 warnings.
 - Iter 2: removed unused Shared/Modules ActionBinder + ClickBinder shims;
   ./run_tests.sh clean; selene 0 errors, 0 warnings.
+- Iter 3: replaced fixed 30s poll with next-expiry scheduling in WorldEventService.Init();
+  added _GetNextWaitSeconds helper + 4 schedule-math specs + 1 structural test;
+  ./run_tests.sh 1337 successes; selene 0 errors, 0 warnings.
