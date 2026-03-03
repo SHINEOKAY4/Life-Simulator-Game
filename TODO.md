@@ -1,9 +1,12 @@
 # TODO - Life-Simulator-Game
 
 Sprint Roadmap (Iter 2–11, refreshed 2026-03-03)
-Status: Iter 6 complete — ChoreServiceSpec added; 1219 tests green, selene 0 errors
+Status: Iter 7 complete — WeatherServiceSpec added; 1228 tests green, selene 0 errors
 
 Review Log
+- Iter 7: origin/main fetch failed (HTTP 500); gh auth failed (treated as no open issue);
+  implemented Goal 4 (WeatherServiceSpec); 1228 successes, 0 failures;
+  selene 0 errors, 0 warnings.
 - Iter 6: merged origin/main; gh auth failed (treated as no open issue);
   implemented Goal 3 (ChoreServiceSpec); 1219 successes, 0 failures;
   selene 0 errors, 0 warnings.
@@ -47,7 +50,7 @@ Acceptance Checks:
 - Reward amount range is validated in at least one test.
 - Spec passes cleanly under busted.
 
-4) [ ] Goal 4 - WeatherService Spec
+4) [x] Goal 4 - WeatherService Spec
 Goal: test the weather-selection weight logic (replicated inline) and state
       structure for all four seasons.
 Acceptance Checks:
