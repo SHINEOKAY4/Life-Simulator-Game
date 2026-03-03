@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
+local StashPackets = require(ReplicatedStorage.Network.StashPackets)
 local ObjectPreview = require(script.Parent.ObjectPreview)
 local PlotBuilder = require(script.Parent.PlotBuilder)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
@@ -74,9 +75,16 @@ local function restoreDetachedPreview(): boolean
 		return false
 	end
 
-	object.Parent = originalParent --#TODO: Bug (The Parent property of 2:15:South:Wall is locked, current parent: NULL, new parent Container )
+	local restored = false
+	local ok, err = pcall(function()
+		object.Parent = originalParent
+		restored = true
+	end)
+	if not ok or not restored then
+		warn("Failed to restore detached preview:", err)
+		return false
+	end
 
-	-- Currently harmless but unsightly, ideally should be fixed properly
 	clearDetachedPreviewState()
 	return true
 end
@@ -247,6 +255,12 @@ local function PlaceSelectedPreview(object: Model)
 end
 
 function ObjectAction.Init()
+	PlotBuilder.SetDeleteObjectHandler(ObjectAction.Delete)
+	PlotBuilder.SetRotateObjectHandler(ObjectAction.Rotate)
+	PlotBuilder.SetSelectObjectHandler(function(object: Model)
+		ObjectAction.Move(object, object:GetPivot().Position)
+	end)
+
 	ObjectPreviewEnabled.Changed:Connect(function()
 		-- if object previewing is cancelled while in the middle of a move action, cancel the move action and reparent the object back to its original parent
 		if not ObjectPreviewEnabled.Value and ObjectActionContext.ClickMoveRequest.Enabled then
@@ -276,8 +290,6 @@ function ObjectAction.Init()
 end
 
 function ObjectAction.Move(object: Model, newPosition: Vector3)
-	print("Moving object:", object:GetFullName(), "to new position:", newPosition)
-	-- Implement movement logic here
 	-- Visual and mechanic goals: The original object gets parented to nil to sell the illusion of movement
 	-- The objectpreview of that object is now shown visually following the cursor to sell the illusion of movement
 	-- When the player clicks a position during object previewing, to place must send a move request to the server with the new position
@@ -331,7 +343,6 @@ function ObjectAction.Move(object: Model, newPosition: Vector3)
 end
 
 function ObjectAction.Rotate(object: Model, rotation: Vector3)
-	print("Rotating object:", object:GetFullName(), "to new rotation:", rotation)
 	local itemId = getObjectItemId(object)
 	if not itemId then
 		warn("Unknown item id for rotation")
@@ -365,10 +376,6 @@ function ObjectAction.Rotate(object: Model, rotation: Vector3)
 		local cycle: { Facing } = { "North", "East", "South", "West" }
 		local index = table.find(cycle, currentFacing) or 0
 		nextFacing = cycle[(index % #cycle) + 1]
-	end
-
-	if nextFacing == currentFacing then
-		nextFacing = currentFacing
 	end
 
 	local cellXAttr = tonumber(object:GetAttribute("CellX"))
@@ -405,8 +412,6 @@ function ObjectAction.Rotate(object: Model, rotation: Vector3)
 end
 
 function ObjectAction.Delete(object: Model)
-	print("Deleting object:", object:GetFullName())
-	-- Implement deletion logic here
 	local itemId = getObjectItemId(object)
 	if not itemId then
 		warn("Cannot delete object without item id")
@@ -463,8 +468,6 @@ function ObjectAction.Delete(object: Model)
 end
 
 function ObjectAction.Copy(object: Model)
-	print("Copying object:", object:GetFullName())
-	-- Implement copy logic here
 	local itemId = getObjectItemId(object)
 	if not itemId then
 		warn("Cannot copy object without item id")
@@ -473,6 +476,53 @@ function ObjectAction.Copy(object: Model)
 	local facing = object:GetAttribute("Facing") :: string
 	IsInCopyMode = true
 	PlotBuilder.PreviewSelected(itemId, facing)
+end
+
+-- Picks up a placed item from the plot and sends it to the player's stash.
+function ObjectAction.PickUp(object: Model)
+	local itemId = getObjectItemId(object)
+	if not itemId then
+		warn("Cannot pick up object without item id")
+		return
+	end
+
+	local placementTypeAttr = object:GetAttribute("PlacementType")
+	if placementTypeAttr == "SurfaceMounted" then
+		warn("[ObjectAction.PickUp] Surface-mounted items cannot be stashed directly")
+		return
+	end
+
+	local cellXValue = tonumber(object:GetAttribute("CellX"))
+	local cellZValue = tonumber(object:GetAttribute("CellZ"))
+	if not cellXValue or not cellZValue then
+		warn("Cannot pick up object without cell coordinates")
+		return
+	end
+
+	local facingAttr = object:GetAttribute("Facing")
+	local facing = if typeof(facingAttr) == "string" and facingAttr ~= "" then facingAttr else "North"
+
+	local levelAttr = object:GetAttribute("Level")
+	local levelNumber = if typeof(levelAttr) == "number" then levelAttr else PlotStateStore.GetActiveLevel()
+	if typeof(levelNumber) ~= "number" then
+		levelNumber = 0
+	end
+	levelNumber = math.clamp(levelNumber, 0, 255)
+
+	local subSlotAttr = object:GetAttribute("SubSlotId")
+	local subSlotId = if typeof(subSlotAttr) == "string" and subSlotAttr ~= "" then subSlotAttr else ""
+
+	local success, message = StashPackets.StashItem:Fire({
+		ItemId = itemId,
+		CellX = cellXValue,
+		CellZ = cellZValue,
+		Facing = facing,
+		Level = levelNumber,
+		SubSlotId = subSlotId,
+	})
+	if not success then
+		warn("[ObjectAction.PickUp] Stash failed:", message)
+	end
 end
 
 function ObjectAction.Close()

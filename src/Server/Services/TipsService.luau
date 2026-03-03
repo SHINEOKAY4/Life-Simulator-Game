@@ -1,26 +1,76 @@
 --!strict
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerScriptService = game:GetService("ServerScriptService")
-local HttpService = game:GetService("HttpService")
-local Workspace = game:GetService("Workspace")
-local Players = game:GetService("Players")
 
-local CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
-local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
-local TipsPackets = require(ReplicatedStorage.Network.TipsPackets)
-local WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
-local ResidentService = require(ServerScriptService.Server.Services.ResidentService)
+local function hasRobloxRuntime()
+	if type(game) ~= "userdata" then
+		return false
+	end
+	return pcall(function()
+		return game:GetService("Players")
+	end)
+end
+
+local IS_ROBLOX = hasRobloxRuntime()
+
+local ReplicatedStorage = nil
+local ServerScriptService = nil
+local HttpService = nil
+local Workspace = nil
+local Players = nil
+
+local CurrencyService = nil
+local PlayerSession = nil
+local TipsPackets = nil
+local WorldUpdate = nil
+local ResidentService = nil
+local WorldEventService = nil
+
+if IS_ROBLOX then
+	ReplicatedStorage = game:GetService("ReplicatedStorage")
+	ServerScriptService = game:GetService("ServerScriptService")
+	HttpService = game:GetService("HttpService")
+	Workspace = game:GetService("Workspace")
+	Players = game:GetService("Players")
+
+	CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
+	PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
+	TipsPackets = require(ReplicatedStorage.Network.TipsPackets)
+	WorldUpdate = require(ServerScriptService.Server.Utilities.WorldUpdate)
+	ResidentService = require(ServerScriptService.Server.Services.ResidentService)
+	WorldEventService = require(ServerScriptService.Server.Services.WorldEventService)
+else
+	HttpService = _G.HttpService or { GenerateGUID = function() return tostring(os.clock()) end }
+	local okWorkspace, workspaceService = pcall(function()
+		return game:GetService("Workspace")
+	end)
+	if okWorkspace and workspaceService then
+		Workspace = workspaceService
+	else
+		Workspace = { Raycast = function() return nil end }
+	end
+	local okPlayers, playersService = pcall(function()
+		return game:GetService("Players")
+	end)
+	if okPlayers and playersService then
+		Players = playersService
+	else
+		Players = { GetPlayers = function() return {} end }
+	end
+	TipsPackets = { TipDropped = { FireClient = function() end }, ClaimTip = { OnServerEvent = { Connect = function() end } } }
+	WorldUpdate = { Subscribe = function() end }
+	ResidentService = { GetResidents = function() return {} end }
+	local okServer, serverScriptService = pcall(function()
+		return game:GetService("ServerScriptService")
+	end)
+	if okServer and serverScriptService and serverScriptService.Server and serverScriptService.Server.Services then
+		WorldEventService = serverScriptService.Server.Services.WorldEventService
+	else
+		WorldEventService = nil
+	end
+end
 
 local TipsService = {}
 
-type TipData = {
-	Amount: number,
-	ResidentName: string,
-	Reason: string?,
-	ExpiresAt: number,
-}
-
-local ActiveTips: { [number]: { [string]: TipData } } = {}
+local ActiveTips = {}
 local TIP_LIFETIME = 45 -- Seconds (slightly longer than client to allow for latency)
 local UPDATE_TASK_NAME = "TipsService"
 local UPDATE_INTERVAL = 1
@@ -29,7 +79,32 @@ local TIP_CHECK_INTERVAL = 60
 
 local lastTipCheck = 0
 
-local function getGroundPosition(position: Vector3, ignoreList: { Instance }?): Vector3
+local function getTipMultiplier()
+	if WorldEventService and WorldEventService.GetBuffMultiplier then
+		local ok, multiplier = pcall(WorldEventService.GetBuffMultiplier, "TipMultiplier")
+		if ok and type(multiplier) == "number" and multiplier > 0 then
+			return multiplier
+		end
+	end
+	return 1.0
+end
+
+local function applyTipMultiplier(amount)
+	if amount <= 0 then
+		return amount
+	end
+	local adjusted = amount * getTipMultiplier()
+	if adjusted ~= adjusted or adjusted <= 0 then
+		return amount
+	end
+	local rounded = math.floor(adjusted + 0.5)
+	if rounded < 1 then
+		return 1
+	end
+	return rounded
+end
+
+local function getGroundPosition(position, ignoreList)
 	local rayOrigin = position + Vector3.new(0, 5, 0)
 	local rayDirection = Vector3.new(0, -50, 0)
 	local params = RaycastParams.new()
@@ -43,7 +118,7 @@ local function getGroundPosition(position: Vector3, ignoreList: { Instance }?): 
 	return position
 end
 
-local function stepTips(_dt: number)
+local function stepTips(_dt)
 	local now = os.clock()
 	if now - lastTipCheck < TIP_CHECK_INTERVAL then
 		return
@@ -100,21 +175,24 @@ function TipsService.Init()
 	WorldUpdate.Subscribe(UPDATE_TASK_NAME, UPDATE_INTERVAL, stepTips)
 end
 
-function TipsService.SpawnTip(
-	player: Player,
-	residentName: string,
-	amount: number,
-	sourcePosition: Vector3?,
-	reason: string?
-)
+function TipsService.SpawnTip(player, residentName, amount, sourcePosition, reason)
+	if not WorldEventService then
+		local okServer, serverScriptService = pcall(function()
+			return game:GetService("ServerScriptService")
+		end)
+		if okServer and serverScriptService and serverScriptService.Server and serverScriptService.Server.Services then
+			WorldEventService = serverScriptService.Server.Services.WorldEventService
+		end
+	end
 	local userId = player.UserId
+	local tipAmount = applyTipMultiplier(amount)
 	if not ActiveTips[userId] then
 		ActiveTips[userId] = {}
 	end
 
 	local tipId = HttpService:GenerateGUID(false)
 	ActiveTips[userId][tipId] = {
-		Amount = amount,
+		Amount = tipAmount,
 		ResidentName = residentName,
 		Reason = reason,
 		ExpiresAt = os.clock() + TIP_LIFETIME,
@@ -123,7 +201,7 @@ function TipsService.SpawnTip(
 	-- Cleanup old tips occasionally
 	local count = 0
 	for _ in pairs(ActiveTips[userId]) do
-		count += 1
+		count = count + 1
 	end
 	if count > 20 then
 		local now = os.clock()
@@ -139,13 +217,27 @@ function TipsService.SpawnTip(
 		groundPos = getGroundPosition(sourcePosition, { player.Character })
 	end
 
-	TipsPackets.TipDropped:FireClient(player, {
-		TipId = tipId,
-		Amount = amount,
-		SourcePosition = groundPos,
-		Reason = reason or "Tip",
-		ResidentName = residentName or "",
-	})
+	local packets = TipsService._TipsPackets or TipsPackets
+	if packets and packets.TipDropped then
+		packets.TipDropped:FireClient(player, {
+			TipId = tipId,
+			Amount = tipAmount,
+			SourcePosition = groundPos,
+			Reason = reason or "Tip",
+			ResidentName = residentName or "",
+		})
+	end
+end
+
+-- Test hook for patching TipsPackets in specs.
+TipsService._TipsPackets = TipsPackets
+
+function TipsService._SetPacketsForTests(packets)
+	TipsService._TipsPackets = packets
+end
+
+function TipsService._SetWorldEventServiceForTests(service)
+	WorldEventService = service
 end
 
 return TipsService

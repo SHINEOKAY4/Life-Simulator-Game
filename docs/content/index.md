@@ -14,4 +14,6 @@ Use the sidebar to navigate generated pages.
 
 Manual references:
 
+- [Gameplay Systems Overview](./GameplayOverview)
+- [Contributor Setup](./ContributorSetup)
 - [Seasonal Events Rewards](./SeasonalEvents)

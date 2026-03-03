@@ -26,6 +26,10 @@ local calendarFrame: Frame? = nil
 local milestoneFrame: Frame? = nil
 local statsLabel: TextLabel? = nil
 
+local streakWarningLabel: TextLabel? = nil
+local challengeQuestLabel: TextLabel? = nil
+local challengeStateLabel: TextLabel? = nil
+
 local open = false
 local initialized = false
 local countdownActive = false
@@ -42,6 +46,17 @@ local DAY_COLORS = {
 
 local MILESTONE_COLOR = Color3.fromRGB(181, 134, 52)
 local MILESTONE_CLAIMED_COLOR = Color3.fromRGB(56, 102, 76)
+
+local DAILY_QUEST_NAMES: { [string]: string } = {
+	daily_challenge_collect = "Collect Resources",
+	daily_challenge_visit = "Visit Neighbors",
+	daily_challenge_place = "Place Furniture",
+}
+
+local QUEST_STATE_DISPLAY: { [string]: { text: string, color: Color3 } } = {
+	in_progress = { text = "In Progress", color = Color3.fromRGB(80, 160, 230) },
+	completed   = { text = "Completed!", color = Color3.fromRGB(80, 200, 120) },
+}
 
 local function formatTime(seconds: number): string
 	if seconds <= 0 then
@@ -254,7 +269,7 @@ local function ensureGui()
 	window.Name = "Window"
 	window.AnchorPoint = Vector2.new(0.5, 0.5)
 	window.Position = UDim2.fromScale(0.5, 0.5)
-	window.Size = UDim2.fromOffset(640, 480)
+	window.Size = UDim2.fromOffset(640, 520)
 	window.BackgroundColor3 = Color3.fromRGB(24, 29, 38)
 	window.BorderSizePixel = 0
 	window.Parent = overlay
@@ -423,11 +438,82 @@ local function ensureGui()
 	countdown.Parent = claimSection
 	countdownLabel = countdown
 
+	-- Streak expiry warning banner (hidden until InGraceWindow is true)
+	local warnLabel = Instance.new("TextLabel")
+	warnLabel.Name = "StreakWarning"
+	warnLabel.BackgroundColor3 = Color3.fromRGB(160, 80, 30)
+	warnLabel.BackgroundTransparency = 1
+	warnLabel.Position = UDim2.fromOffset(20, 234)
+	warnLabel.Size = UDim2.new(1, -40, 0, 22)
+	warnLabel.Font = Enum.Font.GothamMedium
+	warnLabel.TextSize = 12
+	warnLabel.TextColor3 = Color3.fromRGB(255, 210, 120)
+	warnLabel.TextXAlignment = Enum.TextXAlignment.Center
+	warnLabel.Text = ""
+	warnLabel.Visible = false
+	warnLabel.Parent = window
+	streakWarningLabel = warnLabel
+	local warnCorner = Instance.new("UICorner")
+	warnCorner.CornerRadius = UDim.new(0, 6)
+	warnCorner.Parent = warnLabel
+
+	-- Daily challenge section
+	local challengeTitle = Instance.new("TextLabel")
+	challengeTitle.Name = "ChallengeTitle"
+	challengeTitle.BackgroundTransparency = 1
+	challengeTitle.Position = UDim2.fromOffset(24, 262)
+	challengeTitle.Size = UDim2.new(1, -48, 0, 18)
+	challengeTitle.Font = Enum.Font.GothamBold
+	challengeTitle.TextSize = 14
+	challengeTitle.TextColor3 = Color3.fromRGB(233, 240, 255)
+	challengeTitle.TextXAlignment = Enum.TextXAlignment.Left
+	challengeTitle.Text = "Today's Challenge"
+	challengeTitle.Parent = window
+
+	local challengePanel = Instance.new("Frame")
+	challengePanel.Name = "DailyChallengePanel"
+	challengePanel.Position = UDim2.fromOffset(20, 282)
+	challengePanel.Size = UDim2.new(1, -40, 0, 34)
+	challengePanel.BackgroundColor3 = Color3.fromRGB(18, 22, 30)
+	challengePanel.BackgroundTransparency = 0.08
+	challengePanel.BorderSizePixel = 0
+	challengePanel.Parent = window
+
+	local challengePanelCorner = Instance.new("UICorner")
+	challengePanelCorner.CornerRadius = UDim.new(0, 8)
+	challengePanelCorner.Parent = challengePanel
+
+	local challengeQuestLbl = Instance.new("TextLabel")
+	challengeQuestLbl.Name = "QuestName"
+	challengeQuestLbl.BackgroundTransparency = 1
+	challengeQuestLbl.Position = UDim2.fromOffset(10, 8)
+	challengeQuestLbl.Size = UDim2.new(0.65, -10, 0, 18)
+	challengeQuestLbl.Font = Enum.Font.GothamMedium
+	challengeQuestLbl.TextSize = 13
+	challengeQuestLbl.TextColor3 = Color3.fromRGB(220, 232, 250)
+	challengeQuestLbl.TextXAlignment = Enum.TextXAlignment.Left
+	challengeQuestLbl.Text = "—"
+	challengeQuestLbl.Parent = challengePanel
+	challengeQuestLabel = challengeQuestLbl
+
+	local challengeStateLbl = Instance.new("TextLabel")
+	challengeStateLbl.Name = "QuestState"
+	challengeStateLbl.BackgroundTransparency = 1
+	challengeStateLbl.AnchorPoint = Vector2.new(1, 0.5)
+	challengeStateLbl.Position = UDim2.new(1, -10, 0.5, 0)
+	challengeStateLbl.Size = UDim2.fromOffset(100, 18)
+	challengeStateLbl.Font = Enum.Font.GothamMedium
+	challengeStateLbl.TextSize = 12
+	challengeStateLbl.TextXAlignment = Enum.TextXAlignment.Right
+	challengeStateLbl.Text = ""
+	challengeStateLbl.Parent = challengePanel
+	challengeStateLabel = challengeStateLbl
+
 	-- Milestones section
 	local milestonesTitle = Instance.new("TextLabel")
 	milestonesTitle.Name = "MilestonesTitle"
 	milestonesTitle.BackgroundTransparency = 1
-	milestonesTitle.Position = UDim2.fromOffset(24, 242)
+	milestonesTitle.Position = UDim2.fromOffset(24, 322)
 	milestonesTitle.Size = UDim2.new(1, -48, 0, 22)
 	milestonesTitle.Font = Enum.Font.GothamBold
 	milestonesTitle.TextSize = 16
@@ -438,8 +524,8 @@ local function ensureGui()
 
 	local milestones = Instance.new("Frame")
 	milestones.Name = "Milestones"
-	milestones.Position = UDim2.fromOffset(20, 268)
-	milestones.Size = UDim2.new(1, -40, 0, 190)
+	milestones.Position = UDim2.fromOffset(20, 346)
+	milestones.Size = UDim2.new(1, -40, 0, 164)
 	milestones.BackgroundColor3 = Color3.fromRGB(18, 22, 30)
 	milestones.BackgroundTransparency = 0.08
 	milestones.BorderSizePixel = 0
@@ -464,8 +550,8 @@ local function ensureGui()
 
 	-- Mobile constraint
 	local mobileConstraint = Instance.new("UISizeConstraint")
-	mobileConstraint.MinSize = Vector2.new(420, 460)
-	mobileConstraint.MaxSize = Vector2.new(720, 520)
+	mobileConstraint.MinSize = Vector2.new(420, 500)
+	mobileConstraint.MaxSize = Vector2.new(720, 560)
 	mobileConstraint.Parent = window
 
 	-- Wire claim button
@@ -497,6 +583,34 @@ local function renderCalendar(currentStreak: number, canClaim: boolean)
 		local reward = DailyRewardDefinitions.GetRewardForStreak(day)
 		local cell = createDayCell(day, reward, cyclePosition, canClaim)
 		cell.Parent = calendarFrame
+	end
+end
+
+local function renderDailyChallenge(challenge: { [string]: any }?)
+	if not challengeQuestLabel or not challengeStateLabel then
+		return
+	end
+
+	if not challenge or challenge.QuestId == "" then
+		challengeQuestLabel.Text = "No challenge assigned"
+		challengeQuestLabel.TextColor3 = Color3.fromRGB(140, 152, 170)
+		challengeStateLabel.Text = ""
+		return
+	end
+
+	local questId = tostring(challenge.QuestId or "")
+	local questName = DAILY_QUEST_NAMES[questId] or questId
+	challengeQuestLabel.Text = questName
+	challengeQuestLabel.TextColor3 = Color3.fromRGB(220, 232, 250)
+
+	local rawState = tostring(challenge.QuestState or "")
+	local display = QUEST_STATE_DISPLAY[rawState]
+	if display then
+		challengeStateLabel.Text = display.text
+		challengeStateLabel.TextColor3 = display.color
+	else
+		challengeStateLabel.Text = "Not Started"
+		challengeStateLabel.TextColor3 = Color3.fromRGB(140, 152, 170)
 	end
 end
 
@@ -561,8 +675,29 @@ local function renderStatus(status: { [string]: any })
 	statsLabel.Text = string.format("Claimed %d times | $%d earned", totalClaimed, totalCash)
 
 	renderCalendar(currentStreak, canClaim)
+	renderDailyChallenge(status.DailyChallenge)
 	renderMilestones(longestStreak, status.MilestonesClaimed)
 	updateClaimButton(canClaim, secondsUntilClaim)
+
+	-- Streak expiry warning banner
+	if streakWarningLabel then
+		local inGrace = status.InGraceWindow == true
+		local secondsLeft = math.max(0, math.floor(tonumber(status.SecondsUntilStreakExpiry) or 0))
+		if inGrace and secondsLeft > 0 then
+			local isUrgent = status.StreakWarning == true
+			streakWarningLabel.Text = string.format(
+				"Streak expires in %s — claim now to keep it!",
+				formatTime(secondsLeft)
+			)
+			streakWarningLabel.TextColor3 = if isUrgent
+				then Color3.fromRGB(255, 120, 60)
+				else Color3.fromRGB(255, 210, 120)
+			streakWarningLabel.BackgroundTransparency = if isUrgent then 0.15 else 1
+			streakWarningLabel.Visible = true
+		else
+			streakWarningLabel.Visible = false
+		end
+	end
 
 	-- Start countdown loop if on cooldown
 	if not canClaim and secondsUntilClaim > 0 then

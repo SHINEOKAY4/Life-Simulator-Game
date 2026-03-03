@@ -3,27 +3,31 @@
 -- Type validation and normalization utilities
 
 local ValidationUtils = {}
+local getType = typeof or type
 
-function ValidationUtils.EnsureNumber(value: any, fallback: number): number
-	return if typeof(value) == "number" then value else fallback
-end
-
-function ValidationUtils.EnsureString(value: any, fallback: string?): string?
-	if typeof(value) == "string" and value ~= "" then
+function ValidationUtils.EnsureNumber(value, fallback)
+	if getType(value) == "number" then
 		return value
 	end
 	return fallback
 end
 
-function ValidationUtils.EnsureTable<T>(value: any, fallback: T?): T
-	if typeof(value) == "table" then
-		return value :: T
+function ValidationUtils.EnsureString(value, fallback)
+	if getType(value) == "string" and value ~= "" then
+		return value
 	end
-	return (fallback or {}) :: T
+	return fallback
 end
 
-function ValidationUtils.IsValidNumber(value: any, minValue: number?): boolean
-	if typeof(value) ~= "number" then
+function ValidationUtils.EnsureTable(value, fallback)
+	if getType(value) == "table" then
+		return value
+	end
+	return fallback or {}
+end
+
+function ValidationUtils.IsValidNumber(value, minValue)
+	if getType(value) ~= "number" then
 		return false
 	end
 	if minValue and value < minValue then

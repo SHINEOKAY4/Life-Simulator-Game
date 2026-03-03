@@ -31,6 +31,14 @@ type Snapshot = {
 	TotalCount: number,
 }
 
+type StatsSummary = {
+	TotalCount: number,
+	UnlockedCount: number,
+	ClaimedCount: number,
+	CompletionPercent: number,
+	Categories: { [string]: { Total: number, Unlocked: number, Claimed: number } },
+}
+
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
@@ -39,9 +47,15 @@ local windowFrame: Frame? = nil
 local progressLabel: TextLabel? = nil
 local listFrame: ScrollingFrame? = nil
 local emptyLabel: TextLabel? = nil
+local summaryCard: Frame? = nil
+local summaryCompletionLabel: TextLabel? = nil
+local summaryDetailLabel: TextLabel? = nil
+local summaryCategoryLabel: TextLabel? = nil
+local claimAllButton: TextButton? = nil
 local open = false
 local initialized = false
 local currentSnapshot: Snapshot? = nil
+local currentSummary: StatsSummary? = nil
 local rowById: { [string]: AchievementRow } = {}
 
 local function formatRewardText(row: AchievementRow): string
@@ -59,6 +73,85 @@ local function formatRewardText(row: AchievementRow): string
 		chunks[#chunks + 1] = string.format("%d XP", math.floor(xp + 0.5))
 	end
 	return table.concat(chunks, " + ")
+end
+
+local function formatCategorySummary(summary: StatsSummary): string
+	local categories = summary.Categories
+	if typeof(categories) ~= "table" then
+		return ""
+	end
+
+	local names = {}
+	for name in pairs(categories) do
+		if type(name) == "string" and name ~= "" then
+			names[#names + 1] = name
+		end
+	end
+	if #names == 0 then
+		return ""
+	end
+	table.sort(names)
+
+	local parts = {}
+	for _, name in ipairs(names) do
+		local entry = categories[name]
+		if typeof(entry) == "table" then
+			local total = math.max(0, math.floor(tonumber(entry.Total) or 0))
+			local unlocked = math.max(0, math.floor(tonumber(entry.Unlocked) or 0))
+			local badge = BadgeService.GetBadgeForCategory(name)
+			local label = name
+			if typeof(badge) == "table" and typeof(badge.Label) == "string" and badge.Label ~= "" then
+				label = badge.Label
+			end
+			parts[#parts + 1] = string.format("%s %d/%d", label, unlocked, total)
+		end
+	end
+
+	return table.concat(parts, " | ")
+end
+
+local function updateSummaryLabels(summary: StatsSummary?)
+	if not summaryCompletionLabel or not summaryDetailLabel or not summaryCategoryLabel then
+		return
+	end
+
+	if not summary then
+		summaryCompletionLabel.Text = "Completion: --%"
+		summaryDetailLabel.Text = "Unlocked --/-- | Claimed --/--"
+		summaryCategoryLabel.Text = "Categories: --"
+		return
+	end
+
+	local total = math.max(0, math.floor(tonumber(summary.TotalCount) or 0))
+	local unlocked = math.max(0, math.floor(tonumber(summary.UnlockedCount) or 0))
+	local claimed = math.max(0, math.floor(tonumber(summary.ClaimedCount) or 0))
+	local completion = math.max(0, math.floor(tonumber(summary.CompletionPercent) or 0))
+
+	summaryCompletionLabel.Text = string.format("Completion: %d%%", completion)
+	summaryDetailLabel.Text = string.format("Unlocked %d/%d | Claimed %d/%d", unlocked, total, claimed, total)
+
+	local categoryText = formatCategorySummary(summary)
+	if categoryText ~= "" then
+		summaryCategoryLabel.Text = categoryText
+	else
+		summaryCategoryLabel.Text = "Categories: --"
+	end
+end
+
+local function applySummary(summary: StatsSummary?)
+	currentSummary = summary
+	updateSummaryLabels(summary)
+end
+
+local function requestStatsSummary()
+	task.spawn(function()
+		local ok, _, payload = AchievementPackets.GetStatsSummary:InvokeServer()
+		if ok and typeof(payload) == "table" then
+			applySummary(payload :: StatsSummary)
+		else
+			applySummary(nil)
+		end
+	end)
 end
 
 local function ensureGui()
@@ -165,6 +258,23 @@ local function ensureGui()
 	progress.Parent = header
 	progressLabel = progress
 
+	local claimAll = Instance.new("TextButton")
+	claimAll.Name = "ClaimAll"
+	claimAll.AnchorPoint = Vector2.new(1, 0)
+	claimAll.Position = UDim2.new(1, -66, 0, 10)
+	claimAll.Size = UDim2.fromOffset(140, 28)
+	claimAll.Font = Enum.Font.GothamBold
+	claimAll.TextSize = 13
+	claimAll.Text = "Claim All"
+	claimAll.TextColor3 = Color3.fromRGB(230, 243, 255)
+	claimAll.BackgroundColor3 = Color3.fromRGB(52, 124, 203)
+	claimAll.AutoButtonColor = true
+	claimAll.Parent = header
+	local claimAllCorner = Instance.new("UICorner")
+	claimAllCorner.CornerRadius = UDim.new(0, 8)
+	claimAllCorner.Parent = claimAll
+	claimAllButton = claimAll
+
 	local body = Instance.new("Frame")
 	body.Name = "Body"
 	body.BackgroundTransparency = 1
@@ -200,6 +310,95 @@ local function ensureGui()
 	empty.Visible = false
 	empty.Parent = list
 	emptyLabel = empty
+end
+
+local function setClaimAllState(enabled: boolean)
+	if not claimAllButton then
+		return
+	end
+	claimAllButton.Active = enabled
+	claimAllButton.AutoButtonColor = enabled
+	if enabled then
+		claimAllButton.Text = "Claim All"
+		claimAllButton.BackgroundColor3 = Color3.fromRGB(52, 124, 203)
+		claimAllButton.TextColor3 = Color3.fromRGB(230, 243, 255)
+	else
+		claimAllButton.Text = "No Rewards"
+		claimAllButton.BackgroundColor3 = Color3.fromRGB(73, 79, 94)
+		claimAllButton.TextColor3 = Color3.fromRGB(192, 198, 211)
+	end
+end
+
+local function makeSummaryCard(summary: StatsSummary?, layoutOrder: number): Frame
+	local card = Instance.new("Frame")
+	card.Name = "SummaryCard"
+	card.LayoutOrder = layoutOrder
+	card.Size = UDim2.new(1, -8, 0, 96)
+	card.BackgroundColor3 = Color3.fromRGB(27, 33, 45)
+	card.BorderSizePixel = 0
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = card
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 1
+	stroke.Transparency = 0.55
+	stroke.Color = Color3.fromRGB(95, 116, 153)
+	stroke.Parent = card
+
+	local title = Instance.new("TextLabel")
+	title.Name = "SummaryTitle"
+	title.BackgroundTransparency = 1
+	title.Position = UDim2.fromOffset(14, 8)
+	title.Size = UDim2.new(1, -28, 0, 16)
+	title.Font = Enum.Font.GothamBold
+	title.TextSize = 14
+	title.TextColor3 = Color3.fromRGB(192, 206, 226)
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.Text = "Progress Overview"
+	title.Parent = card
+
+	local completion = Instance.new("TextLabel")
+	completion.Name = "Completion"
+	completion.BackgroundTransparency = 1
+	completion.Position = UDim2.fromOffset(14, 26)
+	completion.Size = UDim2.new(1, -28, 0, 20)
+	completion.Font = Enum.Font.GothamBold
+	completion.TextSize = 18
+	completion.TextColor3 = Color3.fromRGB(241, 247, 255)
+	completion.TextXAlignment = Enum.TextXAlignment.Left
+	completion.Parent = card
+	summaryCompletionLabel = completion
+
+	local detail = Instance.new("TextLabel")
+	detail.Name = "Detail"
+	detail.BackgroundTransparency = 1
+	detail.Position = UDim2.fromOffset(14, 48)
+	detail.Size = UDim2.new(1, -28, 0, 16)
+	detail.Font = Enum.Font.GothamMedium
+	detail.TextSize = 12
+	detail.TextColor3 = Color3.fromRGB(168, 184, 206)
+	detail.TextXAlignment = Enum.TextXAlignment.Left
+	detail.Parent = card
+	summaryDetailLabel = detail
+
+	local categories = Instance.new("TextLabel")
+	categories.Name = "Categories"
+	categories.BackgroundTransparency = 1
+	categories.Position = UDim2.fromOffset(14, 64)
+	categories.Size = UDim2.new(1, -28, 0, 26)
+	categories.Font = Enum.Font.Gotham
+	categories.TextSize = 11
+	categories.TextColor3 = Color3.fromRGB(155, 170, 192)
+	categories.TextXAlignment = Enum.TextXAlignment.Left
+	categories.TextYAlignment = Enum.TextYAlignment.Top
+	categories.TextWrapped = true
+	categories.Parent = card
+	summaryCategoryLabel = categories
+
+	updateSummaryLabels(summary)
+	return card
 end
 
 local function makeCard(row: AchievementRow, layoutOrder: number): Frame
@@ -382,6 +581,10 @@ local function renderSnapshot(snapshot: Snapshot?)
 
 	currentSnapshot = snapshot
 	rowById = {}
+	summaryCard = nil
+	summaryCompletionLabel = nil
+	summaryDetailLabel = nil
+	summaryCategoryLabel = nil
 
 	for _, child in ipairs(listFrame:GetChildren()) do
 		if child:IsA("Frame") then
@@ -392,10 +595,17 @@ local function renderSnapshot(snapshot: Snapshot?)
 	if not snapshot then
 		progressLabel.Text = "0 / 0 claimed"
 		emptyLabel.Visible = true
+		setClaimAllState(false)
 		return
 	end
 
 	progressLabel.Text = string.format("%d / %d claimed", snapshot.ClaimedCount or 0, snapshot.TotalCount or 0)
+	local claimableCount = math.max(0, (snapshot.UnlockedCount or 0) - (snapshot.ClaimedCount or 0))
+	setClaimAllState(claimableCount > 0)
+
+	local summary = makeSummaryCard(currentSummary, 0)
+	summary.Parent = listFrame
+	summaryCard = summary
 
 	local rows = snapshot.Achievements
 	if typeof(rows) ~= "table" or #rows == 0 then
@@ -419,7 +629,7 @@ local function renderSnapshot(snapshot: Snapshot?)
 	emptyLabel.Visible = false
 	for index, row in ipairs(rows) do
 		rowById[row.Id] = row
-		local card = makeCard(row, index)
+		local card = makeCard(row, index + 1)
 		card.Parent = listFrame
 	end
 end
@@ -429,6 +639,7 @@ local function onSnapshotUpdated(payload: any)
 		return
 	end
 	renderSnapshot(payload :: Snapshot)
+	requestStatsSummary()
 end
 
 local function onAchievementUnlocked(payload: any)
@@ -473,6 +684,52 @@ function AchievementUI.Init()
 	ensureGui()
 	AchievementPackets.SnapshotUpdated.OnClientEvent:Connect(onSnapshotUpdated)
 	AchievementPackets.AchievementUnlocked.OnClientEvent:Connect(onAchievementUnlocked)
+	if claimAllButton then
+		claimAllButton.Activated:Connect(function()
+			setClaimAllState(false)
+			if claimAllButton then
+				claimAllButton.Text = "Claiming..."
+			end
+			local ok, msg, payload = AchievementPackets.ClaimAllAchievements:InvokeServer()
+			if not ok then
+				Notification.Show({
+					Title = "Claim Failed",
+					Text = if typeof(msg) == "string" then msg else "Could not claim achievements.",
+					Duration = 3,
+					BackgroundColor = Color3.fromRGB(132, 64, 64),
+				})
+				setClaimAllState(true)
+				return
+			end
+			local data = if typeof(payload) == "table" then payload else {}
+			local cash = math.floor(tonumber(data.RewardCash) or 0)
+			local xp = math.floor(tonumber(data.RewardExperience) or 0)
+			local claimedIds = data.ClaimedIds
+			local claimedCount = if typeof(claimedIds) == "table" then #claimedIds else 0
+			if claimedCount > 0 then
+				Notification.Show({
+					Title = "Rewards Claimed",
+					Text = string.format("%d achievements claimed: +$%d, +%d XP", claimedCount, cash, xp),
+					Duration = 4,
+					BackgroundColor = Color3.fromRGB(52, 130, 90),
+				})
+			else
+				Notification.Show({
+					Title = "No Rewards",
+					Text = "No achievements ready to claim.",
+					Duration = 3,
+					BackgroundColor = Color3.fromRGB(80, 90, 100),
+				})
+			end
+			local okSnapshot, _, snapshotPayload = AchievementPackets.GetSnapshot:InvokeServer()
+			if okSnapshot and typeof(snapshotPayload) == "table" then
+				renderSnapshot(snapshotPayload :: Snapshot)
+			else
+				renderSnapshot(nil)
+			end
+			requestStatsSummary()
+		end)
+	end
 
 	local ok, _, payload = AchievementPackets.GetSnapshot:InvokeServer()
 	if ok and typeof(payload) == "table" then
@@ -480,6 +737,7 @@ function AchievementUI.Init()
 	else
 		renderSnapshot(nil)
 	end
+	requestStatsSummary()
 end
 
 return AchievementUI

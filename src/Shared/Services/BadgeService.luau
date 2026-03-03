@@ -35,6 +35,8 @@ local ICONS = {
 	Tenants     = utf8char(0x1F465),  -- people silhouettes
 	Crafting    = utf8char(0x1F528),  -- hammer
 	Progression = utf8char(0x2B50),   -- star
+	Daily       = utf8char(0x1F4C5),  -- calendar
+	Seasonal    = utf8char(0x1F342),  -- fallen leaf
 	Default     = utf8char(0x1F3C6), -- trophy
 }
 
@@ -63,6 +65,16 @@ local CATEGORY_BADGES = {
 		Icon = ICONS.Progression,
 		Color = { R = 255, G = 210, B = 80 },
 		Label = "Progression",
+	},
+	Daily = {
+		Icon = ICONS.Daily,
+		Color = { R = 90, G = 190, B = 220 },
+		Label = "Daily",
+	},
+	Seasonal = {
+		Icon = ICONS.Seasonal,
+		Color = { R = 235, G = 110, B = 165 },
+		Label = "Seasonal",
 	},
 }
 

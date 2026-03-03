@@ -7,6 +7,7 @@ local Players = game:GetService("Players")
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local ObjectPreview = require(script.Parent.ObjectPreview)
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
+local StashPackets = require(ReplicatedStorage.Network.StashPackets)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local SoundtrackManager = require(script.Parent.SoundtrackManager)
 local PlacementCelebration = require(script.Parent.PlacementCelebration)
@@ -39,6 +40,8 @@ type RoofSelectionInfo = ObjectPreview.RoofSelectionInfo
 
 local PlotBuilder = {}
 local INPUT_DEBOUNCE_SECONDS = 0.25
+-- When non-nil, the next PlaceSelectedPreview call sends PlaceFromStash instead of PlaceRequest.
+local stashModeItemId: string? = nil
 local PREVIEW_RESTORE_DELAY = 0.6
 local DEFAULT_BUILD_CONTEXT_PRIORITY = BuildContext.Priority or 0
 local PREVIEW_SUPPRESSED_PRIORITY = DEFAULT_BUILD_CONTEXT_PRIORITY - 1
@@ -47,6 +50,10 @@ local FLOOR_INPUT_SUPPRESS_SECONDS = 0.12
 
 local previewRestoreToken = 0
 local floorInputSuppressUntil = 0
+
+local deleteObjectHandler: ((Model) -> ())?
+local rotateObjectHandler: ((Model) -> ())?
+local selectObjectHandler: ((Model) -> ())?
 
 local function syncInputContextPriorities()
 	if not ObjectPreviewEnabled then
@@ -335,6 +342,13 @@ function PlotBuilder.PreviewSelected(itemId: string, initialFacing: string?)
 	PlacePreviewAction.Enabled = true
 end
 
+-- Enters stash-place mode: the next successful PlaceSelectedPreview will use PlaceFromStash
+-- instead of PlaceRequest (bypassing currency cost) and deduct from the stash.
+-- Pass nil to clear stash mode.
+function PlotBuilder.SetStashMode(itemId: string?)
+	stashModeItemId = itemId
+end
+
 function PlotBuilder.RemovePreview()
 	cancelPendingPreviewRestore()
 	ObjectPreview.ClearPreview()
@@ -429,7 +443,12 @@ function PlotBuilder.PlaceSelectedPreview()
 	end
 	local poseLevel = if typeof(pose.Level) == "number" then pose.Level else PlotStateStore.GetActiveLevel()
 	local ceilingEnabled = pose.Kind == "Ceiling" and ceilingPose ~= nil
-	local success, message = Packets.PlaceRequest:Fire({
+	local isFromStash = stashModeItemId == pose.ItemId
+	local PlacePacket = if isFromStash then StashPackets.PlaceFromStash else Packets.PlaceRequest
+	if isFromStash then
+		stashModeItemId = nil
+	end
+	local success, message = PlacePacket:Fire({
 		ItemId = pose.ItemId,
 		CellX = cellX,
 		CellZ = cellZ,
@@ -715,5 +734,40 @@ function PlotBuilder.PlaceRoofSelection(selection: RoofSelectionInfo)
 	PlacementCelebration.ShowSuccess(placementPosition, itemId)
 end
 
---#TODO: More functions for rotating, selecting already placed items, deleting placed items, etc.
+function PlotBuilder.SetDeleteObjectHandler(handler: (Model) -> ())
+	deleteObjectHandler = handler
+end
+
+function PlotBuilder.SetRotateObjectHandler(handler: (Model) -> ())
+	rotateObjectHandler = handler
+end
+
+function PlotBuilder.SetSelectObjectHandler(handler: (Model) -> ())
+	selectObjectHandler = handler
+end
+
+function PlotBuilder.DeleteObject(object: Model)
+	if deleteObjectHandler then
+		deleteObjectHandler(object)
+	else
+		warn("PlotBuilder.DeleteObject: no handler registered")
+	end
+end
+
+function PlotBuilder.RotateObject(object: Model)
+	if rotateObjectHandler then
+		rotateObjectHandler(object)
+	else
+		warn("PlotBuilder.RotateObject: no handler registered")
+	end
+end
+
+function PlotBuilder.SelectObject(object: Model)
+	if selectObjectHandler then
+		selectObjectHandler(object)
+	else
+		warn("PlotBuilder.SelectObject: no handler registered")
+	end
+end
+
 return PlotBuilder

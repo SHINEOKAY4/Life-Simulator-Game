@@ -3,10 +3,12 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
+local StashPackets = require(ReplicatedStorage.Network.StashPackets)
 local RateLimiter = require(ReplicatedStorage.Shared.Utilities.RateLimiter)
 
 local Build = require(script.Actions.Build)
 local DestroyAction = require(script.Actions.DestroyAction)
+local StashAction = require(script.Actions.StashAction)
 local Move = require(script.Actions.Move)
 local PlaceFloorArea = require(script.Actions.PlaceFloorArea)
 local PlaceRoofArea = require(script.Actions.PlaceRoofArea)
@@ -62,6 +64,35 @@ function BuildService.Init()
 	Packets.RotateRequest.OnServerInvoke = withRateLimit(BuildService.Rotate)
 	Packets.ConnectUtilityRequest.OnServerInvoke = withRateLimit(BuildService.ConnectUtility)
 	Packets.DisconnectUtilityRequest.OnServerInvoke = withRateLimit(BuildService.DisconnectUtility)
+
+	-- Stash packet handlers
+	StashPackets.StashItem.OnServerInvoke = withRateLimit(StashAction)
+
+	StashPackets.GetStash.OnServerInvoke = function(player: Player): (boolean, string, any)
+		local items = StashAction.GetStashItems(player)
+		if not items then
+			return false, "Unable to load stash", nil
+		end
+		return true, "ok", items
+	end
+
+	StashPackets.PlaceFromStash.OnServerInvoke = withRateLimit(function(player: Player, payload: any): (boolean, string)
+		local itemId = if typeof(payload) == "table" and typeof(payload.ItemId) == "string" then payload.ItemId else nil
+		if not itemId or itemId == "" then
+			return false, "Invalid item ID"
+		end
+		if not StashAction.DeductFromStash(player, itemId) then
+			return false, "Item not in stash"
+		end
+		local buildPayload = table.clone(payload)
+		buildPayload.SkipCost = true
+		local success, message = Build(player, buildPayload)
+		if not success then
+			-- Restore the deducted count on failure.
+			StashAction.AddToStash(player, itemId, 1)
+		end
+		return success, message
+	end)
 end
 
 return BuildService

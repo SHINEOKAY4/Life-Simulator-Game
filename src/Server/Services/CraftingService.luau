@@ -586,6 +586,10 @@ local function completeCraftingJob(job: CraftingJob)
 		ProgressionService.AwardExperience(job.Player, progressionExperience, "Crafting:" .. recipe.Id)
 	end
 
+	CraftingPackets.SkillSummaryUpdated:FireClient(job.Player, {
+		Skills = buildSkillSummary(craftingState),
+	})
+
 	CraftingService.CraftCompleted:Fire(job.Player, recipe.Id, recipe.Output.ItemId, recipe.Output.Quantity)
 	AchievementService.RecordCraftCompleted(job.Player)
 	CraftingPackets.CraftCompleted:FireClient(job.Player, {
@@ -704,6 +708,14 @@ end
 
 function CraftingService.Init()
 	CraftingPackets.GetCraftingData.OnServerInvoke = handleGetCraftingData
+	CraftingPackets.GetSkillSummary.OnServerInvoke = function(player: Player): (boolean, string, any)
+		local profile = PlayerSession.GetData(player)
+		if not profile then
+			return false, "Player profile unavailable.", nil
+		end
+		local craftingState = ensureCraftingState(profile)
+		return true, "", buildSkillSummary(craftingState)
+	end
 	CraftingPackets.StartCrafting.OnServerInvoke = function(player: Player, recipeId: string, stationId: string)
 		if typeof(recipeId) ~= "string" or recipeId == "" then
 			return false, "Recipe id is required.", nil

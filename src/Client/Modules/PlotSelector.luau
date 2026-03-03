@@ -9,13 +9,49 @@ local Players = game:GetService("Players")
 local Packets = require(ReplicatedStorage.Network.PlacementPackets)
 local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
+local Notification = require(script.Parent.Parent.UserInterface.Notification)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
-local MainHUD = PlayerGui:WaitForChild("MainHUD") :: ScreenGui
-local PlotSelectorGui = PlayerGui:WaitForChild("PlotSelectorGui")
-local MainFrame = PlotSelectorGui:WaitForChild("Main")
-local PlotSelectorContext = PlotSelectorGui:WaitForChild("PlotSelectorContext")
+local REQUIRED_CHILD_TIMEOUT_SECONDS = 15
+
+local function requireChild(parent: Instance, childName: string): Instance
+	local child = parent:FindFirstChild(childName)
+	if child then
+		return child
+	end
+
+	local waited = parent:WaitForChild(childName, REQUIRED_CHILD_TIMEOUT_SECONDS)
+	assert(
+		waited,
+		("[PlotSelector] Missing required child '%s' under %s after %ds")
+			:format(childName, parent:GetFullName(), REQUIRED_CHILD_TIMEOUT_SECONDS)
+	)
+
+	return waited
+end
+
+local function requireChildOfClass(parent: Instance, childName: string, className: string): Instance
+	local child = parent:FindFirstChild(childName)
+	if child and child:IsA(className) then
+		return child
+	end
+
+	local waited = parent:WaitForChild(childName, REQUIRED_CHILD_TIMEOUT_SECONDS)
+	assert(
+		waited and waited:IsA(className),
+		("[PlotSelector] Missing required %s '%s' under %s after %ds")
+			:format(className, childName, parent:GetFullName(), REQUIRED_CHILD_TIMEOUT_SECONDS)
+	)
+
+	return waited
+end
+
+local MainHUD = requireChildOfClass(PlayerGui, "MainHUD", "ScreenGui") :: ScreenGui
+local PlotSelectorGui = requireChildOfClass(PlayerGui, "PlotSelectorGui", "ScreenGui")
+	:: ScreenGui
+local MainFrame = requireChildOfClass(PlotSelectorGui, "Main", "Frame") :: Frame
+local PlotSelectorContext = requireChild(PlotSelectorGui, "PlotSelectorContext")
 
 local Camera = workspace.CurrentCamera
 
@@ -28,6 +64,21 @@ local INPUT_DEBOUNCE_SECONDS = 0.25
 local function runDebounced(actionName: string, callback: () -> ()): ()
 	local key = string.format("PlotSelector/%s", actionName)
 	Debounce.RunIfAvailable(key, INPUT_DEBOUNCE_SECONDS, callback, Player.UserId)
+end
+
+local function showClaimNotification(title: string, text: string, backgroundColor: Color3)
+	local ok, err = pcall(function()
+		Notification.Show({
+			Title = title,
+			Text = text,
+			Duration = 3,
+			BackgroundColor = backgroundColor,
+		})
+	end)
+
+	if not ok then
+		warn(("[PlotSelector] Failed to show claim notification: %s"):format(tostring(err)))
+	end
 end
 
 local function MoveCamera()
@@ -87,7 +138,6 @@ function PlotSelector.Init()
 	SetPlayerMovement(false)
 	MoveCamera()
 	MainFrame.Visible = true
-	--#TODO: Throttle or debounce input to prevent multiple rapid inputs
 	table.insert(
 		Connections,
 		PlotSelectorContext.MoveNextAction.Pressed:Connect(function()
@@ -136,6 +186,7 @@ end
 function PlotSelector.Select()
 	local currentPlot = PlotFinder.FindPlot(CurrentIndex)
 	if not currentPlot then
+		showClaimNotification("Plot Claim Failed", "The selected plot no longer exists.", Color3.fromRGB(132, 64, 64))
 		warn("Failed to claim plot: plot not found")
 		return
 	end
@@ -144,7 +195,12 @@ function PlotSelector.Select()
 	local responseMessage = message
 
 	if not success then
-		--#TODO: Toast notification for failure
+		local failureMessage = "Could not claim this plot right now. Try another one."
+		if type(responseMessage) == "string" and responseMessage ~= "" then
+			failureMessage = responseMessage
+		end
+
+		showClaimNotification("Plot Claim Failed", failureMessage, Color3.fromRGB(132, 64, 64))
 		warn(("Failed to claim plot: %s"):format(responseMessage or "Unknown error"))
 		return
 	end
@@ -164,7 +220,12 @@ function PlotSelector.Select()
 	end
 
 	SetPlayerMovement(true)
-	--#TODO: Toast notification for success
+	local successMessage = "Your plot has been claimed."
+	if type(responseMessage) == "string" and responseMessage ~= "" then
+		successMessage = responseMessage
+	end
+
+	showClaimNotification("Plot Claimed", successMessage, Color3.fromRGB(52, 130, 90))
 	--CameraModule.EnableTopDownCamera()
 	MainHUD.Enabled = true
 	print(("Successfully claimed plot: %s"):format(responseMessage or ""))

@@ -1,0 +1,37 @@
+name: Update Changelog
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  update-changelog:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Update CHANGELOG from merged PR metadata
+        run: node .github/scripts/update-changelog.mjs
+      - name: Commit and push CHANGELOG update
+        run: |
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "No changelog updates were required."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "chore(changelog): update from merged PR #${{ github.event.pull_request.number }}"
+          git push origin HEAD:main

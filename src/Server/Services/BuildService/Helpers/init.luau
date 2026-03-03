@@ -260,8 +260,12 @@ end
 function Helpers.ensurePlacementFunds(
 	player: Player,
 	itemSpec: { [string]: any }?,
-	quantity: number?
+	quantity: number?,
+	free: boolean?
 ): (boolean, string?, number, CurrencyState?)
+	if free then
+		return true, nil, 0, nil
+	end
 	local totalCost = Helpers.computePlacementCost(itemSpec, quantity)
 	if totalCost <= 0 then
 		return true, nil, 0, nil

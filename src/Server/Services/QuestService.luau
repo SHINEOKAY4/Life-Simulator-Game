@@ -48,12 +48,23 @@ if IS_ROBLOX then
     end
 end
 
+local QuestPackets = nil
+
+if IS_ROBLOX then
+    local ok, packets = pcall(function()
+        return require(game:GetService("ReplicatedStorage").Network.QuestPackets)
+    end)
+    if ok and type(packets) == "table" then
+        QuestPackets = packets
+    end
+end
+
 local QuestService = {}
 
 -- Type definitions (Luau export types not used to keep loadfile() compatibility)
 -- Objective: { id: string, kind: string, target: any, progress?: number }
 -- QuestDefinition: { id: string, name?: string, prerequisites?: {string},
---   objectives: {Objective}, rewards?: { Currency?, XP?, Items? }, AutoClaim?: boolean }
+--   objectives: {Objective}, rewards?: { Currency?, XP?, Items? }, AutoClaim?: boolean, Repeatable?: boolean }
 -- QuestState: { State: string, Progress: { [string]: number } }
 -- PlayerQuestState: { [string]: QuestState }
 
@@ -152,6 +163,50 @@ local function EnsureDefaultCatalog()
         },
         AutoClaim = true,
     }
+
+    -- Daily challenge variants rotate through these objective types.
+    QuestCatalog["daily_challenge_collect"] = {
+        id = "daily_challenge_collect",
+        name = "Daily: Resource Run",
+        prerequisites = {},
+        objectives = {
+            { id = "daily_collect", kind = "Collect", target = 25 },
+        },
+        rewards = {
+            XP = 25,
+            Currency = { { Name = "Coins", Amount = 35 } },
+        },
+        AutoClaim = true,
+        Repeatable = true,
+    }
+    QuestCatalog["daily_challenge_visit"] = {
+        id = "daily_challenge_visit",
+        name = "Daily: Check In",
+        prerequisites = {},
+        objectives = {
+            { id = "daily_visit", kind = "Talk", target = "OldMan" },
+        },
+        rewards = {
+            XP = 20,
+            Currency = { { Name = "Coins", Amount = 25 } },
+        },
+        AutoClaim = true,
+        Repeatable = true,
+    }
+    QuestCatalog["daily_challenge_place"] = {
+        id = "daily_challenge_place",
+        name = "Daily: Builder Task",
+        prerequisites = {},
+        objectives = {
+            { id = "daily_place", kind = "Place", target = "Chair" },
+        },
+        rewards = {
+            XP = 30,
+            Currency = { { Name = "Coins", Amount = 40 } },
+        },
+        AutoClaim = true,
+        Repeatable = true,
+    }
 end
 
 local function loadCatalogIfNeeded()
@@ -210,6 +265,69 @@ local function evaluateQuestCompletion(state, quest)
     return allDone
 end
 
+-- Push a quest state snapshot to the client player via QuestPackets.
+local function copyShallow(source)
+    local clone = {}
+    if type(source) ~= "table" then
+        return clone
+    end
+    for key, value in pairs(source) do
+        clone[key] = value
+    end
+    return clone
+end
+
+-- Build a client-facing snapshot that includes quest display data.
+local function buildQuestSnapshot(player)
+    loadCatalogIfNeeded()
+    if not player then
+        return nil
+    end
+    local snapshot = {}
+    local states = HydratePlayer(player)
+    for questId, def in pairs(QuestCatalog) do
+        local state = states[questId] or { State = "locked", Progress = {} }
+        local progressCopy = copyShallow(state.Progress)
+        local objectivesCopy = {}
+        if type(def.objectives) == "table" then
+            for index, obj in ipairs(def.objectives) do
+                objectivesCopy[index] = obj
+            end
+        end
+        local rewardsCopy = copyShallow(def.rewards)
+        snapshot[questId] = {
+            State = state.State or "locked",
+            Progress = progressCopy,
+            Name = def.name or def.Name or questId,
+            Objectives = objectivesCopy,
+            Rewards = rewardsCopy,
+        }
+    end
+    return snapshot
+end
+
+local function pushSnapshotToClient(player)
+    if not IS_ROBLOX or not QuestPackets then
+        return
+    end
+    local quests = buildQuestSnapshot(player)
+    if quests then
+        QuestPackets.QuestSnapshotUpdated:FireClient(player, quests)
+    end
+end
+
+-- Notify the client that a specific quest was completed.
+local function notifyQuestCompleted(player, questId)
+    if not IS_ROBLOX or not QuestPackets then
+        return
+    end
+    local def = QuestCatalog[questId]
+    QuestPackets.QuestCompleted:FireClient(player, {
+        QuestId = questId,
+        QuestName = def and def.name or questId,
+    })
+end
+
 -- Public API
 function QuestService.Init()
     loadCatalogIfNeeded()
@@ -220,6 +338,46 @@ function QuestService.Init()
             HydratePlayer(p)
         end)
     end
+
+    -- Wire network packet handlers when running in Roblox
+    if IS_ROBLOX and QuestPackets then
+        QuestPackets.GetQuestSnapshot.OnServerInvoke = function(player)
+            local quests = buildQuestSnapshot(player)
+            if quests then
+                return true, quests
+            end
+            return false, nil
+        end
+
+        QuestPackets.StartQuest.OnServerInvoke = function(player, questId)
+            if type(questId) ~= "string" then
+                return false, "InvalidQuestId"
+            end
+            local ok, err = QuestService.StartQuest(player, questId)
+            if ok then
+                pushSnapshotToClient(player)
+            end
+            return ok, err or ""
+        end
+
+        QuestPackets.ClaimQuest.OnServerInvoke = function(player, questId)
+            if type(questId) ~= "string" then
+                return false, "InvalidQuestId"
+            end
+            local ok, err = QuestService.ClaimQuest(player, questId)
+            if ok then
+                -- Refresh prerequisites after claiming so chained quests unlock
+                QuestService.RefreshPlayerStates(player)
+                pushSnapshotToClient(player)
+            end
+            return ok, err or ""
+        end
+    end
+end
+
+-- Client snapshot for UI rendering (includes quest definition metadata).
+function QuestService.GetQuestSnapshot(player)
+    return buildQuestSnapshot(player)
 end
 
 -- Recompute all quest states for a player based on prerequisites and current completion
@@ -265,11 +423,18 @@ end
 
 -- Start a quest if it is available
 function QuestService.StartQuest(player, questId)
+    if player == nil then
+        return false, "PlayerRequired"
+    end
     local quest = ensureQuestExists(questId)
     if not quest then
         return false, "UnknownQuest"
     end
     local state = getStateForQuest(player, questId) or { State = "locked", Progress = {} }
+    if quest.Repeatable == true and state.State == "claimed" then
+        state.State = "available"
+        state.Progress = {}
+    end
     if state.State ~= "available" then
         return false, "QuestNotAvailable"
     end
@@ -290,6 +455,12 @@ end
 
 -- Generic progress update for an objective by numeric delta
 function QuestService.ProgressObjective(player, questId, objectiveId, delta)
+    if player == nil then
+        return false, "PlayerRequired"
+    end
+    if type(delta) ~= "number" then
+        return false, "InvalidDelta"
+    end
     if delta < 0 then delta = 0 end
     local quest = ensureQuestExists(questId)
     if not quest then return false, "UnknownQuest" end
@@ -307,6 +478,7 @@ function QuestService.ProgressObjective(player, questId, objectiveId, delta)
     -- If all objectives are completed, auto-complete if configured or mark completed
     if allDone then
         state.State = "completed"
+        notifyQuestCompleted(player, questId)
         -- if quest has auto-claim, immediately award rewards and mark claimed
         if quest.AutoClaim == true then
             QuestService.ClaimQuest(player, questId)
@@ -318,11 +490,17 @@ function QuestService.ProgressObjective(player, questId, objectiveId, delta)
     local pstore = PlayerQuests[tonumber(key) or key] or {}
     pstore[questId] = state
     PlayerQuests[tonumber(key) or key] = pstore
+
+    -- Push updated snapshot to client
+    pushSnapshotToClient(player)
+
     return true
 end
-
--- Report a produced item collection for an objective
 function QuestService.ReportItemCollected(player, questId, itemDefId, qty)
+    if player == nil then return false, "PlayerRequired" end
+    if qty ~= nil and (type(qty) ~= "number" or qty <= 0) then
+        return false, "InvalidQuantity"
+    end
     local quest = ensureQuestExists(questId)
     if not quest then return false, "UnknownQuest" end
     local state = getStateForQuest(player, questId)
@@ -347,6 +525,7 @@ function QuestService.ReportItemCollected(player, questId, itemDefId, qty)
 
     if evaluateQuestCompletion(state, quest) then
         state.State = "completed"
+        notifyQuestCompleted(player, questId)
         if quest.AutoClaim == true then
             QuestService.ClaimQuest(player, questId)
         end
@@ -356,6 +535,10 @@ function QuestService.ReportItemCollected(player, questId, itemDefId, qty)
     local pstore = PlayerQuests[tonumber(key) or key] or {}
     pstore[questId] = state
     PlayerQuests[tonumber(key) or key] = pstore
+
+    -- Push updated snapshot to client
+    pushSnapshotToClient(player)
+
     return true
 end
 

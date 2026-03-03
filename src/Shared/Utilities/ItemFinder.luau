@@ -2,15 +2,37 @@
 -- ReplicatedStorage/Shared/Utilities/ItemFinder.luau
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StartupDiagnostics = require(ReplicatedStorage.Shared.Utilities.StartupDiagnostics)
+local StartupLog = StartupDiagnostics.new("ItemFinder")
 
 local CatalogFolder = ReplicatedStorage.Shared.Definitions:FindFirstChild("Catalog")
 assert(CatalogFolder and CatalogFolder:IsA("Folder"), "Replicated catalog folder not found")
 
-local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
-assert(AssetsFolder and AssetsFolder:IsA("Folder"), "Replicated assets folder not found")
+local REQUIRED_CHILD_TIMEOUT_SECONDS = 15
 
-local CatalogModelsFolder = AssetsFolder:WaitForChild("Catalog")
-assert(CatalogModelsFolder and CatalogModelsFolder:IsA("Folder"), "Replicated catalog models folder not found")
+local function requireChildOfClass(parent: Instance, childName: string, className: string): Instance
+	return StartupLog:ResolveDependency(("%s.%s"):format(parent:GetFullName(), childName), function()
+		local child = parent:FindFirstChild(childName)
+		if child and child:IsA(className) then
+			return child
+		end
+
+		local waited = parent:WaitForChild(childName, REQUIRED_CHILD_TIMEOUT_SECONDS)
+		assert(
+			waited and waited:IsA(className),
+			("[ItemFinder] Missing required %s '%s' under %s after %ds")
+				:format(className, childName, parent:GetFullName(), REQUIRED_CHILD_TIMEOUT_SECONDS)
+		)
+
+		return waited
+	end)
+end
+
+local AssetsFolder = requireChildOfClass(ReplicatedStorage, "Assets", "Folder")
+	:: Folder
+
+local CatalogModelsFolder = requireChildOfClass(AssetsFolder, "Catalog", "Folder")
+	:: Folder
 
 local function loadCatalogModule(name: string): { [string]: any }
 	local moduleScript = CatalogFolder:FindFirstChild(name)
@@ -444,6 +466,10 @@ function ItemFinder.SearchCatalog(normalizedQuery: string): { SearchResultEntry 
 		return cloneSearchResults(SearchEntries)
 	end
 
+	-- Defensively lowercase the query for blob matching; SearchBlob components are
+	-- already lowered via sanitizeComponent, so matching must be case-insensitive.
+	local loweredQuery = string.lower(normalizedQuery)
+
 	local tokens = extractQueryTokens(normalizedQuery)
 	local candidateMap: { [string]: SearchEntryInternal }? = nil
 
@@ -492,7 +518,7 @@ function ItemFinder.SearchCatalog(normalizedQuery: string): { SearchResultEntry 
 
 	local matches = table.create(#scanList)
 	for _, entry in ipairs(scanList) do
-		if string.find(entry.SearchBlob, normalizedQuery, 1, true) then
+		if string.find(entry.SearchBlob, loweredQuery, 1, true) then
 			matches[#matches + 1] = entry
 		end
 	end

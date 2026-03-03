@@ -6,6 +6,12 @@ local Packet = require(ReplicatedStorage.Packages.Packet)
 
 local WorldEventPackets = {}
 
+local buffPayload = {
+	Type = Packet.String,
+	Value = Packet.NumberF64,
+	Label = Packet.String,
+}
+
 local rotationEventPayload = {
 	Id = Packet.String,
 	Name = Packet.String,
@@ -13,6 +19,7 @@ local rotationEventPayload = {
 	Kind = Packet.String,
 	StartsAt = Packet.NumberF64,
 	EndsAt = Packet.NumberF64,
+	Buffs = { buffPayload },
 }
 
 local statePayload = {

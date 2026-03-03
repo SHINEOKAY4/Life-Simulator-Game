@@ -17,6 +17,9 @@ local BillUI = require(script.Parent.BillUI)
 local AchievementUI = require(script.Parent.AchievementUI)
 local DailyRewardUI = require(script.Parent.DailyRewardUI)
 local SeasonalEventUI = require(script.Parent.SeasonalEventUI)
+local QuestUI = require(script.Parent.QuestUI)
+local WorldEventUI = require(script.Parent.WorldEventUI)
+local EmoteUI = require(script.Parent.EmoteUI)
 local PlotExpansion = require(script.Parent.Parent.Modules.PlotExpansion)
 
 local Player = Players.LocalPlayer
@@ -56,56 +59,104 @@ local TopRight = MainHUDGui:WaitForChild("TopRight")
 local TextFrame = TopRight:WaitForChild("TextFrame") :: Frame
 local CashLabel = TextFrame:WaitForChild("CashLabel") :: TextLabel
 local IncomePerSecondLabel = TopRight:WaitForChild("IncomePerSecondLabel") :: TextLabel
-local BuildButton = BottomRight:WaitForChild("BuildButton") :: TextButton
+local function setButtonText(button: GuiButton, text: string)
+	if button:IsA("TextButton") then
+		button.Text = text
+		return
+	end
+
+	local textLabel = button:FindFirstChild("Text")
+	if textLabel and textLabel:IsA("TextLabel") then
+		textLabel.Text = text
+	end
+end
+
+local BuildButton = BottomRight:WaitForChild("BuildButton") :: GuiButton
 -- ExpandButton moved into PlotBuilder menu; this slot now hosts ProfileButton
-local ProfileButton = BottomRight:WaitForChild("ProfileButton") :: TextButton
-local ReviewsButton = BottomRight:WaitForChild("ReviewsButton") :: TextButton
-local BillsButton = BottomRight:WaitForChild("BillsButton") :: TextButton
-local ReputationButton = (function(): TextButton
+local ProfileButton = BottomRight:WaitForChild("ProfileButton") :: GuiButton
+local ReviewsButton = BottomRight:WaitForChild("ReviewsButton") :: GuiButton
+local BillsButton = BottomRight:WaitForChild("BillsButton") :: GuiButton
+local ReputationButton = (function(): GuiButton
 	local existing = BottomRight:FindFirstChild("ReputationButton")
-	if existing and existing:IsA("TextButton") then
+	if existing and existing:IsA("GuiButton") then
 		return existing
 	end
 	local button = ReviewsButton:Clone()
 	button.Name = "ReputationButton"
-	button.Text = "Reputation"
+	setButtonText(button, "Reputation")
 	button.LayoutOrder = ReviewsButton.LayoutOrder + 1
 	button.Parent = BottomRight
 	return button
 end)()
-local AchievementsButton = (function(): TextButton
+local AchievementsButton = (function(): GuiButton
 	local existing = BottomRight:FindFirstChild("AchievementsButton")
-	if existing and existing:IsA("TextButton") then
+	if existing and existing:IsA("GuiButton") then
 		return existing
 	end
 	local button = ReviewsButton:Clone()
 	button.Name = "AchievementsButton"
-	button.Text = "Achievements"
+	setButtonText(button, "Achievements")
 	button.LayoutOrder = math.max(BillsButton.LayoutOrder, ReputationButton.LayoutOrder) + 1
 	button.Parent = BottomRight
 	return button
 end)()
-local DailyRewardsButton = (function(): TextButton
+local DailyRewardsButton = (function(): GuiButton
 	local existing = BottomRight:FindFirstChild("DailyRewardsButton")
-	if existing and existing:IsA("TextButton") then
+	if existing and existing:IsA("GuiButton") then
 		return existing
 	end
 	local button = ReviewsButton:Clone()
 	button.Name = "DailyRewardsButton"
-	button.Text = "Daily Rewards"
+	setButtonText(button, "Daily Rewards")
 	button.LayoutOrder = AchievementsButton.LayoutOrder + 1
 	button.Parent = BottomRight
 	return button
 end)()
-local SeasonsButton = (function(): TextButton
+local SeasonsButton = (function(): GuiButton
 	local existing = BottomRight:FindFirstChild("SeasonsButton")
-	if existing and existing:IsA("TextButton") then
+	if existing and existing:IsA("GuiButton") then
 		return existing
 	end
 	local button = ReviewsButton:Clone()
 	button.Name = "SeasonsButton"
-	button.Text = "Seasons"
+	setButtonText(button, "Seasons")
 	button.LayoutOrder = DailyRewardsButton.LayoutOrder + 1
+	button.Parent = BottomRight
+	return button
+end)()
+local QuestsButton = (function(): GuiButton
+	local existing = BottomRight:FindFirstChild("QuestsButton")
+	if existing and existing:IsA("GuiButton") then
+		return existing
+	end
+	local button = ReviewsButton:Clone()
+	button.Name = "QuestsButton"
+	setButtonText(button, "Quests")
+	button.LayoutOrder = SeasonsButton.LayoutOrder + 1
+	button.Parent = BottomRight
+	return button
+end)()
+local WorldEventsButton = (function(): GuiButton
+	local existing = BottomRight:FindFirstChild("WorldEventsButton")
+	if existing and existing:IsA("GuiButton") then
+		return existing
+	end
+	local button = ReviewsButton:Clone()
+	button.Name = "WorldEventsButton"
+	setButtonText(button, "World Events")
+	button.LayoutOrder = QuestsButton.LayoutOrder + 1
+	button.Parent = BottomRight
+	return button
+end)()
+local EmotesButton = (function(): GuiButton
+	local existing = BottomRight:FindFirstChild("EmotesButton")
+	if existing and existing:IsA("GuiButton") then
+		return existing
+	end
+	local button = ReviewsButton:Clone()
+	button.Name = "EmotesButton"
+	setButtonText(button, "Emotes")
+	button.LayoutOrder = WorldEventsButton.LayoutOrder + 1
 	button.Parent = BottomRight
 	return button
 end)()
@@ -497,7 +548,7 @@ local function scaleUDim2(size: UDim2, scaleX: number, scaleY: number): UDim2
 	return UDim2.new(size.X.Scale * scaleX, size.X.Offset * scaleX, size.Y.Scale * scaleY, size.Y.Offset * scaleY)
 end
 
-local function configureButtonVisuals(button: TextButton)
+local function configureButtonVisuals(button: GuiButton)
 	local imageFrame = button:FindFirstChild("Image")
 	if not imageFrame or not imageFrame:IsA("Frame") then
 		return
@@ -627,6 +678,18 @@ function MainHUD.Init()
 		SeasonalEventUI.Toggle()
 	end)
 
+	QuestsButton.Activated:Connect(function()
+		QuestUI.Toggle()
+	end)
+
+	WorldEventsButton.Activated:Connect(function()
+		WorldEventUI.Toggle()
+	end)
+
+	EmotesButton.Activated:Connect(function()
+		EmoteUI.Toggle()
+	end)
+
 	PlotBuilderEnabled.Changed:Connect(function()
 		if PlotBuilderEnabled.Value then
 			MainHUD.Hide()
@@ -691,7 +754,7 @@ function MainHUD.Init()
 		Player:GetAttributeChangedSignal(attributeName):Connect(updateProgressionDisplay)
 	end
 
-	for _, button in ipairs({ BuildButton, ReviewsButton, ReputationButton, ProfileButton, BillsButton, AchievementsButton, DailyRewardsButton, SeasonsButton }) do
+	for _, button in ipairs({ BuildButton, ReviewsButton, ReputationButton, ProfileButton, BillsButton, AchievementsButton, DailyRewardsButton, SeasonsButton, QuestsButton, WorldEventsButton, EmotesButton }) do
 		configureButtonVisuals(button)
 	end
 
@@ -705,6 +768,8 @@ function MainHUD.Init()
 
 	-- Billing system: Listen to BillDue attribute
 	local notifierTween = nil
+	local notifierOriginalSize: UDim2 = if NotifierSymbol then NotifierSymbol.Size else UDim2.fromScale(1, 1)
+	local notifierOriginalRotation: number = if NotifierSymbol then NotifierSymbol.Rotation else 0
 	local function updateBillNotifier()
 		if not NotifierSymbol then
 			return
@@ -718,6 +783,11 @@ function MainHUD.Init()
 				notifierTween:Cancel()
 			end
 
+			-- Always reset to the original size before creating a new tween to prevent
+			-- compounding growth when updateBillNotifier is called multiple times.
+			NotifierSymbol.Size = notifierOriginalSize
+			NotifierSymbol.Rotation = notifierOriginalRotation
+
 			local tweenInfo = TweenInfo.new(
 				0.6, -- Duration
 				Enum.EasingStyle.Quad,
@@ -727,7 +797,10 @@ function MainHUD.Init()
 			)
 
 			notifierTween = TweenService:Create(NotifierSymbol, tweenInfo, {
-				Size = UDim2.fromScale(NotifierSymbol.Size.X.Scale * 1.2, NotifierSymbol.Size.Y.Scale * 1.2),
+				Size = UDim2.new(
+					notifierOriginalSize.X.Scale * 1.2, math.round(notifierOriginalSize.X.Offset * 1.2),
+					notifierOriginalSize.Y.Scale * 1.2, math.round(notifierOriginalSize.Y.Offset * 1.2)
+				),
 				Rotation = 15,
 			})
 			notifierTween:Play()
@@ -735,8 +808,8 @@ function MainHUD.Init()
 			-- Stop tween and reset when bill is paid
 			if notifierTween then
 				notifierTween:Cancel()
-				NotifierSymbol.Size = UDim2.fromScale(1, 1)
-				NotifierSymbol.Rotation = 0
+				NotifierSymbol.Size = notifierOriginalSize
+				NotifierSymbol.Rotation = notifierOriginalRotation
 			end
 		end
 	end

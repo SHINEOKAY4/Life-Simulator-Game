@@ -1,68 +1,62 @@
 # TODO - Life-Simulator-Game
 
-See the docs https://shineokay4.github.io/Life-Simulator-Game/generated/api/
+Sprint Roadmap (10 goals)
+Status: refresh for Iteration 9 (2026-03-02)
 
-Last updated: 2026-02-18
+1. [x] Add achievement bulk-claim action.
+   Acceptance:
+   - Achievement service exposes `ClaimAllAchievements` and a network packet.
+   - Achievement UI shows a Claim All button with disabled state when none are claimable.
+   - Tests cover reward totals and idempotency.
 
-## Completed Infrastructure
+2. [x] Surface daily challenge status in DailyReward UI.
+   Acceptance:
+   - `DailyRewardPackets` status schema includes `DailyChallenge` fields (DayId, QuestId, AssignedAt, QuestState).
+   - `DailyRewardUI` renders the current daily challenge with quest name and state.
+   - `DailyRewardSpec` verifies daily challenge payload wiring.
 
-- [x] Add GitHub issue templates
-  - `.github/ISSUE_TEMPLATE/bug-report.yml`
-  - `.github/ISSUE_TEMPLATE/feature-request.yml`
-  - `.github/ISSUE_TEMPLATE/config.yml`
-- [x] Add CI workflow for tests, Rojo build, and docs build/deploy
-  - `.github/workflows/build.yml`
-- [x] Add Lua test runner and initial spec suite
-  - `run_tests.sh`
-  - `Tests/Specs/ExampleSpec.lua`
-  - `Tests/Specs/PlotSpec.lua`
-  - `Tests/Specs/TenantSpec.lua`
-- [x] Scaffold dynamic docs site and source-driven generation
-  - `docs/` (Docusaurus + `docs/scripts/generate-docs.mjs`)
-- [x] Add initial changelog scaffold
-  - `CHANGELOG.md`
+3. [x] Add quest daily challenge rotation regression tests.
+   Acceptance:
+   - New spec verifies quest rotation across consecutive UTC days.
+   - Ensures repeatable quest assignment remains consistent across resets.
 
-## Verified Locally
+4. [ ] Build Notification inbox panel.
+   Acceptance:
+   - New client UI lists notifications from `NotificationPackets.StateSnapshot` and deltas.
+   - Unread/read state is reflected in the list and can be toggled locally.
+   - Manual smoke: opening inbox shows latest 20 notifications in order.
 
-- [x] `./run_tests.sh` passes
-- [x] `busted Tests/Specs/*.lua` passes
-- [x] `npm run build --prefix docs` passes
+5. [ ] Add category filters to Achievement UI.
+   Acceptance:
+   - UI provides category filter tabs (All + per-category).
+   - Filtered list updates counts and preserves claim button behavior.
+   - `AchievementUISpec` covers filter selection and empty states.
 
-## Completed Features
+6. [ ] Add active quest detail drawer in Quest UI.
+   Acceptance:
+   - Quest UI shows selected quest objectives, rewards, and state.
+   - Drawer updates on `QuestSnapshotUpdated` without reopening.
+   - `QuestUISpec` covers rendering and update behavior.
 
-- [x] Seasonal Event System (Iteration 1)
-  - `src/Shared/Definitions/SeasonalEventDefinitions.luau` -- 4 seasons with challenges, buffs, milestones
-  - `src/Server/Services/SeasonalEventService.luau` -- season transitions, challenge tracking, buff multipliers
-  - `src/Network/SeasonalEventPackets.luau` -- client-server packets
-  - `Tests/Specs/SeasonalEventSpec.lua` -- 54 behavioral tests
-  - `Profile.luau` updated with `SeasonalEventState`
-  - Integrates with WeatherConfig season cycle and notification system
-- [x] Daily Reward System (Iteration 1)
-  - `src/Shared/Definitions/DailyRewardDefinitions.luau` -- 7-day reward cycle with milestones
-  - `src/Server/Services/DailyRewardService.luau` -- streak tracking, cooldown, claim logic
-  - `src/Network/DailyRewardPackets.luau` -- client-server packets
-  - `Tests/Specs/DailyRewardSpec.lua` -- 27 behavioral tests
-  - `Profile.luau` updated with `DailyRewardState`
-  - First real consumer of `NotificationService`
+7. [ ] Add tenant review filters by rating.
+   Acceptance:
+   - Reviews UI supports filtering to 5/4/3+ star ratings.
+   - Filter state persists while UI is open.
+   - Manual smoke: filter reduces visible rows correctly.
 
-## Next Work (Product/Code Depth)
+8. [ ] Add mailbox income breakdown tooltip.
+   Acceptance:
+   - Mailbox packets include per-tenant income breakdown in summary payload.
+   - Mailbox HUD shows tooltip with per-tenant contributions and next payout time.
+   - Tests verify breakdown totals and payload shape.
 
-- [x] Seasonal Event System follow-ups
-  - [x] Wire SeasonalEventService into WeatherService for automatic season transitions
-  - [x] Build client-side SeasonalEventUI (season banner, challenge tracker, buff display, milestone rewards, per-challenge/milestone reward claiming, MainHUD button)
-  - [x] Add seasonal achievements to AchievementDefinitions
-  - [x] Integrate seasonal buffs into ProgressionService (XP multiplier) and BillingService (cash multiplier)
-- [ ] Daily Reward System follow-ups
-  - [x] Build client-side DailyRewardUI (claim button, streak calendar, countdown timer)
-  - [x] Wire DailyRewardService into ProgressionService for XP grants
-  - [x] Add Daily Reward achievements to AchievementDefinitions
-  - [ ] Add daily challenge variant (rotating objectives using QuestService)
-- [ ] Replace stub-heavy tests with behavior tests against production service logic
-  - Focus first on `PlotService` and `TenantService` edge cases
-- [x] Integrate NotificationService into core economy/services
-  - [x] AchievementService
-  - [x] TradeService
-  - [x] BillingService
-- [x] Add CI lint step for Luau source (`selene`)
-- [ ] Expand public docs with gameplay/system overviews and contributor setup guidance
-- [ ] Enable release process that updates `CHANGELOG.md` from merged PR metadata
+9. [ ] Add seasonal event reward summary panel.
+   Acceptance:
+   - Seasonal status payload includes pending rewards count and next milestone label.
+   - Seasonal UI shows pending counts and next milestone progress.
+   - `SeasonalEventUISpec` covers summary rendering.
+
+10. [ ] Add world event tips cooldown safeguards.
+    Acceptance:
+    - Tip selection enforces a cooldown per tip.
+    - `WorldEventTipsSpec` covers cooldown rotation behavior.

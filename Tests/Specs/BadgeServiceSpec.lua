@@ -48,8 +48,22 @@ describe("BadgeService", function()
 			assert.is_string(badge.Icon)
 		end)
 
+		it("returns a badge for Daily", function()
+			local badge = BadgeService.GetBadgeForCategory("Daily")
+			assert.is_not_nil(badge)
+			assert.equals("Daily", badge.Label)
+			assert.is_string(badge.Icon)
+		end)
+
+		it("returns a badge for Seasonal", function()
+			local badge = BadgeService.GetBadgeForCategory("Seasonal")
+			assert.is_not_nil(badge)
+			assert.equals("Seasonal", badge.Label)
+			assert.is_string(badge.Icon)
+		end)
+
 		it("returns unique icons for each known category", function()
-			local categories = { "Building", "Household", "Tenants", "Crafting", "Progression" }
+			local categories = { "Building", "Household", "Tenants", "Crafting", "Progression", "Daily", "Seasonal" }
 			local icons = {}
 			for _, category in ipairs(categories) do
 				local badge = BadgeService.GetBadgeForCategory(category)
@@ -59,7 +73,7 @@ describe("BadgeService", function()
 		end)
 
 		it("returns unique colors for each known category", function()
-			local categories = { "Building", "Household", "Tenants", "Crafting", "Progression" }
+			local categories = { "Building", "Household", "Tenants", "Crafting", "Progression", "Daily", "Seasonal" }
 			local colorKeys = {}
 			for _, category in ipairs(categories) do
 				local badge = BadgeService.GetBadgeForCategory(category)
@@ -127,7 +141,7 @@ describe("BadgeService", function()
 		end)
 
 		it("returns valid RGB values in 0-255 range for all categories", function()
-			local categories = { "Building", "Household", "Tenants", "Crafting", "Progression" }
+			local categories = { "Building", "Household", "Tenants", "Crafting", "Progression", "Daily", "Seasonal" }
 			for _, category in ipairs(categories) do
 				local badge = BadgeService.GetBadgeForCategory(category)
 				assert.is_true(badge.Color.R >= 0 and badge.Color.R <= 255,
@@ -151,10 +165,10 @@ describe("BadgeService", function()
 	-- ========== GetCategories ==========
 
 	describe("GetCategories", function()
-		it("returns all 5 known categories", function()
+		it("returns all 7 known categories", function()
 			local categories = BadgeService.GetCategories()
 			assert.is_table(categories)
-			assert.equals(5, #categories)
+			assert.equals(7, #categories)
 		end)
 
 		it("returns categories in sorted order", function()
@@ -176,6 +190,8 @@ describe("BadgeService", function()
 			assert.is_true(set["Tenants"])
 			assert.is_true(set["Crafting"])
 			assert.is_true(set["Progression"])
+			assert.is_true(set["Daily"])
+			assert.is_true(set["Seasonal"])
 		end)
 
 		it("returns a fresh table each call", function()
@@ -189,7 +205,7 @@ describe("BadgeService", function()
 
 	describe("HasBadge", function()
 		it("returns true for all known categories", function()
-			local categories = { "Building", "Household", "Tenants", "Crafting", "Progression" }
+			local categories = { "Building", "Household", "Tenants", "Crafting", "Progression", "Daily", "Seasonal" }
 			for _, category in ipairs(categories) do
 				assert.is_true(BadgeService.HasBadge(category), "expected HasBadge true for " .. category)
 			end

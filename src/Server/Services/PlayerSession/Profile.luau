@@ -52,6 +52,9 @@ local Profile = {
 		OutageActive = false,
 	},
 	InventoryState = {},
+	StashState = {
+		Items = {}, -- { [itemId: string]: number } count map
+	},
 	CraftingState = {
 		Skills = {},
 		StarterResourcesGranted = false,
@@ -83,6 +86,11 @@ local Profile = {
 		TotalCashEarned = 0,
 		TotalExperienceEarned = 0,
 		MilestonesClaimed = {},
+		DailyChallenge = {
+			DayId = -1,
+			QuestId = "",
+			AssignedAt = 0,
+		},
 	},
 	SeasonalEventState = {
 		CurrentSeason = "Spring",

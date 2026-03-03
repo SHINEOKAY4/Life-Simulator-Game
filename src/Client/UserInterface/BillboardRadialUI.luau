@@ -100,13 +100,14 @@ function BillboardRadialUI.Init()
 			return
 		end
 		print("MoveObject action triggered")
-		if not AdorneeModel then
+		local selectedModel = AdorneeModel
+		if not selectedModel then
 			warn("No model selected for move action.")
 			return
 		end
 
-		ObjectAction.Move(AdorneeModel, Vector3.new(0, 0, 0))
-		--#TODO: You can add functionality here to handle the move action
+		BillboardRadialUI.Hide()
+		ObjectAction.Move(selectedModel, selectedModel:GetPivot().Position)
 	end)
 
 	ObjectSelectorContext.RotateObject.Pressed:Connect(function()
@@ -137,12 +138,12 @@ function BillboardRadialUI.Init()
 		if not UiClickGuard() then
 			return
 		end
-		print("CopyObject action triggered")
+		print("PickUp (stash) action triggered")
 		if not AdorneeModel then
-			warn("No model selected for copy action.")
+			warn("No model selected for pick-up action.")
 			return
 		end
-		ObjectAction.Copy(AdorneeModel)
+		ObjectAction.PickUp(AdorneeModel)
 	end)
 end
 

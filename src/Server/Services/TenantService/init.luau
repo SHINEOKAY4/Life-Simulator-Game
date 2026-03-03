@@ -72,7 +72,7 @@ local TenantService = {}
 local RuntimeByUserId: { [number]: RuntimeState } = {}
 
 -- Forward declarations for functions used out of order
-local broadcastMailboxBalance, broadcastPropertyValue, broadcastTenantDelta, updateIncomeRateAttribute, concludeLease
+local broadcastMailboxBalance, broadcastIncomeSummary, broadcastPropertyValue, broadcastTenantDelta, updateIncomeRateAttribute, concludeLease
 
 -- ========================================
 -- HELPER FUNCTIONS
@@ -281,11 +281,52 @@ end
 -- ATTRIBUTE BROADCASTING
 -- ========================================
 
+-- Returns seconds until the next whole-dollar income drip (earliest across all active leases).
+local function calculateNextRentTick(runtime: RuntimeState): number
+	local leases = runtime.Save.ActiveLeases
+	if typeof(leases) ~= "table" then
+		return 0
+	end
+
+	local minTick = math.huge
+	for _, lease in pairs(leases) do
+		local rate = LeaseManager.GetIncomePerSecond(lease)
+		if rate > 0 then
+			local accrued = typeof(lease.AccruedRemainder) == "number" and lease.AccruedRemainder or 0
+			local remaining = 1.0 - accrued
+			if remaining <= 0 then
+				return 0
+			end
+			local tickIn = remaining / rate
+			if tickIn < minTick then
+				minTick = tickIn
+			end
+		end
+	end
+
+	if minTick == math.huge then
+		return 0
+	end
+	return math.max(0, math.floor(minTick + 0.5))
+end
+
+function broadcastIncomeSummary(runtime: RuntimeState, balance: number?)
+	local finalBalance = balance or MailboxManager.EnsureBalance(runtime.Save)
+	local totalRate = LeaseManager.CalculateTotalIncomeRate(runtime.Save.ActiveLeases)
+	local nextTick = calculateNextRentTick(runtime)
+	MailboxPackets.IncomeSummary:FireClient(runtime.Player, {
+		Balance = finalBalance,
+		IncomePerSecond = totalRate,
+		NextRentTick = nextTick,
+	})
+end
+
 function broadcastMailboxBalance(runtime: RuntimeState, balance: number?)
 	local finalBalance = balance or MailboxManager.EnsureBalance(runtime.Save)
 	runtime.Save.MailboxBalance = finalBalance
 	AttributeManager.SetMailboxBalance(runtime.Player, finalBalance)
 	MailboxPackets.BalanceUpdate:FireClient(runtime.Player, { Balance = finalBalance })
+	broadcastIncomeSummary(runtime, finalBalance)
 end
 
 function broadcastPropertyValue(runtime: RuntimeState, scoreValue: any?)
@@ -299,6 +340,7 @@ function updateIncomeRateAttribute(runtime: RuntimeState)
 	local leases = runtime.Save.ActiveLeases
 	local totalRate = LeaseManager.CalculateTotalIncomeRate(leases)
 	AttributeManager.SetIncomeRate(runtime.Player, totalRate)
+	broadcastIncomeSummary(runtime)
 end
 
 function broadcastTenantDelta(runtime: RuntimeState, tenantId: string, lease: TenantLease?)
@@ -473,6 +515,7 @@ local function hydrateRuntime(player: Player): RuntimeState?
 		if RuntimeByUserId[player.UserId] == runtime then
 			broadcastMailboxBalance(runtime)
 			broadcastPropertyValue(runtime)
+			broadcastIncomeSummary(runtime)
 		end
 	end)
 

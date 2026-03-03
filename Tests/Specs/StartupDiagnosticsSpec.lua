@@ -1,0 +1,36 @@
+local function readFile(path)
+	local file = assert(io.open(path, "r"), "missing file: " .. path)
+	local contents = file:read("*a")
+	file:close()
+	return contents
+end
+
+describe("Startup diagnostics standards", function()
+	it("defines the shared StartupDiagnostics utility API", function()
+		local contents = readFile("src/Shared/Utilities/StartupDiagnostics.luau")
+		assert.is_truthy(string.find(contents, "function StartupDiagnostics.new", 1, true))
+		assert.is_truthy(string.find(contents, "function StartupDiagnostics:Boundary", 1, true))
+		assert.is_truthy(string.find(contents, "function StartupDiagnostics:ResolveDependency", 1, true))
+	end)
+
+	it("wraps server startup service boundaries", function()
+		local contents = readFile("src/Server/Main.server.luau")
+		assert.is_truthy(string.find(contents, "local StartupLog = StartupDiagnostics.new(\"ServerMain\")", 1, true))
+		assert.is_truthy(string.find(contents, "runStartupStep(\"ProgressionService.Init\"", 1, true))
+		assert.is_truthy(string.find(contents, "runStartupStep(\"TrashManager.Start\"", 1, true))
+	end)
+
+	it("wraps client startup boundaries and dependency resolution", function()
+		local contents = readFile("src/Client/Main.client.luau")
+		assert.is_truthy(string.find(contents, "local StartupLog = StartupDiagnostics.new(\"ClientMain\")", 1, true))
+		assert.is_truthy(string.find(contents, "StartupLog:ResolveDependency(\"ReplicatedStorage.Network\"", 1, true))
+		assert.is_truthy(string.find(contents, "runStartupStep(\"PreloadNetworkPackets\"", 1, true))
+		assert.is_truthy(string.find(contents, "runStartupStep(\"TenantStore.Init\"", 1, true))
+	end)
+
+	it("uses diagnostics for key shared dependency lookups", function()
+		local contents = readFile("src/Shared/Utilities/ItemFinder.luau")
+		assert.is_truthy(string.find(contents, "local StartupLog = StartupDiagnostics.new(\"ItemFinder\")", 1, true))
+		assert.is_truthy(string.find(contents, "StartupLog:ResolveDependency", 1, true))
+	end)
+end)

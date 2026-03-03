@@ -21,6 +21,13 @@ local MilestoneSchema = {
 	Label = Packet.String,
 }
 
+local DailyChallengeSchema = {
+	DayId = Packet.NumberU32,
+	QuestId = Packet.String,
+	AssignedAt = Packet.NumberU32,
+	QuestState = Packet.String,
+}
+
 local StatusSchema = {
 	CurrentStreak = Packet.NumberU16,
 	LongestStreak = Packet.NumberU16,
@@ -30,6 +37,10 @@ local StatusSchema = {
 	CanClaim = Packet.Boolean8,
 	SecondsUntilClaim = Packet.NumberU32,
 	NextStreak = Packet.NumberU16,
+	SecondsUntilStreakExpiry = Packet.NumberU32,
+	InGraceWindow = Packet.Boolean8,
+	StreakWarning = Packet.Boolean8,
+	DailyChallenge = DailyChallengeSchema,
 }
 
 local ClaimResultSchema = {

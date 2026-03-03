@@ -17,28 +17,9 @@ local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
 local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 local GoodSignal = require(ReplicatedStorage.Packages.GoodSignal)
+local PlotSerializationUtils = require(ServerScriptService.Server.Utilities.PlotSerializationUtils)
 
 type PlotRuntimeState = PlotState.PlotState
-type PlacedObjectMap = PlotState.PlacedObjectMap
-type SurfaceMountedMap = PlotState.SurfaceMountedMap
-type SurfaceMountSnapshot = {
-	key: string,
-	id: string,
-	parentKey: string,
-	LocalPosition: { X: number, Y: number, Z: number },
-	LocalRotationY: number,
-	Metadata: any?,
-}
-type PlacedObjectSnapshot = {
-	id: string,
-	cellX: number,
-	cellZ: number,
-	facing: string,
-	WidthCells: number,
-	DepthCells: number,
-	Metadata: any?,
-	Level: number,
-}
 type Facing = PlotState.Facing
 type StationOccupancy = {
 	Id: string,
@@ -78,114 +59,6 @@ end
 PlotService.PlotClaimed = GoodSignal.new()
 PlotService.PlotUnclaimed = GoodSignal.new()
 PlotService.StationRemoved = GoodSignal.new()
-
-local function cloneMetadata(value: any): any
-	if typeof(value) ~= "table" then
-		return value
-	end
-
-	local result = {}
-	for key, entry in pairs(value) do
-		result[key] = cloneMetadata(entry)
-	end
-
-	return result
-end
-
-local function clonePosition(value: any): { X: number, Y: number, Z: number }
-	if typeof(value) == "table" then
-		local xValue = value.X or value.x
-		local yValue = value.Y or value.y
-		local zValue = value.Z or value.z
-		if typeof(xValue) == "number" and typeof(yValue) == "number" and typeof(zValue) == "number" then
-			return {
-				X = xValue,
-				Y = yValue,
-				Z = zValue,
-			}
-		end
-	elseif typeof(value) == "Vector3" then
-		return {
-			X = value.X,
-			Y = value.Y,
-			Z = value.Z,
-		}
-	end
-
-	return {
-		X = 0,
-		Y = 0,
-		Z = 0,
-	}
-end
-
-local function flattenPlacedObjects(map: PlacedObjectMap, defaultLevel: number): { PlacedObjectSnapshot }
-	local keys = {}
-	for key in pairs(map) do
-		keys[#keys + 1] = key
-	end
-	table.sort(keys)
-
-	local keyCount = #keys
-	local result = table.create(keyCount)
-	for index = 1, keyCount do
-		local saved = map[keys[index]]
-		if saved then
-			local spec = saved.id and ItemFinder.FindItemById(saved.id) or nil
-			local metadata = saved.Metadata
-			local metadataClone = if metadata ~= nil then cloneMetadata(metadata) else nil
-			local widthCells = metadata and (metadata.WidthCells or metadata.widthCells)
-			if not widthCells or widthCells <= 0 then
-				widthCells = if spec then (spec.WidthCells or spec.Width or 1) else 1
-			end
-			local depthCells = metadata and (metadata.DepthCells or metadata.depthCells)
-			if not depthCells or depthCells <= 0 then
-				depthCells = if spec then (spec.DepthCells or spec.Depth or 1) else 1
-			end
-			local facing: string = (saved.facing or "North") :: string
-			local levelValue = if typeof(saved.yLevel) == "number" then saved.yLevel else defaultLevel
-			result[index] = {
-				id = saved.id,
-				cellX = saved.cellX,
-				cellZ = saved.cellZ,
-				facing = facing,
-				WidthCells = widthCells,
-				DepthCells = depthCells,
-				Metadata = metadataClone,
-				Level = levelValue,
-			}
-		end
-	end
-
-	return result
-end
-
-local function flattenSurfaceMounts(map: SurfaceMountedMap): { SurfaceMountSnapshot }
-	local keys = {}
-	for key in pairs(map) do
-		keys[#keys + 1] = key
-	end
-	table.sort(keys)
-
-	local result = table.create(#keys)
-	for index = 1, #keys do
-		local key = keys[index]
-		local saved = map[key]
-		if saved and typeof(saved) == "table" and typeof(saved.id) == "string" then
-			local metadataClone = saved.Metadata and cloneMetadata(saved.Metadata) or nil
-			result[index] = {
-				key = key,
-				id = saved.id,
-				parentKey = saved.parentKey,
-				LocalPosition = clonePosition(saved.LocalPosition),
-				LocalRotationY = typeof(saved.LocalRotationY) == "number" and saved.LocalRotationY or 0,
-				Metadata = metadataClone,
-			}
-		end
-	end
-
-	return result
-end
 
 local function InitializePlayerPlot(player: Player, plotModel: Model)
 	local coversFolder = plotModel:FindFirstChild("Covers") :: Folder
@@ -291,7 +164,7 @@ function PlotService.Load(player: Player, plotModel: Model)
 	local stationCache = PlayerStations[userId]
 	for uniqueKey, obj in pairs(plotStateData.PlacedObjects) do
 		local facing = obj.facing or "North"
-		local metadataClone = if obj.Metadata ~= nil then cloneMetadata(obj.Metadata) else nil
+		local metadataClone = if obj.Metadata ~= nil then PlotSerializationUtils.CloneMetadata(obj.Metadata) else nil
 		WorldPlacer.Spawn(player, grid, obj.id, obj.cellX, obj.cellZ, facing, obj.yLevel, {
 			metadata = metadataClone,
 		})
@@ -351,8 +224,12 @@ function PlotService.Load(player: Player, plotModel: Model)
 		FloorHeightStuds = runtimeState:GetFloorHeightStuds(),
 	}
 
-	local placedSnapshot = flattenPlacedObjects(plotStateData.PlacedObjects, runtimeState.DefaultLevel)
-	local surfaceMountSnapshot = flattenSurfaceMounts(runtimeState.SurfaceMountedObjects)
+	local placedSnapshot = PlotSerializationUtils.FlattenPlacedObjects(
+		plotStateData.PlacedObjects,
+		runtimeState.DefaultLevel,
+		ItemFinder.FindItemById
+	)
+	local surfaceMountSnapshot = PlotSerializationUtils.FlattenSurfaceMounts(runtimeState.SurfaceMountedObjects)
 	Packets.PlotStateSync:FireClient(
 		player,
 		chunkInfo,

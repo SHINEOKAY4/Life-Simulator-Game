@@ -39,6 +39,14 @@ local CloseButton = ImageLabelBackground:FindFirstChild("CloseButton") :: TextBu
 
 local BillUI = {}
 
+-- Ordered list of tiers with their fixed monthly costs (mirrors BillingConstants.InternetTiers)
+local INTERNET_TIERS: { { Name: string, Cost: number } } = {
+	{ Name = "None", Cost = 0 },
+	{ Name = "Basic", Cost = 25 },
+	{ Name = "Standard", Cost = 50 },
+	{ Name = "Premium", Cost = 100 },
+}
+
 local CURRENCY_OPTIONS = {
 	currencySymbol = "$",
 	decimalPlaces = 2,
@@ -54,6 +62,8 @@ local CASH_ATTRIBUTE = "Cash"
 local isVisible = false
 local hudSuppressed = false
 local hudRestoreValue: boolean? = nil
+local currentInternetTier: string = "None"
+local tierButtons: { [string]: TextButton } = {}
 
 local function updateAmountLabel(label: TextLabel, value: number)
 	label.Text = Formatter.formatCurrency(value, CURRENCY_OPTIONS)
@@ -107,6 +117,89 @@ local function updatePayButtonVisibility()
 	PayButton.Visible = billDue and cash >= totalBill and totalBill > 0
 end
 
+local function highlightTierButtons(activeTier: string)
+	for _, entry in ipairs(INTERNET_TIERS) do
+		local btn = tierButtons[entry.Name]
+		if not btn then
+			continue
+		end
+		if entry.Name == activeTier then
+			btn.BackgroundColor3 = Color3.fromRGB(70, 140, 220)
+			btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		else
+			btn.BackgroundColor3 = Color3.fromRGB(50, 55, 75)
+			btn.TextColor3 = Color3.fromRGB(200, 205, 220)
+		end
+	end
+end
+
+local function buildTierSelector(parent: Frame)
+	local container = Instance.new("Frame")
+	container.Name = "InternetTierSelector"
+	container.BackgroundTransparency = 1
+	container.Size = UDim2.new(1, 0, 0, 36)
+	container.LayoutOrder = 10
+	container.Parent = parent
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Padding = UDim.new(0, 6)
+	layout.Parent = container
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.new(0, 68, 1, 0)
+	label.Font = Enum.Font.GothamSemibold
+	label.TextSize = 12
+	label.TextColor3 = Color3.fromRGB(180, 185, 205)
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Text = "Plan:"
+	label.Parent = container
+
+	for _, entry in ipairs(INTERNET_TIERS) do
+		local btn = Instance.new("TextButton")
+		btn.Name = "Tier_" .. entry.Name
+		btn.Size = UDim2.new(0, 72, 0, 28)
+		btn.BackgroundColor3 = Color3.fromRGB(50, 55, 75)
+		btn.BorderSizePixel = 0
+		btn.Font = Enum.Font.Gotham
+		btn.TextSize = 12
+		btn.TextColor3 = Color3.fromRGB(200, 205, 220)
+		btn.Text = entry.Name .. "\n$" .. tostring(entry.Cost)
+		btn.Parent = container
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 4)
+		corner.Parent = btn
+
+		local tierName = entry.Name
+		btn.Activated:Connect(function()
+			Debounce.RunIfAvailable("SetInternetTier", 0.5, function()
+				local success, result = BillingPackets.SetInternetTier:Fire(tierName)
+				if success then
+					currentInternetTier = result
+					highlightTierButtons(currentInternetTier)
+				else
+					warn("[BillUI] Failed to set internet tier:", result)
+				end
+			end, Player.UserId)
+		end)
+
+		tierButtons[entry.Name] = btn
+	end
+end
+
+local function fetchAndApplyInternetTier()
+	local success, tier = BillingPackets.GetInternetTier:Fire()
+	if success and typeof(tier) == "string" then
+		currentInternetTier = tier
+		highlightTierButtons(currentInternetTier)
+	end
+end
+
 function BillUI.Init()
 	-- Initially hide the UI
 	MainFrame.Visible = false
@@ -138,6 +231,9 @@ function BillUI.Init()
 		updateAmountLabel(InternetAmountLabel, value)
 	end)
 	updateAmountLabel(InternetAmountLabel, Player:GetAttribute(BillingConstants.InternetAttribute) or 0)
+
+	-- Build the internet tier selector inside the Internet row frame
+	buildTierSelector(InternetFrame)
 
 	-- Listen to TotalBill attribute changes
 	Player:GetAttributeChangedSignal(BillingConstants.TotalBillAttribute):Connect(function()
@@ -180,6 +276,8 @@ function BillUI.Show()
 	hideConflictingInterfaces()
 	MainFrame.Visible = true
 	VisualFX.SetPopupVisible(WindowFrame, true, POPUP_OPTIONS)
+	-- Refresh tier highlight whenever the panel opens
+	fetchAndApplyInternetTier()
 end
 
 function BillUI.Hide()

@@ -23,6 +23,16 @@ end
 
 local IS_ROBLOX = hasRobloxRuntime()
 
+local ReplicatedStorage = nil
+local Players = nil
+local NotificationPackets = nil
+
+if IS_ROBLOX then
+	ReplicatedStorage = game:GetService("ReplicatedStorage")
+	Players = game:GetService("Players")
+	NotificationPackets = require(ReplicatedStorage.Network.NotificationPackets)
+end
+
 -- Notification categories with default priorities and display durations (seconds)
 local CATEGORIES = {
 	Achievement = { Priority = 4, Duration = 8, Icon = "achievement" },
@@ -50,8 +60,15 @@ local function getTime()
 	return clockFn()
 end
 
+local function normalizePlayerKey(playerId)
+	if IS_ROBLOX and typeof(playerId) == "Instance" and playerId:IsA("Player") then
+		return tostring(playerId.UserId)
+	end
+	return tostring(playerId)
+end
+
 local function ensurePlayerState(playerId)
-	local key = tostring(playerId)
+	local key = normalizePlayerKey(playerId)
 	local state = stateByPlayerId[key]
 	if not state then
 		state = {
@@ -63,6 +80,61 @@ local function ensurePlayerState(playerId)
 		stateByPlayerId[key] = state
 	end
 	return state
+end
+
+local function resolvePlayer(playerId)
+	if not Players then
+		return nil
+	end
+	if typeof(playerId) == "Instance" and playerId:IsA("Player") then
+		return playerId
+	end
+	if type(playerId) == "number" then
+		return Players:GetPlayerByUserId(playerId)
+	end
+	if type(playerId) == "string" then
+		local numericId = tonumber(playerId)
+		if numericId then
+			return Players:GetPlayerByUserId(numericId)
+		end
+	end
+	return nil
+end
+
+local function buildPacketPayload(notification)
+	return {
+		Id = notification.Id,
+		Category = notification.Category,
+		Title = notification.Title,
+		Body = notification.Body,
+		Icon = notification.Icon,
+		Priority = notification.Priority,
+		Duration = notification.Duration,
+		Timestamp = notification.Timestamp,
+		Read = notification.Read,
+		Metadata = notification.Metadata or {},
+	}
+end
+
+local function buildQueueSnapshot(state)
+	local queue = {}
+	for i, notification in ipairs(state.Queue) do
+		queue[i] = buildPacketPayload(notification)
+	end
+	return {
+		Queue = queue,
+	}
+end
+
+local function sendDelta(playerId, notification)
+	if not IS_ROBLOX or not NotificationPackets then
+		return
+	end
+	local player = resolvePlayer(playerId)
+	if not player then
+		return
+	end
+	NotificationPackets.NotificationDelta:FireClient(player, buildPacketPayload(notification))
 end
 
 local function generateId(state)
@@ -156,6 +228,17 @@ function NotificationService.Send(playerId, category, title, body, metadata)
 	}
 
 	insertSorted(state.Queue, notification)
+
+	local stillQueued = false
+	for _, queued in ipairs(state.Queue) do
+		if queued.Id == id then
+			stillQueued = true
+			break
+		end
+	end
+	if stillQueued then
+		sendDelta(playerId, notification)
+	end
 	return notification, nil
 end
 
@@ -344,7 +427,7 @@ function NotificationService.ClearAll(playerId)
 		return
 	end
 
-	local key = tostring(playerId)
+	local key = normalizePlayerKey(playerId)
 	stateByPlayerId[key] = nil
 end
 
@@ -396,7 +479,25 @@ function NotificationService.Init()
 	if not IS_ROBLOX then
 		return
 	end
-	-- Roblox-specific packet registration would go here
+	if not Players then
+		Players = game:GetService("Players")
+	end
+	if not NotificationPackets and ReplicatedStorage then
+		NotificationPackets = require(ReplicatedStorage.Network.NotificationPackets)
+	end
+	if not NotificationPackets then
+		return
+	end
+
+	local function sendSnapshot(player)
+		local state = ensurePlayerState(player)
+		NotificationPackets.StateSnapshot:FireClient(player, buildQueueSnapshot(state))
+	end
+
+	Players.PlayerAdded:Connect(sendSnapshot)
+	for _, player in ipairs(Players:GetPlayers()) do
+		sendSnapshot(player)
+	end
 end
 
 -- ============ Test Hooks ============

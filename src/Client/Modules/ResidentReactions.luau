@@ -2,6 +2,7 @@
 -- Client/Modules/ResidentReactions.luau
 -- Handles procedural animations and reactions for residents based on environment.
 
+local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local TemperatureController = require(script.Parent.TemperatureController)
@@ -18,6 +19,10 @@ type ReactionState = {
 	LookTarget: Vector3?,
 	LookWeight: number,
 	ShiverTween: Tween?,
+	HeatSwayTween: Tween?,
+	WaistMotor: Motor6D?,
+	WaistOriginalC0: CFrame?,
+	ActiveWeatherAnim: "None" | "Shiver" | "HeatSway",
 }
 
 local States: { [Model]: ReactionState } = {}
@@ -37,6 +42,161 @@ end
 
 local function getRoot(model: Model): BasePart?
 	return model:FindFirstChild("HumanoidRootPart") :: BasePart
+end
+
+-- Locate the Waist Motor6D in either R15 (UpperTorso.Waist) or R6 (Torso.Root Joint) rigs
+local function getWaistMotor(model: Model): Motor6D?
+	local upperTorso = model:FindFirstChild("UpperTorso")
+	if upperTorso then
+		local waist = upperTorso:FindFirstChild("Waist")
+		if waist and waist:IsA("Motor6D") then
+			return waist :: Motor6D
+		end
+	end
+	-- R6 fallback: Torso contains a Motor6D called "Root Joint"
+	local torso = model:FindFirstChild("Torso")
+	if torso then
+		local rootJoint = torso:FindFirstChild("Root Joint")
+		if rootJoint and rootJoint:IsA("Motor6D") then
+			return rootJoint :: Motor6D
+		end
+	end
+	return nil
+end
+
+-- Ensure waist motor reference is cached on the state
+local function ensureWaistMotor(model: Model, state: ReactionState)
+	if state.WaistMotor and state.WaistMotor.Parent then
+		return -- already valid
+	end
+	local motor = getWaistMotor(model)
+	if motor then
+		state.WaistMotor = motor
+		state.WaistOriginalC0 = motor.C0
+	else
+		state.WaistMotor = nil
+		state.WaistOriginalC0 = nil
+	end
+end
+
+-- Stop any active weather animation tweens and restore the waist to its original C0
+local function stopWeatherAnimation(state: ReactionState)
+	if state.ShiverTween then
+		state.ShiverTween:Cancel()
+		state.ShiverTween = nil
+	end
+	if state.HeatSwayTween then
+		state.HeatSwayTween:Cancel()
+		state.HeatSwayTween = nil
+	end
+	-- Restore waist to original pose (direct assignment; the next frame's head-tracking
+	-- lerp will smooth it out visually)
+	if state.WaistMotor and state.WaistOriginalC0 then
+		local motor = state.WaistMotor
+		if motor.Parent then
+			motor.C0 = state.WaistOriginalC0
+		end
+	end
+	state.ActiveWeatherAnim = "None"
+end
+
+-- Create a looping shiver tween: rapid small oscillation on the waist joint
+local function startShiverAnimation(state: ReactionState)
+	if state.ActiveWeatherAnim == "Shiver" then
+		return -- already shivering
+	end
+	stopWeatherAnimation(state)
+
+	local motor = state.WaistMotor
+	local originalC0 = state.WaistOriginalC0
+	if not motor or not originalC0 or not motor.Parent then
+		return
+	end
+
+	-- Shiver: quick oscillation +-2 degrees on Z axis with slight X tremor
+	local shiverAngleZ = math.rad(2.0)
+	local shiverAngleX = math.rad(0.8)
+	local shiverTarget = originalC0 * CFrame.Angles(shiverAngleX, 0, shiverAngleZ)
+	local shiverInfo = TweenInfo.new(
+		0.12, -- very fast
+		Enum.EasingStyle.Sine,
+		Enum.EasingDirection.InOut,
+		-1, -- repeat forever
+		true, -- reverses
+		0 -- no delay
+	)
+
+	-- We need a CFrameValue proxy because Motor6D.C0 is not directly tweenable
+	local proxy = Instance.new("CFrameValue")
+	proxy.Name = "ShiverProxy"
+	proxy.Value = originalC0
+	proxy.Parent = motor.Parent
+
+	proxy.Changed:Connect(function()
+		if motor.Parent then
+			motor.C0 = proxy.Value
+		end
+	end)
+
+	local tween = TweenService:Create(proxy, shiverInfo, { Value = shiverTarget })
+	tween:Play()
+
+	-- Store reference so we can cancel later
+	state.ShiverTween = tween
+	state.ActiveWeatherAnim = "Shiver"
+
+	-- Clean up proxy when tween is cancelled
+	tween.Completed:Connect(function()
+		proxy:Destroy()
+	end)
+end
+
+-- Create a looping slow sway tween: sluggish heat-exhaustion movement on waist
+local function startHeatSwayAnimation(state: ReactionState)
+	if state.ActiveWeatherAnim == "HeatSway" then
+		return -- already swaying
+	end
+	stopWeatherAnimation(state)
+
+	local motor = state.WaistMotor
+	local originalC0 = state.WaistOriginalC0
+	if not motor or not originalC0 or not motor.Parent then
+		return
+	end
+
+	-- Heat exhaustion: slow droop forward + gentle side sway
+	local droopAngleX = math.rad(4.0) -- lean forward slightly
+	local swayAngleZ = math.rad(2.5) -- side sway
+	local swayTarget = originalC0 * CFrame.Angles(droopAngleX, 0, swayAngleZ)
+	local swayInfo = TweenInfo.new(
+		1.2, -- slow, lethargic
+		Enum.EasingStyle.Sine,
+		Enum.EasingDirection.InOut,
+		-1, -- repeat forever
+		true, -- reverses
+		0 -- no delay
+	)
+
+	local proxy = Instance.new("CFrameValue")
+	proxy.Name = "HeatSwayProxy"
+	proxy.Value = originalC0
+	proxy.Parent = motor.Parent
+
+	proxy.Changed:Connect(function()
+		if motor.Parent then
+			motor.C0 = proxy.Value
+		end
+	end)
+
+	local tween = TweenService:Create(proxy, swayInfo, { Value = swayTarget })
+	tween:Play()
+
+	state.HeatSwayTween = tween
+	state.ActiveWeatherAnim = "HeatSway"
+
+	tween.Completed:Connect(function()
+		proxy:Destroy()
+	end)
 end
 
 local function updateTemperatureReaction(model: Model, state: ReactionState)
@@ -80,13 +240,16 @@ local function updateTemperatureReaction(model: Model, state: ReactionState)
 
 	if tempF < 55 then
 		state.CurrentMood = "Cold"
-		-- TODO: Play shiver animation
+		ensureWaistMotor(model, state)
+		startShiverAnimation(state)
 	elseif tempF > 85 then
 		state.CurrentMood = "Hot"
-		-- TODO: Play wipe brow animation
+		ensureWaistMotor(model, state)
+		startHeatSwayAnimation(state)
 	else
 		if state.CurrentMood == "Cold" or state.CurrentMood == "Hot" then
 			state.CurrentMood = "Neutral"
+			stopWeatherAnimation(state)
 		end
 	end
 end
@@ -173,16 +336,26 @@ local function updateHeadTracking(model: Model, state: ReactionState, dt: number
 end
 
 function ResidentReactions.Register(model: Model)
-	States[model] = {
+	local state: ReactionState = {
 		LastTempCheck = 0,
 		LastTrashCheck = 0,
 		CurrentMood = "Neutral",
 		LookTarget = nil,
 		LookWeight = 0,
+		ShiverTween = nil,
+		HeatSwayTween = nil,
+		WaistMotor = nil,
+		WaistOriginalC0 = nil,
+		ActiveWeatherAnim = "None",
 	}
+	States[model] = state
 end
 
 function ResidentReactions.Unregister(model: Model)
+	local state = States[model]
+	if state then
+		stopWeatherAnimation(state)
+	end
 	States[model] = nil
 end
 

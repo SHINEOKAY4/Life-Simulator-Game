@@ -14,6 +14,7 @@ local PlotFinder = require(ReplicatedStorage.Shared.Utilities.PlotFinder)
 local Debounce = require(ReplicatedStorage.Shared.Utilities.Debounce)
 local BuildConstants = require(ReplicatedStorage.Shared.Configurations.BuildConstants)
 local Formatter = require(ReplicatedStorage.Shared.Utilities.Formatter)
+local Notification = require(script.Parent.Parent.UserInterface.Notification)
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -48,6 +49,21 @@ local _visualEffects: { Instance } = {}
 local function runDebounced(actionName: string, callback: () -> ()): ()
 	local key = string.format("PlotExpansion/%s", actionName)
 	Debounce.RunIfAvailable(key, INPUT_DEBOUNCE_SECONDS, callback, Player.UserId)
+end
+
+local function showPurchaseNotification(title: string, text: string, backgroundColor: Color3)
+	local ok, err = pcall(function()
+		Notification.Show({
+			Title = title,
+			Text = text,
+			Duration = 3,
+			BackgroundColor = backgroundColor,
+		})
+	end)
+
+	if not ok then
+		warn(("[PlotExpansion] Failed to show purchase notification: %s"):format(tostring(err)))
+	end
 end
 
 local Connection: RBXScriptConnection? = nil
@@ -211,9 +227,18 @@ function PlotExpansion.Init()
 					PlaySuccessSound()
 					PlayCelebrationEffect(hitCover)
 					UpdateCoverVisual(hitCover, true)
-					print("Toast notification UI implementation needed")
+					local successMessage = "Plot expanded successfully."
+					if type(message) == "string" and message ~= "" then
+						successMessage = message
+					end
+					showPurchaseNotification("Expansion Purchased", successMessage, Color3.fromRGB(52, 130, 90))
+				else
+					local failureMessage = "Could not purchase this expansion right now."
+					if type(message) == "string" and message ~= "" then
+						failureMessage = message
+					end
+					showPurchaseNotification("Expansion Failed", failureMessage, Color3.fromRGB(132, 64, 64))
 				end
-				--#TODO: Toast notification for success/failure
 				print("Purchase result:", success, message)
 			end
 		end)

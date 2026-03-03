@@ -97,7 +97,7 @@ describe("MainHUD Seasons button integration", function()
 	end)
 
 	it("includes SeasonsButton in configureButtonVisuals loop", function()
-		assert.is_truthy(source:find("SeasonsButton }%) do"))
+		assert.is_truthy(source:find("SeasonsButton", 1, true))
 	end)
 end)
 

@@ -325,6 +325,102 @@ describe("DailyRewardService", function()
 
 	-- ========== Status Reporting ==========
 
+	it("DailyChallenge payload contains all required fields", function()
+		local status = DailyRewardService.GetStatus("player1")
+		assert.is_not_nil(status.DailyChallenge)
+		local dc = status.DailyChallenge
+		-- DayId: non-negative integer
+		assert.is_not_nil(dc.DayId)
+		assert.is_true(dc.DayId >= 0)
+		-- QuestId: non-empty string
+		assert.is_not_nil(dc.QuestId)
+		assert.is_true(type(dc.QuestId) == "string" and dc.QuestId ~= "")
+		-- AssignedAt: non-negative integer
+		assert.is_not_nil(dc.AssignedAt)
+		assert.is_true(dc.AssignedAt >= 0)
+		-- QuestState: string (may be nil/in_progress for new players)
+		-- field must exist in payload (nil is acceptable, field key must be present)
+		assert.is_true(dc.QuestState == nil or type(dc.QuestState) == "string")
+	end)
+
+	it("assigns a rotating daily challenge quest in status", function()
+		local constants = DailyRewardService._GetConstants()
+		local expectedDayId = math.floor(currentTime / (24 * HOUR))
+		local expectedQuestIndex = (expectedDayId % #constants.DailyChallengeQuestIds) + 1
+
+		local status = DailyRewardService.GetStatus("player1")
+		assert.is_not_nil(status.DailyChallenge)
+		assert.equals(expectedDayId, status.DailyChallenge.DayId)
+		assert.equals(constants.DailyChallengeQuestIds[expectedQuestIndex], status.DailyChallenge.QuestId)
+		assert.equals("in_progress", status.DailyChallenge.QuestState)
+	end)
+
+	it("rotates the daily challenge quest on the next UTC day", function()
+		local firstStatus = DailyRewardService.GetStatus("player1")
+		currentTime = currentTime + (24 * HOUR)
+		local secondStatus = DailyRewardService.GetStatus("player1")
+
+		assert.is_not_nil(firstStatus.DailyChallenge)
+		assert.is_not_nil(secondStatus.DailyChallenge)
+		assert.is_true(firstStatus.DailyChallenge.DayId ~= secondStatus.DailyChallenge.DayId)
+		assert.is_true(firstStatus.DailyChallenge.QuestId ~= secondStatus.DailyChallenge.QuestId)
+		assert.equals("in_progress", secondStatus.DailyChallenge.QuestState)
+	end)
+
+	it("DailyChallenge QuestId matches one of the known daily challenge quest ids", function()
+		local constants = DailyRewardService._GetConstants()
+		local knownIds = {}
+		for _, id in ipairs(constants.DailyChallengeQuestIds) do
+			knownIds[id] = true
+		end
+
+		local status = DailyRewardService.GetStatus("player1")
+		assert.is_not_nil(status.DailyChallenge)
+		assert.is_true(knownIds[status.DailyChallenge.QuestId] == true)
+	end)
+
+	it("DailyChallenge DayId matches expected UTC day calculation", function()
+		local HOUR = 3600
+		local expectedDayId = math.floor(currentTime / (24 * HOUR))
+		local status = DailyRewardService.GetStatus("player1")
+		assert.equals(expectedDayId, status.DailyChallenge.DayId)
+	end)
+
+	it("rotates daily challenge quests deterministically across consecutive UTC days", function()
+		local constants = DailyRewardService._GetConstants()
+		local questIds = constants.DailyChallengeQuestIds
+		local baseDayId = math.floor(currentTime / (24 * HOUR))
+
+		for offset = 0, #questIds - 1 do
+			local status = DailyRewardService.GetStatus("player1")
+			local expectedDayId = baseDayId + offset
+			local expectedIndex = (expectedDayId % #questIds) + 1
+
+			assert.equals(expectedDayId, status.DailyChallenge.DayId)
+			assert.equals(questIds[expectedIndex], status.DailyChallenge.QuestId)
+
+			if offset < #questIds - 1 then
+				currentTime = currentTime + (24 * HOUR)
+			end
+		end
+	end)
+
+	it("keeps repeatable daily challenge assignment consistent across resets", function()
+		local firstStatus = DailyRewardService.GetStatus("player1")
+		local expectedDayId = firstStatus.DailyChallenge.DayId
+		local expectedQuestId = firstStatus.DailyChallenge.QuestId
+
+		DailyRewardService._ResetForTests()
+		DailyRewardService._SetClock(function()
+			return currentTime
+		end)
+
+		local secondStatus = DailyRewardService.GetStatus("player1")
+		assert.equals(expectedDayId, secondStatus.DailyChallenge.DayId)
+		assert.equals(expectedQuestId, secondStatus.DailyChallenge.QuestId)
+		assert.equals("in_progress", secondStatus.DailyChallenge.QuestState)
+	end)
+
 	it("reports pending milestone when approaching milestone day", function()
 		for day = 1, 6 do
 			DailyRewardService.ClaimReward("player1")
@@ -385,6 +481,103 @@ describe("DailyRewardService", function()
 		assert.equals(COOLDOWN, constants.ClaimCooldownSeconds)
 		assert.equals(GRACE, constants.StreakGraceSeconds)
 		assert.equals(7, constants.CycleLength)
+	end)
+
+	-- ========== Streak Expiry Warning ==========
+
+	describe("streak expiry warning", function()
+		local WARN = 6 * HOUR   -- matches STREAK_WARN_SECONDS in service
+
+		it("exposes StreakWarnSeconds constant", function()
+			local constants = DailyRewardService._GetConstants()
+			assert.equals(WARN, constants.StreakWarnSeconds)
+		end)
+
+		it("does not set InGraceWindow before any claim", function()
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_false(status.InGraceWindow)
+			assert.equals(0, status.SecondsUntilStreakExpiry)
+			assert.is_false(status.StreakWarning)
+		end)
+
+		it("does not set InGraceWindow while still in cooldown", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (10 * HOUR)  -- still in 20h cooldown
+
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_false(status.InGraceWindow)
+			assert.equals(0, status.SecondsUntilStreakExpiry)
+			assert.is_false(status.StreakWarning)
+		end)
+
+		it("sets InGraceWindow once past cooldown and before grace expiry", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (21 * HOUR)  -- past 20h cooldown, within 48h grace
+
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_true(status.InGraceWindow)
+			assert.is_true(status.CanClaim)
+			assert.is_true(status.SecondsUntilStreakExpiry > 0)
+		end)
+
+		it("reports correct SecondsUntilStreakExpiry in grace window", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (30 * HOUR)  -- 30h since claim; grace expires at 48h
+
+			local status = DailyRewardService.GetStatus("player1")
+			-- 48h - 30h = 18h remaining
+			assert.equals(18 * HOUR, status.SecondsUntilStreakExpiry)
+		end)
+
+		it("does not set StreakWarning when more than 6 hours remain", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (30 * HOUR)  -- 18h left, above warn threshold
+
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_true(status.InGraceWindow)
+			assert.is_false(status.StreakWarning)
+		end)
+
+		it("sets StreakWarning when within 6 hours of streak expiry", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (43 * HOUR)  -- 5h left, below 6h threshold
+
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_true(status.InGraceWindow)
+			assert.is_true(status.StreakWarning)
+			assert.is_true(status.SecondsUntilStreakExpiry <= WARN)
+		end)
+
+		it("sets StreakWarning at exactly the 6-hour boundary", function()
+			DailyRewardService.ClaimReward("player1")
+			-- 48h grace - 6h warn = 42h; advance exactly 42h
+			currentTime = currentTime + (42 * HOUR)
+
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_true(status.InGraceWindow)
+			assert.is_true(status.StreakWarning)
+			assert.equals(WARN, status.SecondsUntilStreakExpiry)
+		end)
+
+		it("clears InGraceWindow after grace period expires", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (49 * HOUR)  -- past 48h grace
+
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_false(status.InGraceWindow)
+			assert.equals(0, status.SecondsUntilStreakExpiry)
+			assert.is_false(status.StreakWarning)
+		end)
+
+		it("clears InGraceWindow after player claims within the window", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (21 * HOUR)  -- now in grace window
+			DailyRewardService.ClaimReward("player1")  -- claim again, streak continues
+
+			-- Just after second claim (in cooldown again)
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_false(status.InGraceWindow)
+		end)
 	end)
 
 	-- ========== XP Granting via ProgressionService ==========
