@@ -1,7 +1,11 @@
 # TODO - Life-Simulator-Game
 
 Sprint Roadmap (Iter 2–11, refreshed 2026-03-03)
-Status: Iter 4 active — CurrencyServiceValidationSpec added
+Status: Iter 5 review sweep complete — tests + selene clean
+
+Review Log
+- Iter 5: merged origin/main; gh auth failed (treated as no open issue);
+  ran ./run_tests.sh and selene src (0 errors, 0 warnings); no regressions found.
 
 Guiding Principles
 - Preserve all shipped behavior; no feature removal.
