@@ -1,67 +1,79 @@
 # TODO - Life-Simulator-Game
 
-Sprint Roadmap (10 goals)
-Status: Iter 10 review sweep complete (2026-03-03) — 1102 tests pass, 0 lint errors/warnings; committed 24 pending lint-fix/cleanup files (unused-var suppression, CanvasGroup upgrade, DailyRewardPackets new fields)
+Sprint Roadmap (Iter 1-10)
+Status: Iter 1 drafting reset (2026-03-03)
 
-Next Sprint Direction (after Iteration 10)
-- Keep all currently shipped features and behavior.
-- Primary goal: reduce code size by removing only VERIFIED dead code and optimizing existing code paths.
-- No feature removals; preserve or improve reliability/performance while simplifying the codebase.
+Guiding Principles
+- Preserve current shipped behavior; prioritize reliability, clarity, and test coverage.
+- Plan-first: each iteration delivers measurable stability, tooling, or UX improvements.
+- Acceptance checks are required for completion sign-off.
 
-1. [x] Add achievement bulk-claim action.
-   Acceptance:
-   - Achievement service exposes `ClaimAllAchievements` and a network packet.
-   - Achievement UI shows a Claim All button with disabled state when none are claimable.
-   - Tests cover reward totals and idempotency.
+1) Iter 1 - Sprint Baseline + Observability
+Goal: establish a clean baseline, system visibility, and clear boundaries for feature work.
+Acceptance Checks:
+- Repo health is documented (tests, lint, docs build commands verified in README/docs).
+- Startup ordering and dependency graph are captured in TODO context for future tasks.
+- Key system contracts (Plot/Build/Tenant/Quest/Reward/Network) are summarized in TODO.
 
-2. [x] Surface daily challenge status in DailyReward UI.
-   Acceptance:
-   - `DailyRewardPackets` status schema includes `DailyChallenge` fields (DayId, QuestId, AssignedAt, QuestState).
-   - `DailyRewardUI` renders the current daily challenge with quest name and state.
-   - `DailyRewardSpec` verifies daily challenge payload wiring.
+2) Iter 2 - Plot/Build Runtime Stability
+Goal: reduce plot/build runtime drift and improve snapshot correctness.
+Acceptance Checks:
+- Placement delta flow is verified end-to-end (server send -> client apply -> UI refresh).
+- PlotState room sync behavior is documented and validated with tests.
+- No stale TODOs related to placement/plot remain in code.
 
-3. [x] Add quest daily challenge rotation regression tests.
-   Acceptance:
-   - New spec verifies quest rotation across consecutive UTC days.
-   - Ensures repeatable quest assignment remains consistent across resets.
+3) Iter 3 - Tenant Loop Reliability
+Goal: harden tenant offers, room assignment, mailbox balance, and lease transitions.
+Acceptance Checks:
+- Room readiness and assignment paths have explicit tests for eviction/reassign edge cases.
+- Mailbox income summary and collection flows have deterministic test coverage.
+- Tenant UI shows accurate occupancy and diagnostics under all room states.
 
-4. [x] Build Notification inbox panel.
-   Acceptance:
-   - New client UI lists notifications from `NotificationPackets.StateSnapshot` and deltas.
-   - Unread/read state is reflected in the list and can be toggled locally.
-   - Manual smoke: opening inbox shows latest 20 notifications in order.
+4) Iter 4 - Reward Systems Consistency
+Goal: ensure daily rewards, seasonal events, and achievements share consistent reward semantics.
+Acceptance Checks:
+- Reward claim flows (daily + seasonal + achievements) are idempotent and tested.
+- Reward summary/preview UI matches server payload shape.
+- Reward packets have explicit schema validation in specs.
 
-5. [ ] Add category filters to Achievement UI.
-   Acceptance:
-   - UI provides category filter tabs (All + per-category).
-   - Filtered list updates counts and preserves claim button behavior.
-   - `AchievementUISpec` covers filter selection and empty states.
+5) Iter 5 - Quest System UX + Sync
+Goal: improve quest UI clarity and correctness under live updates.
+Acceptance Checks:
+- Quest detail drawer reflects server updates without reopening.
+- Quest snapshots remain consistent across login/session refresh.
+- Quest UI specs cover selection, update, and completion states.
 
-6. [ ] Add active quest detail drawer in Quest UI.
-   Acceptance:
-   - Quest UI shows selected quest objectives, rewards, and state.
-   - Drawer updates on `QuestSnapshotUpdated` without reopening.
-   - `QuestUISpec` covers rendering and update behavior.
+6) Iter 6 - Notification/Inbox Expansion
+Goal: unify notification delivery, inbox filtering, and read/unread states.
+Acceptance Checks:
+- Notification queue/history/mark-read are reflected in inbox UI.
+- Inbox shows correct unread counts after batch changes.
+- Notification packet payloads validated by tests.
 
-7. [ ] Add tenant review filters by rating.
-   Acceptance:
-   - Reviews UI supports filtering to 5/4/3+ star ratings.
-   - Filter state persists while UI is open.
-   - Manual smoke: filter reduces visible rows correctly.
+7) Iter 7 - Economy/Billing Clarity
+Goal: stabilize billing/currency updates and surface clear player feedback.
+Acceptance Checks:
+- Billing cycle transitions are tested for timing boundaries.
+- Currency deltas track sources consistently across services.
+- Billing UI shows accurate state after reconnect.
 
-8. [ ] Add mailbox income breakdown tooltip.
-   Acceptance:
-   - Mailbox packets include per-tenant income breakdown in summary payload.
-   - Mailbox HUD shows tooltip with per-tenant contributions and next payout time.
-   - Tests verify breakdown totals and payload shape.
+8) Iter 8 - Performance + Memory Hygiene
+Goal: reduce hot-path allocations and runtime churn without feature removal.
+Acceptance Checks:
+- High-frequency loops have targeted optimizations (profiling-backed or measured).
+- Client caches invalidate correctly without excessive churn.
+- No new lint warnings; tests remain green.
 
-9. [ ] Add seasonal event reward summary panel.
-   Acceptance:
-   - Seasonal status payload includes pending rewards count and next milestone label.
-   - Seasonal UI shows pending counts and next milestone progress.
-   - `SeasonalEventUISpec` covers summary rendering.
+9) Iter 9 - Test Coverage + Regression Sweep
+Goal: fill gaps across core loops and prevent regressions in key systems.
+Acceptance Checks:
+- New specs cover edge cases for plot/build/tenant/reward/quest systems.
+- Regression tests added for any recurring issues.
+- Tests pass with no flaky cases.
 
-10. [ ] Add world event tips cooldown safeguards.
-    Acceptance:
-    - Tip selection enforces a cooldown per tip.
-    - `WorldEventTipsSpec` covers cooldown rotation behavior.
+10) Iter 10 - Release Readiness + Cleanup
+Goal: consolidate documentation, deprecations, and final QA readiness.
+Acceptance Checks:
+- Docs updated for any public API/system changes.
+- Deprecated or dead code removed only if fully verified.
+- Final smoke passes for core UX flows (plot claim, build, tenant, rewards, quests).
