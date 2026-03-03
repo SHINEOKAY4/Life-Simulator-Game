@@ -1,7 +1,7 @@
 # TODO - Life-Simulator-Game
 
 Sprint Roadmap (Iter 2–11, refreshed 2026-03-03)
-Status: Iter 9 complete — BillingServiceCycleSpec added; 1286 tests green, selene 0 errors
+Status: Iter 10 complete — ResidentServiceSpec added; 1332 tests green, selene 0 errors
 
 Review Log
 - Iter 8: origin/main already up to date; gh auth failed (treated as no open issue);
@@ -9,6 +9,11 @@ Review Log
   selene 0 errors, 0 warnings.
 - Iter 9: origin/main already up to date; gh auth failed (treated as no open issue);
   implemented Goal 6 (BillingServiceCycleSpec); 1286 successes, 0 failures;
+  selene 0 errors, 0 warnings.
+- Iter 10: origin/main already up to date; gh auth failed (treated as no open issue);
+  implemented Goal 7 (ResidentServiceSpec): 46 new tests covering occupancy math,
+  bidirectional tenant-resident map, transmission ID resolution, deep-clone, strip helpers,
+  name deduplication, and structural drift guards; 1332 successes, 0 failures;
   selene 0 errors, 0 warnings.
 - Iter 7: origin/main fetch failed (HTTP 500); gh auth failed (treated as no open issue);
   implemented Goal 4 (WeatherServiceSpec); 1228 successes, 0 failures;
@@ -85,7 +90,7 @@ Acceptance Checks:
 - Source-level assertions confirm PowerOutageAttribute wiring.
 - Spec passes cleanly.
 
-7) [ ] Goal 7 - ResidentService Spec
+7) [x] Goal 7 - ResidentService Spec
 Goal: structural + behavioral tests for ResidentService: occupancy tracking,
       lease-state machine, eviction trigger conditions.
 Acceptance Checks:
