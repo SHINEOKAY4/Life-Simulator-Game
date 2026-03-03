@@ -1,11 +1,14 @@
 # TODO - Life-Simulator-Game
 
 Sprint Roadmap (Iter 2–11, refreshed 2026-03-03)
-Status: Iter 8 complete — CraftingJobSpec added; 1274 tests green, selene 0 errors
+Status: Iter 9 complete — BillingServiceCycleSpec added; 1286 tests green, selene 0 errors
 
 Review Log
 - Iter 8: origin/main already up to date; gh auth failed (treated as no open issue);
   implemented Goal 5 (CraftingJobSpec); 1274 successes, 0 failures;
+  selene 0 errors, 0 warnings.
+- Iter 9: origin/main already up to date; gh auth failed (treated as no open issue);
+  implemented Goal 6 (BillingServiceCycleSpec); 1286 successes, 0 failures;
   selene 0 errors, 0 warnings.
 - Iter 7: origin/main fetch failed (HTTP 500); gh auth failed (treated as no open issue);
   implemented Goal 4 (WeatherServiceSpec); 1228 successes, 0 failures;
@@ -73,7 +76,7 @@ Acceptance Checks:
 - Ingredient consumption logic paths asserted (structural).
 - Spec passes cleanly.
 
-6) [ ] Goal 6 - BillingService Cycle Spec
+6) [x] Goal 6 - BillingService Cycle Spec
 Goal: test billing cycle boundary semantics: due-date calculation, grace-period
       threshold, power-outage trigger wiring, payment settlement paths.
 Acceptance Checks:
