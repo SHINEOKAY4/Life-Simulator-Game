@@ -1,9 +1,12 @@
 # TODO - Life-Simulator-Game
 
 Sprint Roadmap (Iter 2–11, refreshed 2026-03-03)
-Status: Iter 7 complete — WeatherServiceSpec added; 1228 tests green, selene 0 errors
+Status: Iter 8 complete — CraftingJobSpec added; 1274 tests green, selene 0 errors
 
 Review Log
+- Iter 8: origin/main already up to date; gh auth failed (treated as no open issue);
+  implemented Goal 5 (CraftingJobSpec); 1274 successes, 0 failures;
+  selene 0 errors, 0 warnings.
 - Iter 7: origin/main fetch failed (HTTP 500); gh auth failed (treated as no open issue);
   implemented Goal 4 (WeatherServiceSpec); 1228 successes, 0 failures;
   selene 0 errors, 0 warnings.
@@ -60,7 +63,7 @@ Acceptance Checks:
 - Season cycling order (Spring→Summer→Autumn→Winter→Spring) asserted structurally.
 - Spec passes cleanly.
 
-5) [ ] Goal 5 - CraftingService Job-Lifecycle Spec
+5) [x] Goal 5 - CraftingService Job-Lifecycle Spec
 Goal: extend coverage beyond skill-panel math to include job record shape,
       skill-requirement validation paths, and ingredient deduction logic.
 Acceptance Checks:
