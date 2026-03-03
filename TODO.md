@@ -1,7 +1,12 @@
 # TODO - Life-Simulator-Game
 
 Sprint Roadmap (10 goals)
-Status: refresh for Iteration 9 (2026-03-02)
+Status: Iter 10 review sweep complete (2026-03-03) — 1102 tests pass, 0 lint errors/warnings
+
+Next Sprint Direction (after Iteration 10)
+- Keep all currently shipped features and behavior.
+- Primary goal: reduce code size by removing only VERIFIED dead code and optimizing existing code paths.
+- No feature removals; preserve or improve reliability/performance while simplifying the codebase.
 
 1. [x] Add achievement bulk-claim action.
    Acceptance:
