@@ -1,7 +1,7 @@
 # TODO - Life-Simulator-Game
 
 Optimization Sprint Roadmap (Iter 1–10, refreshed 2026-03-03)
-Status: Iter 1 complete — roadmap rebuilt; Goal 1 executed; tests and selene green.
+Status: Iter 2 complete — shim cleanup executed; tests and selene green.
 
 Guiding Principles
 - Preserve all shipped behavior; no feature removal.
@@ -27,12 +27,12 @@ Acceptance Checks:
 Regression Checks:
 - Client startup requires remain unchanged (no missing module errors).
 
-2) [ ] Iter 2 Goal - Audit and Consolidate Dead Shims
+2) [x] Iter 2 Goal - Audit and Consolidate Dead Shims
 Goal: verify and reduce redundant Shared/Modules shims where no callers exist.
 Acceptance Checks:
 - Identify shim modules with zero references.
 - Remove at least one verified-unused shim.
-- Add structural tests or greps documenting removed shims.
+- Grep confirms removed shims have no references.
 - ./run_tests.sh passes; selene clean.
 Regression Checks:
 - Rojo tree still builds with Shared/Utilities as canonical.
@@ -117,3 +117,5 @@ Acceptance Checks:
 Review Log
 - Iter 1: origin/main already up to date; removed deprecated MinimalPromptUI;
   ./run_tests.sh 1332 successes; selene 0 errors, 0 warnings.
+- Iter 2: removed unused Shared/Modules ActionBinder + ClickBinder shims;
+  ./run_tests.sh clean; selene 0 errors, 0 warnings.
