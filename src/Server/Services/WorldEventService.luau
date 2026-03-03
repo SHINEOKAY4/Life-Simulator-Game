@@ -39,12 +39,11 @@ else
 	if type(_G) == "table" then
 		dynamicLoadfile = _G.loadfile
 	end
-	local okLoader, loader = pcall(function()
-		assert(type(dynamicLoadfile) == "function", "loadfile is unavailable in this runtime")
-		return dynamicLoadfile("src/Shared/Definitions/WorldEventDefinitions.luau")
-	end)
-	if okLoader and type(loader) == "function" then
-		WorldEventDefinitions = assert(loader())
+	if type(dynamicLoadfile) == "function" then
+		local okLoader, loader = pcall(dynamicLoadfile, "src/Shared/Definitions/WorldEventDefinitions.luau")
+		if okLoader and type(loader) == "function" then
+			WorldEventDefinitions = assert(loader())
+		end
 	end
 end
 

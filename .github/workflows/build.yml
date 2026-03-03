@@ -21,7 +21,7 @@ jobs:
       - name: Lint Luau source with Selene
         run: |
           export PATH="$HOME/.aftman/bin:$PATH"
-          selene --allow-warnings src
+          selene --config selene.toml src
 
   test:
     runs-on: ubuntu-latest

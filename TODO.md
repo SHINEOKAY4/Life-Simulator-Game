@@ -1,7 +1,7 @@
 # TODO - Life-Simulator-Game
 
 Sprint Roadmap (Iter 2–11, refreshed 2026-03-03)
-Status: Iter 2 active — roadmap rebuilt after backlog exhaustion
+Status: Iter 3 active — lint workflow fix for issue #18
 
 Guiding Principles
 - Preserve all shipped behavior; no feature removal.

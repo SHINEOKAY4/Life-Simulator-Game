@@ -74,14 +74,13 @@ local function getQuestService()
 		if type(_G) == "table" then
 			dynamicLoadfile = _G.loadfile
 		end
-		local okLoader, loader = pcall(function()
-			assert(type(dynamicLoadfile) == "function", "loadfile is unavailable in this runtime")
-			return dynamicLoadfile("src/Server/Services/QuestService.luau")
-		end)
-		if okLoader and type(loader) == "function" then
-			local okService, service = pcall(loader)
-			if okService and type(service) == "table" then
-				QuestService = service
+		if type(dynamicLoadfile) == "function" then
+			local okLoader, loader = pcall(dynamicLoadfile, "src/Server/Services/QuestService.luau")
+			if okLoader and type(loader) == "function" then
+				local okService, service = pcall(loader)
+				if okService and type(service) == "table" then
+					QuestService = service
+				end
 			end
 		end
 	end
