@@ -109,12 +109,21 @@ end
 -- Waits until the debounce for the key is no longer active.
 -- Uses precise sleeps based on remaining time; loops if the window is extended.
 function Debounce.WaitUntilInactive(key: Key, scope: Scope): ()
-	while true do
-		local remaining = Debounce.TimeRemaining(key, scope)
-		if remaining <= 0 then
+	local scopedKey = toScopedKey(key, scope)
+	local expirationTime = getActiveExpiration(scopedKey)
+	while expirationTime ~= nil do
+		local remaining = expirationTime - now()
+		if remaining > 0 then
+			task.wait(remaining)
+		end
+
+		local latestExpiration = state[scopedKey]
+		if latestExpiration == nil or latestExpiration <= expirationTime then
+			state[scopedKey] = nil
 			return
 		end
-		task.wait(remaining)
+
+		expirationTime = latestExpiration
 	end
 end
 

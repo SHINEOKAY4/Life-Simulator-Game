@@ -47,7 +47,7 @@ Acceptance Checks:
 Regression Checks:
 - World events still rotate in same order and timing windows.
 
-4) [ ] Iter 4 Goal - Debounce Loop Backoff Review
+4) [x] Iter 4 Goal - Debounce Loop Backoff Review
 Goal: reduce Debounce wait loop wakeups without changing behavior.
 Acceptance Checks:
 - Debounce wait loop uses a single wait when possible.
@@ -122,3 +122,6 @@ Review Log
 - Iter 3: replaced fixed 30s poll with next-expiry scheduling in WorldEventService.Init();
   added _GetNextWaitSeconds helper + 4 schedule-math specs + 1 structural test;
   ./run_tests.sh 1337 successes; selene 0 errors, 0 warnings.
+- Iter 4: optimized Debounce.WaitUntilInactive to avoid extra wakeups while preserving semantics;
+  added DebounceSpec structural timing checks;
+  ./run_tests.sh (see latest run); selene 0 errors, 0 warnings.
