@@ -325,6 +325,24 @@ describe("DailyRewardService", function()
 
 	-- ========== Status Reporting ==========
 
+	it("DailyChallenge payload contains all required fields", function()
+		local status = DailyRewardService.GetStatus("player1")
+		assert.is_not_nil(status.DailyChallenge)
+		local dc = status.DailyChallenge
+		-- DayId: non-negative integer
+		assert.is_not_nil(dc.DayId)
+		assert.is_true(dc.DayId >= 0)
+		-- QuestId: non-empty string
+		assert.is_not_nil(dc.QuestId)
+		assert.is_true(type(dc.QuestId) == "string" and dc.QuestId ~= "")
+		-- AssignedAt: non-negative integer
+		assert.is_not_nil(dc.AssignedAt)
+		assert.is_true(dc.AssignedAt >= 0)
+		-- QuestState: string (may be nil/in_progress for new players)
+		-- field must exist in payload (nil is acceptable, field key must be present)
+		assert.is_true(dc.QuestState == nil or type(dc.QuestState) == "string")
+	end)
+
 	it("assigns a rotating daily challenge quest in status", function()
 		local constants = DailyRewardService._GetConstants()
 		local expectedDayId = math.floor(currentTime / (24 * HOUR))
@@ -347,6 +365,25 @@ describe("DailyRewardService", function()
 		assert.is_true(firstStatus.DailyChallenge.DayId ~= secondStatus.DailyChallenge.DayId)
 		assert.is_true(firstStatus.DailyChallenge.QuestId ~= secondStatus.DailyChallenge.QuestId)
 		assert.equals("in_progress", secondStatus.DailyChallenge.QuestState)
+	end)
+
+	it("DailyChallenge QuestId matches one of the known daily challenge quest ids", function()
+		local constants = DailyRewardService._GetConstants()
+		local knownIds = {}
+		for _, id in ipairs(constants.DailyChallengeQuestIds) do
+			knownIds[id] = true
+		end
+
+		local status = DailyRewardService.GetStatus("player1")
+		assert.is_not_nil(status.DailyChallenge)
+		assert.is_true(knownIds[status.DailyChallenge.QuestId] == true)
+	end)
+
+	it("DailyChallenge DayId matches expected UTC day calculation", function()
+		local HOUR = 3600
+		local expectedDayId = math.floor(currentTime / (24 * HOUR))
+		local status = DailyRewardService.GetStatus("player1")
+		assert.equals(expectedDayId, status.DailyChallenge.DayId)
 	end)
 
 	it("reports pending milestone when approaching milestone day", function()

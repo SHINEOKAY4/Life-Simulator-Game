@@ -9,7 +9,7 @@ Status: refresh for Iteration 9 (2026-03-02)
    - Achievement UI shows a Claim All button with disabled state when none are claimable.
    - Tests cover reward totals and idempotency.
 
-2. [ ] Surface daily challenge status in DailyReward UI.
+2. [x] Surface daily challenge status in DailyReward UI.
    Acceptance:
    - `DailyRewardPackets` status schema includes `DailyChallenge` fields (DayId, QuestId, AssignedAt, QuestState).
    - `DailyRewardUI` renders the current daily challenge with quest name and state.
