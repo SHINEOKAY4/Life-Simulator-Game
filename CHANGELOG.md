@@ -3,6 +3,10 @@
 All notable changes to this project are documented in this file.
 
 ## [Unreleased]
+### Merged PRs
+
+- PR #17: Duo ([@Ritooo-kun](https://github.com/Ritooo-kun), 2026-03-03) ([link](https://github.com/SHINEOKAY4/Life-Simulator-Game/pull/17))
+
 
 ### Added
 
