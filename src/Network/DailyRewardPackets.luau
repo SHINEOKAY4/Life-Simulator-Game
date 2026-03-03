@@ -30,6 +30,9 @@ local StatusSchema = {
 	CanClaim = Packet.Boolean8,
 	SecondsUntilClaim = Packet.NumberU32,
 	NextStreak = Packet.NumberU16,
+	SecondsUntilStreakExpiry = Packet.NumberU32,
+	InGraceWindow = Packet.Boolean8,
+	StreakWarning = Packet.Boolean8,
 }
 
 local ClaimResultSchema = {

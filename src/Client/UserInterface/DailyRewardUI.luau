@@ -26,6 +26,8 @@ local calendarFrame: Frame? = nil
 local milestoneFrame: Frame? = nil
 local statsLabel: TextLabel? = nil
 
+local streakWarningLabel: TextLabel? = nil
+
 local open = false
 local initialized = false
 local countdownActive = false
@@ -423,11 +425,30 @@ local function ensureGui()
 	countdown.Parent = claimSection
 	countdownLabel = countdown
 
+	-- Streak expiry warning banner (hidden until InGraceWindow is true)
+	local warnLabel = Instance.new("TextLabel")
+	warnLabel.Name = "StreakWarning"
+	warnLabel.BackgroundColor3 = Color3.fromRGB(160, 80, 30)
+	warnLabel.BackgroundTransparency = 1
+	warnLabel.Position = UDim2.fromOffset(20, 234)
+	warnLabel.Size = UDim2.new(1, -40, 0, 22)
+	warnLabel.Font = Enum.Font.GothamMedium
+	warnLabel.TextSize = 12
+	warnLabel.TextColor3 = Color3.fromRGB(255, 210, 120)
+	warnLabel.TextXAlignment = Enum.TextXAlignment.Center
+	warnLabel.Text = ""
+	warnLabel.Visible = false
+	warnLabel.Parent = window
+	streakWarningLabel = warnLabel
+	local warnCorner = Instance.new("UICorner")
+	warnCorner.CornerRadius = UDim.new(0, 6)
+	warnCorner.Parent = warnLabel
+
 	-- Milestones section
 	local milestonesTitle = Instance.new("TextLabel")
 	milestonesTitle.Name = "MilestonesTitle"
 	milestonesTitle.BackgroundTransparency = 1
-	milestonesTitle.Position = UDim2.fromOffset(24, 242)
+	milestonesTitle.Position = UDim2.fromOffset(24, 260)
 	milestonesTitle.Size = UDim2.new(1, -48, 0, 22)
 	milestonesTitle.Font = Enum.Font.GothamBold
 	milestonesTitle.TextSize = 16
@@ -438,8 +459,8 @@ local function ensureGui()
 
 	local milestones = Instance.new("Frame")
 	milestones.Name = "Milestones"
-	milestones.Position = UDim2.fromOffset(20, 268)
-	milestones.Size = UDim2.new(1, -40, 0, 190)
+	milestones.Position = UDim2.fromOffset(20, 284)
+	milestones.Size = UDim2.new(1, -40, 0, 174)
 	milestones.BackgroundColor3 = Color3.fromRGB(18, 22, 30)
 	milestones.BackgroundTransparency = 0.08
 	milestones.BorderSizePixel = 0
@@ -563,6 +584,26 @@ local function renderStatus(status: { [string]: any })
 	renderCalendar(currentStreak, canClaim)
 	renderMilestones(longestStreak, status.MilestonesClaimed)
 	updateClaimButton(canClaim, secondsUntilClaim)
+
+	-- Streak expiry warning banner
+	if streakWarningLabel then
+		local inGrace = status.InGraceWindow == true
+		local secondsLeft = math.max(0, math.floor(tonumber(status.SecondsUntilStreakExpiry) or 0))
+		if inGrace and secondsLeft > 0 then
+			local isUrgent = status.StreakWarning == true
+			streakWarningLabel.Text = string.format(
+				"Streak expires in %s — claim now to keep it!",
+				formatTime(secondsLeft)
+			)
+			streakWarningLabel.TextColor3 = if isUrgent
+				then Color3.fromRGB(255, 120, 60)
+				else Color3.fromRGB(255, 210, 120)
+			streakWarningLabel.BackgroundTransparency = if isUrgent then 0.15 else 1
+			streakWarningLabel.Visible = true
+		else
+			streakWarningLabel.Visible = false
+		end
+	end
 
 	-- Start countdown loop if on cooldown
 	if not canClaim and secondsUntilClaim > 0 then

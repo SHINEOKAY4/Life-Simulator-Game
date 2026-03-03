@@ -45,7 +45,7 @@ Status: refresh for Iteration 8 (2026-03-02)
    - UI shows active multipliers with descriptions.
    - Buffs refresh on season change and challenge completion.
 
-8. [ ] Add daily reward streak warning.
+8. [x] Add daily reward streak warning.
    Acceptance:
    - Daily reward packets include time-to-expire and grace window info.
    - UI shows countdown warning inside the grace window.

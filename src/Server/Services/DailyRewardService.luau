@@ -57,6 +57,7 @@ local MILESTONES = {
 
 local CLAIM_COOLDOWN_SECONDS = 20 * 60 * 60  -- 20 hours
 local STREAK_GRACE_SECONDS = 48 * 60 * 60    -- 48 hours
+local STREAK_WARN_SECONDS = 6 * 60 * 60      -- warn when < 6 hours left in grace window
 local CYCLE_LENGTH = #REWARDS
 local DAILY_CHALLENGE_QUEST_IDS = {
 	"daily_challenge_collect",
@@ -382,6 +383,18 @@ function DailyRewardService.GetStatus(player)
 		milestoneAlreadyClaimed = state.MilestonesClaimed[tostring(milestone.StreakRequired)] == true
 	end
 
+	-- Streak expiry warning: active when the player can claim but the grace
+	-- window is still open, meaning they risk losing their streak if they wait.
+	local timeSinceClaim = now - state.LastClaimTime
+	local secondsUntilStreakExpiry = 0
+	local inGraceWindow = false
+	local streakWarning = false
+	if state.LastClaimTime > 0 and timeSinceClaim >= CLAIM_COOLDOWN_SECONDS and timeSinceClaim <= STREAK_GRACE_SECONDS then
+		secondsUntilStreakExpiry = STREAK_GRACE_SECONDS - timeSinceClaim
+		inGraceWindow = true
+		streakWarning = secondsUntilStreakExpiry <= STREAK_WARN_SECONDS
+	end
+
 	return {
 		CurrentStreak = state.CurrentStreak,
 		LongestStreak = state.LongestStreak,
@@ -392,6 +405,9 @@ function DailyRewardService.GetStatus(player)
 		SecondsUntilClaim = status.SecondsUntilClaim,
 		ClaimCooldownSeconds = CLAIM_COOLDOWN_SECONDS,
 		StreakGraceSeconds = STREAK_GRACE_SECONDS,
+		SecondsUntilStreakExpiry = secondsUntilStreakExpiry,
+		InGraceWindow = inGraceWindow,
+		StreakWarning = streakWarning,
 		NextReward = nextReward,
 		NextStreak = nextStreak,
 		PendingMilestone = (milestone and not milestoneAlreadyClaimed) and milestone or nil,
@@ -594,6 +610,7 @@ function DailyRewardService._GetConstants()
 	return {
 		ClaimCooldownSeconds = CLAIM_COOLDOWN_SECONDS,
 		StreakGraceSeconds = STREAK_GRACE_SECONDS,
+		StreakWarnSeconds = STREAK_WARN_SECONDS,
 		CycleLength = CYCLE_LENGTH,
 		DailyChallengeQuestIds = DAILY_CHALLENGE_QUEST_IDS,
 	}

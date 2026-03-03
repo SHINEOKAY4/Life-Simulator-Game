@@ -411,6 +411,103 @@ describe("DailyRewardService", function()
 		assert.equals(7, constants.CycleLength)
 	end)
 
+	-- ========== Streak Expiry Warning ==========
+
+	describe("streak expiry warning", function()
+		local WARN = 6 * HOUR   -- matches STREAK_WARN_SECONDS in service
+
+		it("exposes StreakWarnSeconds constant", function()
+			local constants = DailyRewardService._GetConstants()
+			assert.equals(WARN, constants.StreakWarnSeconds)
+		end)
+
+		it("does not set InGraceWindow before any claim", function()
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_false(status.InGraceWindow)
+			assert.equals(0, status.SecondsUntilStreakExpiry)
+			assert.is_false(status.StreakWarning)
+		end)
+
+		it("does not set InGraceWindow while still in cooldown", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (10 * HOUR)  -- still in 20h cooldown
+
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_false(status.InGraceWindow)
+			assert.equals(0, status.SecondsUntilStreakExpiry)
+			assert.is_false(status.StreakWarning)
+		end)
+
+		it("sets InGraceWindow once past cooldown and before grace expiry", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (21 * HOUR)  -- past 20h cooldown, within 48h grace
+
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_true(status.InGraceWindow)
+			assert.is_true(status.CanClaim)
+			assert.is_true(status.SecondsUntilStreakExpiry > 0)
+		end)
+
+		it("reports correct SecondsUntilStreakExpiry in grace window", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (30 * HOUR)  -- 30h since claim; grace expires at 48h
+
+			local status = DailyRewardService.GetStatus("player1")
+			-- 48h - 30h = 18h remaining
+			assert.equals(18 * HOUR, status.SecondsUntilStreakExpiry)
+		end)
+
+		it("does not set StreakWarning when more than 6 hours remain", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (30 * HOUR)  -- 18h left, above warn threshold
+
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_true(status.InGraceWindow)
+			assert.is_false(status.StreakWarning)
+		end)
+
+		it("sets StreakWarning when within 6 hours of streak expiry", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (43 * HOUR)  -- 5h left, below 6h threshold
+
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_true(status.InGraceWindow)
+			assert.is_true(status.StreakWarning)
+			assert.is_true(status.SecondsUntilStreakExpiry <= WARN)
+		end)
+
+		it("sets StreakWarning at exactly the 6-hour boundary", function()
+			DailyRewardService.ClaimReward("player1")
+			-- 48h grace - 6h warn = 42h; advance exactly 42h
+			currentTime = currentTime + (42 * HOUR)
+
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_true(status.InGraceWindow)
+			assert.is_true(status.StreakWarning)
+			assert.equals(WARN, status.SecondsUntilStreakExpiry)
+		end)
+
+		it("clears InGraceWindow after grace period expires", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (49 * HOUR)  -- past 48h grace
+
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_false(status.InGraceWindow)
+			assert.equals(0, status.SecondsUntilStreakExpiry)
+			assert.is_false(status.StreakWarning)
+		end)
+
+		it("clears InGraceWindow after player claims within the window", function()
+			DailyRewardService.ClaimReward("player1")
+			currentTime = currentTime + (21 * HOUR)  -- now in grace window
+			DailyRewardService.ClaimReward("player1")  -- claim again, streak continues
+
+			-- Just after second claim (in cooldown again)
+			local status = DailyRewardService.GetStatus("player1")
+			assert.is_false(status.InGraceWindow)
+		end)
+	end)
+
 	-- ========== XP Granting via ProgressionService ==========
 
 	describe("XP integration", function()
