@@ -5,15 +5,9 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local PlotService = require(ServerScriptService.Server.Services.PlotService)
-local WorldPlacer = require(ServerScriptService.Server.Utilities.WorldPlacer)
 local PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
-local UtilityService = require(ServerScriptService.Server.Services.UtilityService)
-local PlacementKey = require(ReplicatedStorage.Shared.Utilities.PlacementKey)
-local SubSlotResolver = require(ReplicatedStorage.Shared.Utilities.SubSlotResolver)
 local StashPackets = require(ReplicatedStorage.Network.StashPackets)
 
-local Helpers = require(ServerScriptService.Server.Services.BuildService.Helpers)
 local DestroyAction = require(ServerScriptService.Server.Services.BuildService.Actions.DestroyAction)
 
 -- Reads the stash items table from player data, creating it if absent.

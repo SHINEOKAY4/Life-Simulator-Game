@@ -156,9 +156,10 @@ export type PlotState = {
 - After any `.luau` code change, run the Luau linter from repo root:
   ```bash
   export PATH="$HOME/.aftman/bin:$PATH"
-  selene --allow-warnings src
+  selene src
   ```
-- Do not consider a Luau task complete until this lint command has been run.
+- End-of-iteration gate: Selene must report **0 errors and 0 warnings**.
+- If Selene reports any issue, keep fixing until lint is clean before ending the iteration.
 
 ## Common Workflows
 

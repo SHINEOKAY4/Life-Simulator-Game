@@ -43,18 +43,18 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local gui: ScreenGui? = nil
-local windowFrame: Frame? = nil
+local _windowFrame: Frame? = nil
 local progressLabel: TextLabel? = nil
 local listFrame: ScrollingFrame? = nil
 local emptyLabel: TextLabel? = nil
-local summaryCard: Frame? = nil
+local _summaryCard: Frame? = nil
 local summaryCompletionLabel: TextLabel? = nil
 local summaryDetailLabel: TextLabel? = nil
 local summaryCategoryLabel: TextLabel? = nil
 local claimAllButton: TextButton? = nil
 local open = false
 local initialized = false
-local currentSnapshot: Snapshot? = nil
+local _currentSnapshot: Snapshot? = nil
 local currentSummary: StatsSummary? = nil
 local rowById: { [string]: AchievementRow } = {}
 
@@ -183,7 +183,7 @@ local function ensureGui()
 	frame.BackgroundColor3 = Color3.fromRGB(24, 29, 38)
 	frame.BorderSizePixel = 0
 	frame.Parent = overlay
-	windowFrame = frame
+	_windowFrame = frame
 
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0, 12)
@@ -579,9 +579,9 @@ local function renderSnapshot(snapshot: Snapshot?)
 		return
 	end
 
-	currentSnapshot = snapshot
+	_currentSnapshot = snapshot
 	rowById = {}
-	summaryCard = nil
+	_summaryCard = nil
 	summaryCompletionLabel = nil
 	summaryDetailLabel = nil
 	summaryCategoryLabel = nil
@@ -605,7 +605,7 @@ local function renderSnapshot(snapshot: Snapshot?)
 
 	local summary = makeSummaryCard(currentSummary, 0)
 	summary.Parent = listFrame
-	summaryCard = summary
+	_summaryCard = summary
 
 	local rows = snapshot.Achievements
 	if typeof(rows) ~= "table" or #rows == 0 then

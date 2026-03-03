@@ -79,8 +79,8 @@ local achievementSink = nil
 local externalMultiplierFn = nil -- function(player) -> number (1.0 = no buff)
 
 -- Cooldown tracking: maps "UserId:action" -> os.clock() of last execution
-local cooldownTimestamps = {}
-local COOLDOWN_DURATION = 1.0 -- seconds between repeated actions
+local _cooldownTimestamps = {}
+local _COOLDOWN_DURATION = 1.0 -- seconds between repeated actions
 
 local function getXpMultiplier(player)
 	-- Try injectable sink first (test mode)
@@ -467,7 +467,7 @@ function ProgressionService._ResetForTests()
 	RuntimeUnlockCache = {}
 	achievementSink = nil
 	externalMultiplierFn = nil
-	cooldownTimestamps = {}
+	_cooldownTimestamps = {}
 	ProgressionService._testBroadcasts = nil
 end
 

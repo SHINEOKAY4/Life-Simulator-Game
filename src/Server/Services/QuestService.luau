@@ -25,41 +25,34 @@ local PlayerSession = nil
 local NotificationService = nil
 
 if IS_ROBLOX then
-    local ReplicatedStorage = game:GetService("ReplicatedStorage")
-    local ServerScriptService = game:GetService("ServerScriptService")
-    Players = game:GetService("Players")
+	local ServerScriptService = game:GetService("ServerScriptService")
+	Players = game:GetService("Players")
 
-    ProgressionService = require(ServerScriptService.Server.Services.ProgressionService)
-    CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
-    PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
-    NotificationService = require(ServerScriptService.Server.Services.NotificationService)
-end
-
--- Local minimal config fallback if no global config is present.
-local QuestsConfig = nil
-if IS_ROBLOX then
-    local ok, cfg = pcall(function()
-        return require(game:GetService("ReplicatedStorage").Shared.Configurations.QuestsConfig)
-    end)
-    if ok and type(cfg) == "table" then
-        QuestsConfig = cfg
-    else
-        QuestsConfig = nil
-    end
+	ProgressionService = require(ServerScriptService.Server.Services.ProgressionService)
+	CurrencyService = require(ServerScriptService.Server.Services.CurrencyService)
+	PlayerSession = require(ServerScriptService.Server.Services.PlayerSession)
+	NotificationService = require(ServerScriptService.Server.Services.NotificationService)
 end
 
 local QuestPackets = nil
 
-if IS_ROBLOX then
-    local ok, packets = pcall(function()
-        return require(game:GetService("ReplicatedStorage").Network.QuestPackets)
-    end)
-    if ok and type(packets) == "table" then
-        QuestPackets = packets
-    end
-end
-
 local QuestService = {}
+
+if IS_ROBLOX then
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local ok, packets = pcall(function()
+		return require(ReplicatedStorage.Network.QuestPackets)
+	end)
+	if ok and type(packets) == "table" then
+		QuestPackets = packets
+	end
+	local okConfig, config = pcall(function()
+		return require(ReplicatedStorage.Shared.Configurations.QuestsConfig)
+	end)
+	if okConfig and type(config) == "table" then
+		QuestService.QuestsConfig = config
+	end
+end
 
 -- Type definitions (Luau export types not used to keep loadfile() compatibility)
 -- Objective: { id: string, kind: string, target: any, progress?: number }
@@ -251,16 +244,24 @@ local function evaluateQuestCompletion(state, quest)
         if o.kind == "Place" or o.kind == "Talk" or o.kind == "Visit" then
             -- treat target as a threshold 1-based; progress increments with each trigger
             if type(target) == "number" then
-                if progress < target then allDone = false end
+                if progress < target then
+                    allDone = false
+                end
             elseif type(target) == "string" then
-                if progress < 1 then allDone = false end
+                if progress < 1 then
+                    allDone = false
+                end
             end
         elseif type(target) == "number" then
-            if progress < target then allDone = false end
+            if progress < target then
+                allDone = false
+            end
         else
             allDone = false
         end
-        if not allDone then break end
+        if not allDone then
+            break
+        end
     end
     return allDone
 end
@@ -461,14 +462,27 @@ function QuestService.ProgressObjective(player, questId, objectiveId, delta)
     if type(delta) ~= "number" then
         return false, "InvalidDelta"
     end
-    if delta < 0 then delta = 0 end
+    if delta < 0 then
+        delta = 0
+    end
     local quest = ensureQuestExists(questId)
-    if not quest then return false, "UnknownQuest" end
+    if not quest then
+        return false, "UnknownQuest"
+    end
     local state = getStateForQuest(player, questId)
-    if not state or state.State ~= "in_progress" then return false, "NotInProgress" end
+    if not state or state.State ~= "in_progress" then
+        return false, "NotInProgress"
+    end
     local objExists = false
-    for _, o in ipairs(quest.objectives) do if o.id == objectiveId then objExists = true; break end end
-    if not objExists then return false, "UnknownObjective" end
+    for _, o in ipairs(quest.objectives) do
+        if o.id == objectiveId then
+            objExists = true
+            break
+        end
+    end
+    if not objExists then
+        return false, "UnknownObjective"
+    end
 
     state.Progress[objectiveId] = (state.Progress[objectiveId] or 0) + delta
 

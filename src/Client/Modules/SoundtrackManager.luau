@@ -1,11 +1,8 @@
 --!strict
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local SoundtrackController = require(ReplicatedStorage.Packages.Soundtrack)
-
-local LOCAL_PLAYER = Players.LocalPlayer or Players.PlayerAdded:Wait()
 
 local SOUND_IDS = {
 	Ambient = "rbxassetid://526738965",

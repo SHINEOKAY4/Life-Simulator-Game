@@ -238,7 +238,7 @@ function TradeService.RequestTrade(initiatorId, recipientId, initiatorItemIds, r
 
 	-- Validate initiator items
 	if #initiatorItemIds > 0 then
-		local ok, err = validateItems(initiatorId, initiatorItemIds)
+		local ok, _err = validateItems(initiatorId, initiatorItemIds)
 		if not ok then
 			return nil, "ItemValidationFailed"
 		end
@@ -304,7 +304,7 @@ function TradeService.AcceptTrade(tradeId, acceptingPlayerId)
 
 	-- Validate recipient items at accept time
 	if #trade.recipient.itemIds > 0 then
-		local ok, err = validateItems(trade.recipient.playerId, trade.recipient.itemIds)
+		local ok, _err = validateItems(trade.recipient.playerId, trade.recipient.itemIds)
 		if not ok then
 			return false, "ItemValidationFailed"
 		end
@@ -312,7 +312,7 @@ function TradeService.AcceptTrade(tradeId, acceptingPlayerId)
 
 	-- Re-validate initiator items (may have been consumed since request)
 	if #trade.initiator.itemIds > 0 then
-		local ok, err = validateItems(trade.initiator.playerId, trade.initiator.itemIds)
+		local ok, _err = validateItems(trade.initiator.playerId, trade.initiator.itemIds)
 		if not ok then
 			return false, "ItemValidationFailed"
 		end
@@ -320,7 +320,7 @@ function TradeService.AcceptTrade(tradeId, acceptingPlayerId)
 
 	-- Execute transfers: initiator items -> recipient
 	if #trade.initiator.itemIds > 0 then
-		local ok, err = executeTransfer(
+		local ok, _err = executeTransfer(
 			trade.initiator.playerId,
 			trade.recipient.playerId,
 			trade.initiator.itemIds
@@ -332,7 +332,7 @@ function TradeService.AcceptTrade(tradeId, acceptingPlayerId)
 
 	-- Execute transfers: recipient items -> initiator
 	if #trade.recipient.itemIds > 0 then
-		local ok, err = executeTransfer(
+		local ok, _err = executeTransfer(
 			trade.recipient.playerId,
 			trade.initiator.playerId,
 			trade.recipient.itemIds
@@ -500,7 +500,7 @@ function TradeService.Init()
 	local TradePackets = require(ReplicatedStorage.Network.TradePackets)
 
 	-- Helper to serialise a trade for the client
-	local function serialiseTrade(trade, forRecipient)
+	local function serialiseTrade(trade, _forRecipient)
 		local initiatorPlayer = Players:GetPlayerByUserId(trade.initiator.playerId)
 		local recipientPlayer = Players:GetPlayerByUserId(trade.recipient.playerId)
 		return {

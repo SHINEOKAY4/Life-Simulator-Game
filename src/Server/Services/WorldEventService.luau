@@ -1,3 +1,4 @@
+-- selene: allow(global_usage, incorrect_standard_library_use, undefined_variable)
 -- WorldEventService: manages rotating world events picked from WorldEventDefinitions.
 -- Each rotation cycle selects one event at random (avoiding back-to-back repeats).
 -- Exposes buff query API so other services can apply event multipliers.
@@ -34,7 +35,17 @@ if IS_ROBLOX then
 	end
 else
 	-- In test environment, load definitions via loadfile
-	WorldEventDefinitions = assert(loadfile("src/Shared/Definitions/WorldEventDefinitions.luau"))()
+	local dynamicLoadfile = nil
+	if type(_G) == "table" then
+		dynamicLoadfile = _G.loadfile
+	end
+	local okLoader, loader = pcall(function()
+		assert(type(dynamicLoadfile) == "function", "loadfile is unavailable in this runtime")
+		return dynamicLoadfile("src/Shared/Definitions/WorldEventDefinitions.luau")
+	end)
+	if okLoader and type(loader) == "function" then
+		WorldEventDefinitions = assert(loader())
+	end
 end
 
 local WorldEventService = {}

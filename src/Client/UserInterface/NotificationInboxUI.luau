@@ -16,7 +16,7 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local gui: ScreenGui? = nil
-local windowFrame: Frame? = nil
+local windowFrame: CanvasGroup? = nil
 local notifListFrame: ScrollingFrame? = nil
 local unreadCountLabel: TextLabel? = nil
 local open = false
@@ -306,7 +306,7 @@ local function buildGui()
 	end)
 
 	-- Window
-	local window = Instance.new("Frame")
+	local window = Instance.new("CanvasGroup")
 	window.Name = "NotificationInboxWindow"
 	window.Size = UDim2.fromOffset(360, 500)
 	window.AnchorPoint = Vector2.new(0.5, 0.5)

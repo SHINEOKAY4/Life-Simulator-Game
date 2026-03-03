@@ -289,7 +289,7 @@ function ObjectAction.Init()
 	end)
 end
 
-function ObjectAction.Move(object: Model, newPosition: Vector3)
+function ObjectAction.Move(object: Model, _newPosition: Vector3)
 	-- Visual and mechanic goals: The original object gets parented to nil to sell the illusion of movement
 	-- The objectpreview of that object is now shown visually following the cursor to sell the illusion of movement
 	-- When the player clicks a position during object previewing, to place must send a move request to the server with the new position
@@ -342,7 +342,7 @@ function ObjectAction.Move(object: Model, newPosition: Vector3)
 	ObjectActionContext.ClickMoveRequest.Enabled = true
 end
 
-function ObjectAction.Rotate(object: Model, rotation: Vector3)
+function ObjectAction.Rotate(object: Model, _rotation: Vector3)
 	local itemId = getObjectItemId(object)
 	if not itemId then
 		warn("Unknown item id for rotation")

@@ -17,8 +17,8 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local gui: ScreenGui? = nil
-local windowFrame: Frame? = nil
-local headerLabel: TextLabel? = nil
+local _windowFrame: Frame? = nil
+local _headerLabel: TextLabel? = nil
 local streakLabel: TextLabel? = nil
 local claimButton: TextButton? = nil
 local countdownLabel: TextLabel? = nil
@@ -35,7 +35,7 @@ local initialized = false
 local countdownActive = false
 
 -- Cached status from server
-local cachedStatus: { [string]: any }? = nil
+local _cachedStatus: { [string]: any }? = nil
 
 -- Day cell colors
 local DAY_COLORS = {
@@ -74,7 +74,7 @@ local function formatTime(seconds: number): string
 	end
 end
 
-local function clearChildren(container: Frame)
+local function _clearChildren(container: Frame)
 	for _, child in ipairs(container:GetChildren()) do
 		if child:IsA("Frame") or child:IsA("TextLabel") then
 			child:Destroy()
@@ -86,7 +86,6 @@ end
 local function createDayCell(dayIndex: number, reward: any, currentStreak: number, canClaim: boolean): Frame
 	local isClaimed = dayIndex <= currentStreak
 	local isCurrent = dayIndex == currentStreak + 1
-	local isNext = dayIndex > currentStreak + 1
 
 	local cell = Instance.new("Frame")
 	cell.Name = "Day_" .. tostring(dayIndex)
@@ -273,7 +272,7 @@ local function ensureGui()
 	window.BackgroundColor3 = Color3.fromRGB(24, 29, 38)
 	window.BorderSizePixel = 0
 	window.Parent = overlay
-	windowFrame = window
+	_windowFrame = window
 
 	local windowCorner = Instance.new("UICorner")
 	windowCorner.CornerRadius = UDim.new(0, 12)
@@ -303,7 +302,7 @@ local function ensureGui()
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.Text = "Daily Rewards"
 	title.Parent = header
-	headerLabel = title
+	_headerLabel = title
 
 	local subtitle = Instance.new("TextLabel")
 	subtitle.Name = "Subtitle"
@@ -662,7 +661,7 @@ local function renderStatus(status: { [string]: any })
 		return
 	end
 
-	cachedStatus = status
+	_cachedStatus = status
 
 	local currentStreak = math.max(0, math.floor(tonumber(status.CurrentStreak) or 0))
 	local longestStreak = math.max(0, math.floor(tonumber(status.LongestStreak) or 0))

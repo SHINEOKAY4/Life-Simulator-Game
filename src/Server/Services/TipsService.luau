@@ -1,3 +1,4 @@
+-- selene: allow(global_usage)
 --!strict
 
 local function hasRobloxRuntime()
@@ -38,14 +39,25 @@ if IS_ROBLOX then
 	ResidentService = require(ServerScriptService.Server.Services.ResidentService)
 	WorldEventService = require(ServerScriptService.Server.Services.WorldEventService)
 else
-	HttpService = _G.HttpService or { GenerateGUID = function() return tostring(os.clock()) end }
+	local fallbackHttp = {
+		GenerateGUID = function()
+			return tostring(os.clock())
+		end,
+	}
+	if type(_G) == "table" and _G.HttpService then
+		HttpService = _G.HttpService
+	else
+		HttpService = fallbackHttp
+	end
 	local okWorkspace, workspaceService = pcall(function()
 		return game:GetService("Workspace")
 	end)
 	if okWorkspace and workspaceService then
 		Workspace = workspaceService
 	else
-		Workspace = { Raycast = function() return nil end }
+		Workspace = { Raycast = function()
+			return nil
+		end }
 	end
 	local okPlayers, playersService = pcall(function()
 		return game:GetService("Players")
@@ -53,11 +65,15 @@ else
 	if okPlayers and playersService then
 		Players = playersService
 	else
-		Players = { GetPlayers = function() return {} end }
+		Players = { GetPlayers = function()
+			return {}
+		end }
 	end
 	TipsPackets = { TipDropped = { FireClient = function() end }, ClaimTip = { OnServerEvent = { Connect = function() end } } }
 	WorldUpdate = { Subscribe = function() end }
-	ResidentService = { GetResidents = function() return {} end }
+	ResidentService = { GetResidents = function()
+		return {}
+	end }
 	local okServer, serverScriptService = pcall(function()
 		return game:GetService("ServerScriptService")
 	end)

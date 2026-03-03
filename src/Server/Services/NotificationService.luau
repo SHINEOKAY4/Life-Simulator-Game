@@ -259,7 +259,7 @@ function NotificationService.Broadcast(playerIds, category, title, body, metadat
 
 	local count = 0
 	for _, playerId in ipairs(playerIds) do
-		local notif, err = NotificationService.Send(playerId, category, title, body, metadata)
+		local notif = NotificationService.Send(playerId, category, title, body, metadata)
 		if notif then
 			count = count + 1
 		end
@@ -338,11 +338,11 @@ function NotificationService.GetHistory(playerId, limit)
 	local state = ensurePlayerState(playerId)
 	if not limit or limit >= #state.History then
 		-- Return a shallow copy
-		local copy = {}
-		for i, n in ipairs(state.History) do
-			copy[i] = n
+		local result = {}
+		for i = 1, #state.History do
+			result[i] = state.History[i]
 		end
-		return copy
+		return result
 	end
 
 	local result = {}

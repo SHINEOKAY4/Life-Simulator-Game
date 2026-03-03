@@ -1,7 +1,7 @@
 # TODO - Life-Simulator-Game
 
 Sprint Roadmap (10 goals)
-Status: Iter 10 review sweep complete (2026-03-03) — 1102 tests pass, 0 lint errors/warnings
+Status: Iter 10 review sweep complete (2026-03-03) — 1102 tests pass, 0 lint errors/warnings; committed 24 pending lint-fix/cleanup files (unused-var suppression, CanvasGroup upgrade, DailyRewardPackets new fields)
 
 Next Sprint Direction (after Iteration 10)
 - Keep all currently shipped features and behavior.

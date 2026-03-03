@@ -681,7 +681,7 @@ function AchievementService.GetAchievementProgress(player, achievementId)
 		return nil
 	end
 
-	local current, progress, target, isUnlocked, isClaimed = definitionProgress(state, definition)
+	local _current, progress, _target, _isUnlocked, _isClaimed = definitionProgress(state, definition)
 	return progress
 end
 

@@ -7,7 +7,6 @@ local TweenService = game:GetService("TweenService")
 
 local StashPackets = require(ReplicatedStorage.Network.StashPackets)
 local ItemFinder = require(ReplicatedStorage.Shared.Utilities.ItemFinder)
-local Notification = require(script.Parent.Notification)
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -23,11 +22,9 @@ end
 
 local StorageInventoryUI = {}
 
-local RootGui: ScreenGui?
 local Panel: Frame?
 local ItemList: ScrollingFrame?
 local EmptyLabel: TextLabel?
-local CloseButton: TextButton?
 local isOpen = false
 
 -- Current stash snapshot: { [itemId]: count }
@@ -160,7 +157,6 @@ local function buildUI(gui: ScreenGui)
 	Panel = panel
 	ItemList = list
 	EmptyLabel = emptyLabel
-	CloseButton = closeBtn
 
 	closeBtn.Activated:Connect(function()
 		StorageInventoryUI.Hide()
@@ -324,7 +320,6 @@ end
 
 function StorageInventoryUI.Init()
 	local gui = findOrCreateGui()
-	RootGui = gui
 	buildUI(gui)
 
 	-- Add a popup UIScale for animation (same pattern as other panels).

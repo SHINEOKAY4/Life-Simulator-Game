@@ -64,7 +64,7 @@ local function createRankingRow(entry: { [string]: any }): Frame
 	name.BackgroundTransparency = 1
 	name.Size = UDim2.new(1, -200, 1, 0)
 	name.Position = UDim2.fromOffset(54, 0)
-	name.Font = Enum.Font.GothamSemibold
+	name.Font = Enum.Font.GothamMedium
 	name.Text = tostring(entry.PlayerName or "Unknown")
 	name.TextColor3 = Color3.fromRGB(50, 60, 80)
 	name.TextSize = 14

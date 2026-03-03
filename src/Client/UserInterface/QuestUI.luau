@@ -6,7 +6,6 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 
 local QuestPackets = require(ReplicatedStorage.Network.QuestPackets)
 local Notification = require(script.Parent.Notification)
@@ -18,9 +17,9 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 -- GUI references
 local gui: ScreenGui? = nil
-local windowFrame: Frame? = nil
+local _windowFrame: Frame? = nil
 local questListFrame: ScrollingFrame? = nil
-local headerLabel: TextLabel? = nil
+local _headerLabel: TextLabel? = nil
 local filterBar: Frame? = nil
 local emptyLabel: TextLabel? = nil
 
@@ -179,9 +178,13 @@ local function createQuestCard(questInfo: { [string]: any }): Frame
 
 	local cardHeight = 110
 	local showAction = (state == "available" or state == "completed")
-	if showAction then cardHeight = 140 end
+	if showAction then
+		cardHeight = 140
+	end
 	local showProgress = (state == "in_progress")
-	if showProgress then cardHeight = 130 end
+	if showProgress then
+		cardHeight = 130
+	end
 
 	local card = Instance.new("Frame")
 	card.Name = "Quest_" .. questId
@@ -363,7 +366,7 @@ local function ensureGui()
 	window.BackgroundColor3 = Color3.fromRGB(24, 29, 38)
 	window.BorderSizePixel = 0
 	window.Parent = overlay
-	windowFrame = window
+	_windowFrame = window
 
 	local windowCorner = Instance.new("UICorner")
 	windowCorner.CornerRadius = UDim.new(0, 12)
@@ -399,7 +402,7 @@ local function ensureGui()
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.Text = "Quests"
 	title.Parent = header
-	headerLabel = title
+	_headerLabel = title
 
 	local subtitle = Instance.new("TextLabel")
 	subtitle.Name = "Subtitle"

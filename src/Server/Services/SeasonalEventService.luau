@@ -254,7 +254,7 @@ end
 -- Injectable reward executor (swapped in tests to simulate failures)
 local rewardExecutor = nil
 
-local function defaultRewardExecutor(playerId, cashAmount, xpAmount, source)
+local function defaultRewardExecutor(_playerId, _cashAmount, _xpAmount, _source)
 	-- In Roblox this would call CurrencyService.Add / ProgressionService.AwardExperience.
 	-- Returns true on success, false + error on failure.
 	return true, nil
@@ -829,7 +829,7 @@ function SeasonalEventService.ClaimChallengeReward(player, challengeId)
 	local xpReward = challengeDef.RewardExperience
 
 	-- Execute the reward distribution
-	local ok, execErr = executeReward(player, cashReward, xpReward, "SeasonalChallenge:" .. challengeId)
+	local ok, _execErr = executeReward(player, cashReward, xpReward, "SeasonalChallenge:" .. challengeId)
 	if not ok then
 		-- Distribution failed: do NOT mark as claimed, state is unchanged
 		return nil, "DistributionFailed"
@@ -905,7 +905,7 @@ function SeasonalEventService.ClaimMilestoneReward(player, seasonsCompleted)
 	local xpReward = milestone.BonusExperience
 
 	-- Execute the reward distribution
-	local ok, execErr = executeReward(player, cashReward, xpReward, "SeasonalMilestone:" .. milestoneKey)
+	local ok, _execErr = executeReward(player, cashReward, xpReward, "SeasonalMilestone:" .. milestoneKey)
 	if not ok then
 		return nil, "DistributionFailed"
 	end
@@ -1009,7 +1009,7 @@ function SeasonalEventService.DistributeSeasonRewards(player)
 
 	-- Distribute challenge rewards
 	for _, challenge in ipairs(pendingChallenges) do
-		local ok, execErr = executeReward(
+		local ok, _execErr = executeReward(
 			player, challenge.RewardCash, challenge.RewardExperience,
 			"SeasonalChallenge:" .. challenge.Id
 		)
@@ -1048,7 +1048,7 @@ function SeasonalEventService.DistributeSeasonRewards(player)
 	-- Distribute milestone rewards
 	for _, milestone in ipairs(pendingMilestones) do
 		local key = tostring(milestone.SeasonsCompleted)
-		local ok, execErr = executeReward(
+		local ok, _execErr = executeReward(
 			player, milestone.BonusCash, milestone.BonusExperience,
 			"SeasonalMilestone:" .. key
 		)
@@ -1177,14 +1177,22 @@ function SeasonalEventService.GetPendingRewards(player)
 		Milestones = pendingMilestones,
 		TotalPendingCash = (function()
 			local total = 0
-			for _, c in ipairs(pendingChallenges) do total = total + c.RewardCash end
-			for _, m in ipairs(pendingMilestones) do total = total + m.BonusCash end
+			for _, c in ipairs(pendingChallenges) do
+				total = total + c.RewardCash
+			end
+			for _, m in ipairs(pendingMilestones) do
+				total = total + m.BonusCash
+			end
 			return total
 		end)(),
 		TotalPendingExperience = (function()
 			local total = 0
-			for _, c in ipairs(pendingChallenges) do total = total + c.RewardExperience end
-			for _, m in ipairs(pendingMilestones) do total = total + m.BonusExperience end
+			for _, c in ipairs(pendingChallenges) do
+				total = total + c.RewardExperience
+			end
+			for _, m in ipairs(pendingMilestones) do
+				total = total + m.BonusExperience
+			end
 			return total
 		end)(),
 	}

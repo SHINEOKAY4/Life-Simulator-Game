@@ -73,7 +73,7 @@ local function makeLabel(parent: Frame, name: string, order: number): TextLabel
 	label.TextColor3 = Color3.new(1, 1, 1)
 	label.TextStrokeColor3 = Color3.new(0, 0, 0)
 	label.TextStrokeTransparency = 0.4
-	label.Font = Enum.Font.GothamSemibold
+	label.Font = Enum.Font.GothamMedium
 	label.TextSize = 13
 	label.TextXAlignment = Enum.TextXAlignment.Right
 	label.Text = ""

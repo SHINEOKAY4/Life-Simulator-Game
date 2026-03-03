@@ -7,20 +7,6 @@ local Packet = require(ReplicatedStorage.Packages.Packet)
 
 local DailyRewardPackets = {}
 
-local RewardSchema = {
-	Day = Packet.NumberU8,
-	Cash = Packet.NumberU32,
-	Experience = Packet.NumberU32,
-	Label = Packet.String,
-}
-
-local MilestoneSchema = {
-	StreakRequired = Packet.NumberU16,
-	BonusCash = Packet.NumberU32,
-	BonusExperience = Packet.NumberU32,
-	Label = Packet.String,
-}
-
 local DailyChallengeSchema = {
 	DayId = Packet.NumberU32,
 	QuestId = Packet.String,
@@ -36,6 +22,8 @@ local StatusSchema = {
 	TotalExperienceEarned = Packet.NumberU32,
 	CanClaim = Packet.Boolean8,
 	SecondsUntilClaim = Packet.NumberU32,
+	ClaimCooldownSeconds = Packet.NumberU32,
+	StreakGraceSeconds = Packet.NumberU32,
 	NextStreak = Packet.NumberU16,
 	SecondsUntilStreakExpiry = Packet.NumberU32,
 	InGraceWindow = Packet.Boolean8,
@@ -48,6 +36,7 @@ local ClaimResultSchema = {
 	DayLabel = Packet.String,
 	CashEarned = Packet.NumberU32,
 	ExperienceEarned = Packet.NumberU32,
+	MilestoneUnlocked = Packet.StringLong,
 	LongestStreak = Packet.NumberU16,
 	StreakReset = Packet.Boolean8,
 }

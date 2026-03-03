@@ -1,3 +1,4 @@
+-- selene: allow(global_usage, incorrect_standard_library_use, undefined_variable)
 -- DailyRewardService: daily login reward system with streak tracking,
 -- cooldown enforcement, milestone bonuses, and notification integration.
 -- Works both in Roblox runtime and in Busted tests loaded via loadfile().
@@ -69,7 +70,14 @@ local questServiceInitialized = false
 
 local function getQuestService()
 	if not QuestService and not IS_ROBLOX then
-		local okLoader, loader = pcall(loadfile, "src/Server/Services/QuestService.luau")
+		local dynamicLoadfile = nil
+		if type(_G) == "table" then
+			dynamicLoadfile = _G.loadfile
+		end
+		local okLoader, loader = pcall(function()
+			assert(type(dynamicLoadfile) == "function", "loadfile is unavailable in this runtime")
+			return dynamicLoadfile("src/Server/Services/QuestService.luau")
+		end)
 		if okLoader and type(loader) == "function" then
 			local okService, service = pcall(loader)
 			if okService and type(service) == "table" then
@@ -323,7 +331,7 @@ local function getDailyChallengeSnapshot(player, state)
 		DayId = challenge.DayId,
 		QuestId = challenge.QuestId,
 		AssignedAt = challenge.AssignedAt,
-		QuestState = questState,
+		QuestState = questState or "",
 	}
 end
 
@@ -490,7 +498,7 @@ function DailyRewardService.ClaimReward(player)
 		DayLabel = reward.Label,
 		CashEarned = cashReward,
 		ExperienceEarned = xpReward,
-		MilestoneUnlocked = milestoneBonus and milestoneBonus.Label or nil,
+		MilestoneUnlocked = milestoneBonus and milestoneBonus.Label or "",
 		LongestStreak = state.LongestStreak,
 		StreakReset = (status.IsFirstClaim or not status.StreakAlive) and newStreak == 1,
 		DailyChallenge = getDailyChallengeSnapshot(player, state),

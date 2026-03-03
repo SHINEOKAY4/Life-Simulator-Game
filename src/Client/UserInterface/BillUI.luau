@@ -152,7 +152,7 @@ local function buildTierSelector(parent: Frame)
 	label.Name = "Label"
 	label.BackgroundTransparency = 1
 	label.Size = UDim2.new(0, 68, 1, 0)
-	label.Font = Enum.Font.GothamSemibold
+		label.Font = Enum.Font.GothamMedium
 	label.TextSize = 12
 	label.TextColor3 = Color3.fromRGB(180, 185, 205)
 	label.TextXAlignment = Enum.TextXAlignment.Left
