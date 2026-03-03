@@ -378,6 +378,16 @@ local function buildAchievementRow(state, definition)
 	}
 end
 
+local function addRewardsTotals(rewards, totals)
+	if type(rewards) ~= "table" then
+		return
+	end
+	local cash = asWholePositive(rewards.Cash)
+	local xp = asWholePositive(rewards.Experience)
+	totals.Cash = totals.Cash + cash
+	totals.Experience = totals.Experience + xp
+end
+
 -- ============ Test-mode state management ============
 
 local testProfiles = {}
@@ -903,6 +913,86 @@ function AchievementService.ClaimAchievement(player, achievementId)
 	}
 end
 
+function AchievementService.ClaimAllAchievements(player)
+	local profile = getProfileForPlayer(player)
+	if type(profile) ~= "table" then
+		return false, "Profile unavailable.", nil
+	end
+
+	local state = ensureState(profile)
+	local claimedIds = {}
+	local totals = { Cash = 0, Experience = 0 }
+
+	for _, definition in ipairs(getDefinitionsList()) do
+		local _, _, _, isUnlocked, isClaimed = definitionProgress(state, definition)
+		if isUnlocked and not isClaimed then
+			local rewards = definition.Rewards or {}
+			local rewardCash = asWholePositive(rewards.Cash)
+			local rewardExperience = asWholePositive(rewards.Experience)
+			if rewardCash > 0 then
+				if IS_ROBLOX then
+					local currencyState = profile.CurrencyState
+					if type(currencyState) ~= "table" then
+						profile.CurrencyState = {}
+						currencyState = profile.CurrencyState
+					end
+					CurrencyService.Add(player, "Cash", rewardCash, currencyState, {
+						Source = "Achievement:" .. definition.Id,
+					})
+				else
+					local currencyState = profile.CurrencyState
+					if type(currencyState) ~= "table" then
+						profile.CurrencyState = {}
+						currencyState = profile.CurrencyState
+					end
+					currencyState.Cash = (currencyState.Cash or 0) + rewardCash
+				end
+			end
+			if rewardExperience > 0 then
+				getProgressionService().AwardExperience(player, rewardExperience, "Achievement:" .. definition.Id)
+			end
+			state.Claimed[definition.Id] = now()
+			claimedIds[#claimedIds + 1] = definition.Id
+			addRewardsTotals(rewards, totals)
+		end
+	end
+
+	if #claimedIds == 0 then
+		return true, "No claimable achievements.", {
+			ClaimedIds = {},
+			RewardCash = 0,
+			RewardExperience = 0,
+		}
+	end
+
+	sendSnapshot(player, state)
+
+	local rewardParts = {}
+	if totals.Cash > 0 then
+		rewardParts[#rewardParts + 1] = totals.Cash .. " Cash"
+	end
+	if totals.Experience > 0 then
+		rewardParts[#rewardParts + 1] = totals.Experience .. " XP"
+	end
+	local rewardText = #rewardParts > 0 and ("Rewards: " .. table.concat(rewardParts, ", ")) or ""
+	local claimedLabel = string.format("Claimed %d achievements", #claimedIds)
+	local body = rewardText ~= "" and (claimedLabel .. " — " .. rewardText) or claimedLabel
+	if #claimedIds > 0 then
+		sendNotification(player, "Achievements Claimed!", body, {
+			AchievementIds = claimedIds,
+			RewardCash = totals.Cash,
+			RewardExperience = totals.Experience,
+			Event = "ClaimedAll",
+		})
+	end
+
+	return true, "Achievements claimed.", {
+		ClaimedIds = claimedIds,
+		RewardCash = totals.Cash,
+		RewardExperience = totals.Experience,
+	}
+end
+
 local function handleGetSnapshot(player)
 	local state = getStateForPlayer(player, true)
 	if not state then
@@ -930,6 +1020,10 @@ function AchievementService.Init()
 
 	AchievementPackets.ClaimAchievement.OnServerInvoke = function(player, achievementId)
 		return AchievementService.ClaimAchievement(player, achievementId)
+	end
+
+	AchievementPackets.ClaimAllAchievements.OnServerInvoke = function(player)
+		return AchievementService.ClaimAllAchievements(player)
 	end
 
 	Players.PlayerAdded:Connect(function(player)

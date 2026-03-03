@@ -954,6 +954,45 @@ describe("AchievementService", function()
 		end)
 	end)
 
+	-- ========== Bulk claim ==========
+
+	describe("ClaimAllAchievements", function()
+		it("claims all unlocked achievements and returns totals", function()
+			AchievementService.RecordBuildPlaced(player, 150)
+			local ok, msg, data = AchievementService.ClaimAllAchievements(player)
+			assert.is_true(ok)
+			assert.equals("Achievements claimed.", msg)
+			assert.is_not_nil(data)
+			assert.is_true(#data.ClaimedIds >= 2)
+			assert.equals(650, data.RewardCash)
+			assert.equals(160, data.RewardExperience)
+
+			local snapshot = AchievementService.GetSnapshot(player)
+			assert.equals(2, snapshot.ClaimedCount)
+		end)
+
+		it("returns no claimable achievements when none are unlocked", function()
+			local ok, msg, data = AchievementService.ClaimAllAchievements(player)
+			assert.is_true(ok)
+			assert.equals("No claimable achievements.", msg)
+			assert.is_not_nil(data)
+			assert.equals(0, data.RewardCash)
+			assert.equals(0, data.RewardExperience)
+			assert.equals(0, #data.ClaimedIds)
+		end)
+
+		it("is idempotent on already-claimed achievements", function()
+			AchievementService.RecordBuildPlaced(player, 25)
+			AchievementService.ClaimAllAchievements(player)
+			local ok, msg, data = AchievementService.ClaimAllAchievements(player)
+			assert.is_true(ok)
+			assert.equals("No claimable achievements.", msg)
+			assert.equals(0, data.RewardCash)
+			assert.equals(0, data.RewardExperience)
+			assert.equals(0, #data.ClaimedIds)
+		end)
+	end)
+
 	-- ========== State initialization / normalization ==========
 
 	describe("state normalization", function()

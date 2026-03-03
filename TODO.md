@@ -1,63 +1,62 @@
 # TODO - Life-Simulator-Game
 
 Sprint Roadmap (10 goals)
-Status: refresh for Iteration 8 (2026-03-02)
+Status: refresh for Iteration 9 (2026-03-02)
 
-1. [x] Add Daily + Seasonal achievement badges in BadgeService.
+1. [x] Add achievement bulk-claim action.
    Acceptance:
-   - BadgeService includes Daily and Seasonal category entries with unique icons/colors.
-   - BadgeServiceSpec covers Daily/Seasonal categories and updated totals.
-   - Achievement UI renders Daily/Seasonal badges (manual smoke).
-
-2. [x] Add NotificationPackets and server-to-client push for NotificationService.
-   Acceptance:
-   - `src/Network/NotificationPackets.luau` defines snapshot and delta packets.
-   - `NotificationService.Init` registers remotes and pushes queue updates.
-   - Client listens and renders toasts via `src/Client/UserInterface/Notification.luau`.
-
-3. [x] Add achievement stats summary packet + UI widget.
-   Acceptance:
-   - `AchievementPackets` exposes stats summary request/response.
-   - `AchievementService.GetStatsSummary` is wired to the packet.
-   - `AchievementUI` shows completion percent and per-category counts.
-
-4. [x] Add mailbox income summary to the HUD.
-   Acceptance:
-   - Mailbox packets expose balance, income rate, and next rent tick.
-   - UI shows mailbox balance + next payout time.
-   - Tests cover income rate calculations and packet payloads.
-
-5. [x] Add tenant review history UI.
-   Acceptance:
-   - `ReviewPackets` supports fetching and pushing new reviews.
-   - UI lists the last 20 reviews with rating, comment, and timestamp.
-   - New review events update the UI without re-open.
-
-6. [x] Add crafting skill progression panel.
-   Acceptance:
-   - Crafting packets include skill level/XP summary per skill.
-   - UI shows per-skill progress bars and next-level XP.
-   - Craft completion updates the panel in real time.
-
-7. [x] Add seasonal buff detail tooltip.
-   Acceptance:
-   - Seasonal packets include active buff details and multipliers.
-   - UI shows active multipliers with descriptions.
-   - Buffs refresh on season change and challenge completion.
-
-8. [x] Add daily reward streak warning.
-   Acceptance:
-   - Daily reward packets include time-to-expire and grace window info.
-   - UI shows countdown warning inside the grace window.
-   - Tests cover warning threshold logic.
-
-9. [ ] Add achievement bulk-claim action.
-   Acceptance:
-   - Achievement service exposes `ClaimAll` for unlocked unclaimed items.
-   - UI button claims all and updates counts in-place.
+   - Achievement service exposes `ClaimAllAchievements` and a network packet.
+   - Achievement UI shows a Claim All button with disabled state when none are claimable.
    - Tests cover reward totals and idempotency.
 
-10. [ ] Add quest daily challenge rotation regression tests.
+2. [ ] Surface daily challenge status in DailyReward UI.
+   Acceptance:
+   - `DailyRewardPackets` status schema includes `DailyChallenge` fields (DayId, QuestId, AssignedAt, QuestState).
+   - `DailyRewardUI` renders the current daily challenge with quest name and state.
+   - `DailyRewardSpec` verifies daily challenge payload wiring.
+
+3. [ ] Add quest daily challenge rotation regression tests.
+   Acceptance:
+   - New spec verifies quest rotation across consecutive UTC days.
+   - Ensures repeatable quest assignment remains consistent across resets.
+
+4. [ ] Build Notification inbox panel.
+   Acceptance:
+   - New client UI lists notifications from `NotificationPackets.StateSnapshot` and deltas.
+   - Unread/read state is reflected in the list and can be toggled locally.
+   - Manual smoke: opening inbox shows latest 20 notifications in order.
+
+5. [ ] Add category filters to Achievement UI.
+   Acceptance:
+   - UI provides category filter tabs (All + per-category).
+   - Filtered list updates counts and preserves claim button behavior.
+   - `AchievementUISpec` covers filter selection and empty states.
+
+6. [ ] Add active quest detail drawer in Quest UI.
+   Acceptance:
+   - Quest UI shows selected quest objectives, rewards, and state.
+   - Drawer updates on `QuestSnapshotUpdated` without reopening.
+   - `QuestUISpec` covers rendering and update behavior.
+
+7. [ ] Add tenant review filters by rating.
+   Acceptance:
+   - Reviews UI supports filtering to 5/4/3+ star ratings.
+   - Filter state persists while UI is open.
+   - Manual smoke: filter reduces visible rows correctly.
+
+8. [ ] Add mailbox income breakdown tooltip.
+   Acceptance:
+   - Mailbox packets include per-tenant income breakdown in summary payload.
+   - Mailbox HUD shows tooltip with per-tenant contributions and next payout time.
+   - Tests verify breakdown totals and payload shape.
+
+9. [ ] Add seasonal event reward summary panel.
+   Acceptance:
+   - Seasonal status payload includes pending rewards count and next milestone label.
+   - Seasonal UI shows pending counts and next milestone progress.
+   - `SeasonalEventUISpec` covers summary rendering.
+
+10. [ ] Add world event tips cooldown safeguards.
     Acceptance:
-    - New spec covers daily challenge rotation across days.
-    - Ensures repeatable quest assignment stays consistent.
+    - Tip selection enforces a cooldown per tip.
+    - `WorldEventTipsSpec` covers cooldown rotation behavior.

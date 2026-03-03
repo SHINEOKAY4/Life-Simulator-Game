@@ -51,6 +51,7 @@ local summaryCard: Frame? = nil
 local summaryCompletionLabel: TextLabel? = nil
 local summaryDetailLabel: TextLabel? = nil
 local summaryCategoryLabel: TextLabel? = nil
+local claimAllButton: TextButton? = nil
 local open = false
 local initialized = false
 local currentSnapshot: Snapshot? = nil
@@ -257,6 +258,23 @@ local function ensureGui()
 	progress.Parent = header
 	progressLabel = progress
 
+	local claimAll = Instance.new("TextButton")
+	claimAll.Name = "ClaimAll"
+	claimAll.AnchorPoint = Vector2.new(1, 0)
+	claimAll.Position = UDim2.new(1, -66, 0, 10)
+	claimAll.Size = UDim2.fromOffset(140, 28)
+	claimAll.Font = Enum.Font.GothamBold
+	claimAll.TextSize = 13
+	claimAll.Text = "Claim All"
+	claimAll.TextColor3 = Color3.fromRGB(230, 243, 255)
+	claimAll.BackgroundColor3 = Color3.fromRGB(52, 124, 203)
+	claimAll.AutoButtonColor = true
+	claimAll.Parent = header
+	local claimAllCorner = Instance.new("UICorner")
+	claimAllCorner.CornerRadius = UDim.new(0, 8)
+	claimAllCorner.Parent = claimAll
+	claimAllButton = claimAll
+
 	local body = Instance.new("Frame")
 	body.Name = "Body"
 	body.BackgroundTransparency = 1
@@ -292,6 +310,23 @@ local function ensureGui()
 	empty.Visible = false
 	empty.Parent = list
 	emptyLabel = empty
+end
+
+local function setClaimAllState(enabled: boolean)
+	if not claimAllButton then
+		return
+	end
+	claimAllButton.Active = enabled
+	claimAllButton.AutoButtonColor = enabled
+	if enabled then
+		claimAllButton.Text = "Claim All"
+		claimAllButton.BackgroundColor3 = Color3.fromRGB(52, 124, 203)
+		claimAllButton.TextColor3 = Color3.fromRGB(230, 243, 255)
+	else
+		claimAllButton.Text = "No Rewards"
+		claimAllButton.BackgroundColor3 = Color3.fromRGB(73, 79, 94)
+		claimAllButton.TextColor3 = Color3.fromRGB(192, 198, 211)
+	end
 end
 
 local function makeSummaryCard(summary: StatsSummary?, layoutOrder: number): Frame
@@ -560,10 +595,13 @@ local function renderSnapshot(snapshot: Snapshot?)
 	if not snapshot then
 		progressLabel.Text = "0 / 0 claimed"
 		emptyLabel.Visible = true
+		setClaimAllState(false)
 		return
 	end
 
 	progressLabel.Text = string.format("%d / %d claimed", snapshot.ClaimedCount or 0, snapshot.TotalCount or 0)
+	local claimableCount = math.max(0, (snapshot.UnlockedCount or 0) - (snapshot.ClaimedCount or 0))
+	setClaimAllState(claimableCount > 0)
 
 	local summary = makeSummaryCard(currentSummary, 0)
 	summary.Parent = listFrame
@@ -646,6 +684,52 @@ function AchievementUI.Init()
 	ensureGui()
 	AchievementPackets.SnapshotUpdated.OnClientEvent:Connect(onSnapshotUpdated)
 	AchievementPackets.AchievementUnlocked.OnClientEvent:Connect(onAchievementUnlocked)
+	if claimAllButton then
+		claimAllButton.Activated:Connect(function()
+			setClaimAllState(false)
+			if claimAllButton then
+				claimAllButton.Text = "Claiming..."
+			end
+			local ok, msg, payload = AchievementPackets.ClaimAllAchievements:InvokeServer()
+			if not ok then
+				Notification.Show({
+					Title = "Claim Failed",
+					Text = if typeof(msg) == "string" then msg else "Could not claim achievements.",
+					Duration = 3,
+					BackgroundColor = Color3.fromRGB(132, 64, 64),
+				})
+				setClaimAllState(true)
+				return
+			end
+			local data = if typeof(payload) == "table" then payload else {}
+			local cash = math.floor(tonumber(data.RewardCash) or 0)
+			local xp = math.floor(tonumber(data.RewardExperience) or 0)
+			local claimedIds = data.ClaimedIds
+			local claimedCount = if typeof(claimedIds) == "table" then #claimedIds else 0
+			if claimedCount > 0 then
+				Notification.Show({
+					Title = "Rewards Claimed",
+					Text = string.format("%d achievements claimed: +$%d, +%d XP", claimedCount, cash, xp),
+					Duration = 4,
+					BackgroundColor = Color3.fromRGB(52, 130, 90),
+				})
+			else
+				Notification.Show({
+					Title = "No Rewards",
+					Text = "No achievements ready to claim.",
+					Duration = 3,
+					BackgroundColor = Color3.fromRGB(80, 90, 100),
+				})
+			end
+			local okSnapshot, _, snapshotPayload = AchievementPackets.GetSnapshot:InvokeServer()
+			if okSnapshot and typeof(snapshotPayload) == "table" then
+				renderSnapshot(snapshotPayload :: Snapshot)
+			else
+				renderSnapshot(nil)
+			end
+			requestStatsSummary()
+		end)
+	end
 
 	local ok, _, payload = AchievementPackets.GetSnapshot:InvokeServer()
 	if ok and typeof(payload) == "table" then

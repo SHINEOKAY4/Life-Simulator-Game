@@ -13,6 +13,11 @@ AchievementPackets.ClaimAchievement = Packet("ClaimAchievement", Packet.String):
 	Packet.StringLong,
 	Packet.Any
 )
+AchievementPackets.ClaimAllAchievements = Packet("ClaimAllAchievements"):Response(
+	Packet.Boolean8,
+	Packet.StringLong,
+	Packet.Any
+)
 
 AchievementPackets.SnapshotUpdated = Packet("AchievementSnapshotUpdated", Packet.Any)
 AchievementPackets.AchievementUnlocked = Packet("AchievementUnlocked", {
