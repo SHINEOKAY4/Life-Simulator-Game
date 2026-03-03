@@ -1,7 +1,7 @@
 # TODO - Life-Simulator-Game
 
 Sprint Roadmap (Iter 2–11, refreshed 2026-03-03)
-Status: Iter 3 active — lint workflow fix for issue #18
+Status: Iter 4 active — CurrencyServiceValidationSpec added
 
 Guiding Principles
 - Preserve all shipped behavior; no feature removal.
@@ -10,7 +10,7 @@ Guiding Principles
 
 ---
 
-1) [ ] Goal 1 - BillingCalculator Behavioral Spec
+1) [x] Goal 1 - BillingCalculator Behavioral Spec
 Goal: add a busted spec that exercises the four billing formulas with
       inline-replicated constants (no Roblox deps), including edge cases.
 Acceptance Checks:
@@ -22,7 +22,7 @@ Acceptance Checks:
 - Unknown tier returns 0.
 - All spec assertions pass; no lint warnings.
 
-2) [ ] Goal 2 - CurrencyService Validation Spec
+2) [x] Goal 2 - CurrencyService Validation Spec
 Goal: test the parameter-validation guards (EnsurePositiveInteger, AssertParameters)
       with inline stubs so no Roblox runtime is required.
 Acceptance Checks:
