@@ -1,79 +1,111 @@
 # TODO - Life-Simulator-Game
 
-Sprint Roadmap (Iter 1-10)
-Status: Iter 1 drafting reset (2026-03-03)
+Sprint Roadmap (Iter 2–11, refreshed 2026-03-03)
+Status: Iter 2 active — roadmap rebuilt after backlog exhaustion
 
 Guiding Principles
-- Preserve current shipped behavior; prioritize reliability, clarity, and test coverage.
-- Plan-first: each iteration delivers measurable stability, tooling, or UX improvements.
-- Acceptance checks are required for completion sign-off.
+- Preserve all shipped behavior; no feature removal.
+- Each goal delivers measurable test coverage, stability, or clarity.
+- Acceptance checks are required before marking a goal done.
 
-1) Iter 1 - Sprint Baseline + Observability
-Goal: establish a clean baseline, system visibility, and clear boundaries for feature work.
-Acceptance Checks:
-- Repo health is documented (tests, lint, docs build commands verified in README/docs).
-- Startup ordering and dependency graph are captured in TODO context for future tasks.
-- Key system contracts (Plot/Build/Tenant/Quest/Reward/Network) are summarized in TODO.
+---
 
-2) Iter 2 - Plot/Build Runtime Stability
-Goal: reduce plot/build runtime drift and improve snapshot correctness.
+1) [ ] Goal 1 - BillingCalculator Behavioral Spec
+Goal: add a busted spec that exercises the four billing formulas with
+      inline-replicated constants (no Roblox deps), including edge cases.
 Acceptance Checks:
-- Placement delta flow is verified end-to-end (server send -> client apply -> UI refresh).
-- PlotState room sync behavior is documented and validated with tests.
-- No stale TODOs related to placement/plot remain in code.
+- Tests/Specs/BillingCalculatorSpec.lua exists and runs under busted.
+- CalculatePropertyTax: zero cells, one cell, many cells all match formula.
+- CalculateElectricity: zero kWh, fractional kWh match formula.
+- CalculateWater: zero residents, many residents match formula.
+- CalculateInternet: all four tiers (None/Basic/Standard/Premium) return correct costs.
+- Unknown tier returns 0.
+- All spec assertions pass; no lint warnings.
 
-3) Iter 3 - Tenant Loop Reliability
-Goal: harden tenant offers, room assignment, mailbox balance, and lease transitions.
+2) [ ] Goal 2 - CurrencyService Validation Spec
+Goal: test the parameter-validation guards (EnsurePositiveInteger, AssertParameters)
+      with inline stubs so no Roblox runtime is required.
 Acceptance Checks:
-- Room readiness and assignment paths have explicit tests for eviction/reassign edge cases.
-- Mailbox income summary and collection flows have deterministic test coverage.
-- Tenant UI shows accurate occupancy and diagnostics under all room states.
+- Tests/Specs/CurrencyServiceValidationSpec.lua exists.
+- Negative amounts, NaN, Inf, non-integer, and zero are each tested.
+- Valid inputs pass without error.
+- Error messages match expected substrings.
 
-4) Iter 4 - Reward Systems Consistency
-Goal: ensure daily rewards, seasonal events, and achievements share consistent reward semantics.
+3) [ ] Goal 3 - ChoreService Spec
+Goal: structural + light behavioral tests for ChoreService: chore-record shape,
+      ID uniqueness, trash vs repair routing, reward semantics.
 Acceptance Checks:
-- Reward claim flows (daily + seasonal + achievements) are idempotent and tested.
-- Reward summary/preview UI matches server payload shape.
-- Reward packets have explicit schema validation in specs.
+- Tests/Specs/ChoreServiceSpec.lua exists.
+- Source-level assertions confirm ActiveChores usage, ID generation, handler dispatch.
+- Reward amount range is validated in at least one test.
+- Spec passes cleanly under busted.
 
-5) Iter 5 - Quest System UX + Sync
-Goal: improve quest UI clarity and correctness under live updates.
+4) [ ] Goal 4 - WeatherService Spec
+Goal: test the weather-selection weight logic (replicated inline) and state
+      structure for all four seasons.
 Acceptance Checks:
-- Quest detail drawer reflects server updates without reopening.
-- Quest snapshots remain consistent across login/session refresh.
-- Quest UI specs cover selection, update, and completion states.
+- Tests/Specs/WeatherServiceSpec.lua exists.
+- pickWeatherForSeason inline replica produces only valid weather types per season.
+- Spring, Summer, Autumn, Winter each tested independently.
+- Season cycling order (Spring→Summer→Autumn→Winter→Spring) asserted structurally.
+- Spec passes cleanly.
 
-6) Iter 6 - Notification/Inbox Expansion
-Goal: unify notification delivery, inbox filtering, and read/unread states.
+5) [ ] Goal 5 - CraftingService Job-Lifecycle Spec
+Goal: extend coverage beyond skill-panel math to include job record shape,
+      skill-requirement validation paths, and ingredient deduction logic.
 Acceptance Checks:
-- Notification queue/history/mark-read are reflected in inbox UI.
-- Inbox shows correct unread counts after batch changes.
-- Notification packet payloads validated by tests.
+- Tests/Specs/CraftingJobSpec.lua exists.
+- Job shape (JobId, RecipeId, StartedAt, EndsAt, ConsumedIngredients) verified.
+- Skill-requirement gates confirmed structurally in source.
+- Ingredient consumption logic paths asserted (structural).
+- Spec passes cleanly.
 
-7) Iter 7 - Economy/Billing Clarity
-Goal: stabilize billing/currency updates and surface clear player feedback.
+6) [ ] Goal 6 - BillingService Cycle Spec
+Goal: test billing cycle boundary semantics: due-date calculation, grace-period
+      threshold, power-outage trigger wiring, payment settlement paths.
 Acceptance Checks:
-- Billing cycle transitions are tested for timing boundaries.
-- Currency deltas track sources consistently across services.
-- Billing UI shows accurate state after reconnect.
+- Tests/Specs/BillingServiceCycleSpec.lua exists.
+- CycleDurationSeconds / GracePeriodSeconds boundary math validated inline.
+- Source-level assertions confirm PowerOutageAttribute wiring.
+- Spec passes cleanly.
 
-8) Iter 8 - Performance + Memory Hygiene
-Goal: reduce hot-path allocations and runtime churn without feature removal.
+7) [ ] Goal 7 - ResidentService Spec
+Goal: structural + behavioral tests for ResidentService: occupancy tracking,
+      lease-state machine, eviction trigger conditions.
 Acceptance Checks:
-- High-frequency loops have targeted optimizations (profiling-backed or measured).
-- Client caches invalidate correctly without excessive churn.
-- No new lint warnings; tests remain green.
+- Tests/Specs/ResidentServiceSpec.lua exists.
+- Occupancy count math tested inline.
+- Source-level assertions confirm eviction dispatch path.
+- Lease-state transitions asserted structurally.
+- Spec passes cleanly.
 
-9) Iter 9 - Test Coverage + Regression Sweep
-Goal: fill gaps across core loops and prevent regressions in key systems.
+8) [ ] Goal 8 - ReviewService Rating Logic Spec
+Goal: inline-replicate the rating formula from ReviewService and assert penalty
+      branches for missed payments, trash count, and temperature offset.
 Acceptance Checks:
-- New specs cover edge cases for plot/build/tenant/reward/quest systems.
-- Regression tests added for any recurring issues.
-- Tests pass with no flaky cases.
+- Tests/Specs/ReviewRatingSpec.lua exists.
+- Base rating range (3–5) asserted.
+- Missed-payment penalty lowers rating correctly.
+- Trash penalty is clamped at rating ≥ 1.
+- Temperature comfort offset branches tested.
+- Spec passes cleanly.
 
-10) Iter 10 - Release Readiness + Cleanup
-Goal: consolidate documentation, deprecations, and final QA readiness.
+9) [ ] Goal 9 - ComfortRating Spec
+Goal: test the two pure functions in ComfortRating that have no Roblox deps:
+      calculateTemperatureScore (inline) and ScoreToStars / GetScoreNote.
 Acceptance Checks:
-- Docs updated for any public API/system changes.
-- Deprecated or dead code removed only if fully verified.
-- Final smoke passes for core UX flows (plot claim, build, tenant, rewards, quests).
+- Tests/Specs/ComfortRatingSpec.lua exists.
+- Ideal temperature band returns score ≥ 60 (inline formula verified).
+- Extreme temperatures return score approaching 0.
+- ScoreToStars: 0→0 stars, 100→5 stars, 50→2.5 stars.
+- GetScoreNote: each threshold band returns correct string.
+- Spec passes cleanly.
+
+10) [ ] Goal 10 - Full Sweep: Test Green + Lint Clean + Docs Refresh
+Goal: run complete test suite and selene, fix any regressions, and update
+      docs index to reference all new specs added in Goals 1–9.
+Acceptance Checks:
+- ./run_tests.sh exits 0 with no failures.
+- selene src/ exits 0 with 0 errors and 0 warnings.
+- docs/content/ reflects the new specs (at minimum one docs update).
+- CHANGELOG.md entry added for Goals 1–9 deliverables.
