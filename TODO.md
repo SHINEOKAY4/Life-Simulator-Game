@@ -1,9 +1,12 @@
 # TODO - Life-Simulator-Game
 
 Sprint Roadmap (Iter 2–11, refreshed 2026-03-03)
-Status: Iter 5 review sweep complete — tests + selene clean
+Status: Iter 6 complete — ChoreServiceSpec added; 1219 tests green, selene 0 errors
 
 Review Log
+- Iter 6: merged origin/main; gh auth failed (treated as no open issue);
+  implemented Goal 3 (ChoreServiceSpec); 1219 successes, 0 failures;
+  selene 0 errors, 0 warnings.
 - Iter 5: merged origin/main; gh auth failed (treated as no open issue);
   ran ./run_tests.sh and selene src (0 errors, 0 warnings); no regressions found.
 
@@ -35,7 +38,7 @@ Acceptance Checks:
 - Valid inputs pass without error.
 - Error messages match expected substrings.
 
-3) [ ] Goal 3 - ChoreService Spec
+3) [x] Goal 3 - ChoreService Spec
 Goal: structural + light behavioral tests for ChoreService: chore-record shape,
       ID uniqueness, trash vs repair routing, reward semantics.
 Acceptance Checks:
