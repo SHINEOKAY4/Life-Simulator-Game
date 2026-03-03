@@ -152,6 +152,14 @@ export type PlotState = {
 }
 ```
 
+## Luau Linting (Required)
+- After any `.luau` code change, run the Luau linter from repo root:
+  ```bash
+  export PATH="$HOME/.aftman/bin:$PATH"
+  selene --allow-warnings src
+  ```
+- Do not consider a Luau task complete until this lint command has been run.
+
 ## Common Workflows
 
 ### Adding a new feature

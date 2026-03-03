@@ -20,7 +20,7 @@ Status: refresh for Iteration 9 (2026-03-02)
    - New spec verifies quest rotation across consecutive UTC days.
    - Ensures repeatable quest assignment remains consistent across resets.
 
-4. [ ] Build Notification inbox panel.
+4. [x] Build Notification inbox panel.
    Acceptance:
    - New client UI lists notifications from `NotificationPackets.StateSnapshot` and deltas.
    - Unread/read state is reflected in the list and can be toggled locally.

@@ -20,6 +20,7 @@ local SeasonalEventUI = require(script.Parent.SeasonalEventUI)
 local QuestUI = require(script.Parent.QuestUI)
 local WorldEventUI = require(script.Parent.WorldEventUI)
 local EmoteUI = require(script.Parent.EmoteUI)
+local NotificationInboxUI = require(script.Parent.NotificationInboxUI)
 local PlotExpansion = require(script.Parent.Parent.Modules.PlotExpansion)
 
 local Player = Players.LocalPlayer
@@ -157,6 +158,18 @@ local EmotesButton = (function(): GuiButton
 	button.Name = "EmotesButton"
 	setButtonText(button, "Emotes")
 	button.LayoutOrder = WorldEventsButton.LayoutOrder + 1
+	button.Parent = BottomRight
+	return button
+end)()
+local NotificationsButton = (function(): GuiButton
+	local existing = BottomRight:FindFirstChild("NotificationsButton")
+	if existing and existing:IsA("GuiButton") then
+		return existing
+	end
+	local button = ReviewsButton:Clone()
+	button.Name = "NotificationsButton"
+	setButtonText(button, "Notifications")
+	button.LayoutOrder = EmotesButton.LayoutOrder + 1
 	button.Parent = BottomRight
 	return button
 end)()
@@ -690,6 +703,10 @@ function MainHUD.Init()
 		EmoteUI.Toggle()
 	end)
 
+	NotificationsButton.Activated:Connect(function()
+		NotificationInboxUI.Toggle()
+	end)
+
 	PlotBuilderEnabled.Changed:Connect(function()
 		if PlotBuilderEnabled.Value then
 			MainHUD.Hide()
@@ -754,7 +771,7 @@ function MainHUD.Init()
 		Player:GetAttributeChangedSignal(attributeName):Connect(updateProgressionDisplay)
 	end
 
-	for _, button in ipairs({ BuildButton, ReviewsButton, ReputationButton, ProfileButton, BillsButton, AchievementsButton, DailyRewardsButton, SeasonsButton, QuestsButton, WorldEventsButton, EmotesButton }) do
+	for _, button in ipairs({ BuildButton, ReviewsButton, ReputationButton, ProfileButton, BillsButton, AchievementsButton, DailyRewardsButton, SeasonsButton, QuestsButton, WorldEventsButton, EmotesButton, NotificationsButton }) do
 		configureButtonVisuals(button)
 	end
 
