@@ -115,7 +115,7 @@ function PacketProcessor.ApplyPlacementDelta(
 	currentPlacedItems: { [string]: any },
 	delta: any,
 	defaultLevel: number
-): (string?, boolean)
+): (string?, boolean, any?)
 	if not delta or not delta.Item then
 		return nil, false
 	end
@@ -166,9 +166,11 @@ function PacketProcessor.ApplyPlacementDelta(
 			levelValue
 		)
 
+	local oldRecord = currentPlacedItems[key]
+
 	if delta.Action == "Removed" then
 		currentPlacedItems[key] = nil
-		return key, true
+		return key, true, oldRecord
 	end
 
 	if delta.Action ~= "Placed" and delta.Action ~= "Updated" then
@@ -189,7 +191,7 @@ function PacketProcessor.ApplyPlacementDelta(
 		PlacementKeyType = placementKeyType,
 	}
 
-	return key, true
+	return key, true, oldRecord
 end
 
 return PacketProcessor

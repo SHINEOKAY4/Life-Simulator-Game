@@ -77,7 +77,7 @@ Acceptance Checks:
 Regression Checks:
 - Build actions still resolve for all known action types.
 
-7) [ ] Iter 7 Goal - PlotState Snapshot Diff Optimization
+7) [x] Iter 7 Goal - PlotState Snapshot Diff Optimization
 Goal: reduce redundant snapshot allocations in PlotState.
 Acceptance Checks:
 - Snapshot diffing avoids deep clone when no changes.
@@ -130,3 +130,6 @@ Review Log
   added SeatAcquisitionSpec (5 structural checks); ./run_tests.sh 1344 successes; selene 0 errors, 0 warnings.
 - Iter 6: cached BuildService action module resolution with dispatch helpers; added BuildServiceActionCacheSpec
   structural checks for cached resolution; ./run_tests.sh (see latest run); selene 0 errors, 0 warnings.
+- Iter 7: incremental PlotState snapshot diff in PlacementDelta handler; added removeKeyFromSnapshot +
+  addItemToSnapshot helpers and LevelSnapshotBuilder.ApplyItemDelta; PacketProcessor returns oldRecord as
+  3rd value; added LevelSnapshotIncrementalSpec (13 structural checks); selene 0 errors on changed files.

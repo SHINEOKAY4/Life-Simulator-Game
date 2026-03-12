@@ -137,6 +137,161 @@ local function resolveCardinalAdjacency(
 	return nil, nil
 end
 
+-- Removes all snapshot contributions for a single placement key.
+-- For roof cells the original record's footprint is required to know which indices to clear.
+local function removeKeyFromSnapshot(snapshot: LevelDerivedSnapshot, key: string, oldRecord: any?)
+	-- Rebuild floor list and index without this key
+	local newFloorList: { FloorCellDescriptor } = {}
+	local newFloorByIndex: { [number]: FloorCellDescriptor } = {}
+	for _, desc in ipairs(snapshot.FloorCellsList) do
+		if desc.PlacementKey ~= key then
+			newFloorList[#newFloorList + 1] = desc
+			newFloorByIndex[desc.CellIndex] = desc
+		end
+	end
+	snapshot.FloorCellsList = newFloorList
+	snapshot.FloorCellsByIndex = newFloorByIndex
+
+	-- Rebuild wall arrays without this key
+	local newWalls: { WallSegmentDescriptor } = {}
+	for _, seg in ipairs(snapshot.WallSegments) do
+		if seg.PlacementKey ~= key then
+			newWalls[#newWalls + 1] = seg
+		end
+	end
+	snapshot.WallSegments = newWalls
+
+	local newCardinal: { WallSegmentDescriptor } = {}
+	for _, seg in ipairs(snapshot.CardinalWallSegments) do
+		if seg.PlacementKey ~= key then
+			newCardinal[#newCardinal + 1] = seg
+		end
+	end
+	snapshot.CardinalWallSegments = newCardinal
+
+	-- Clear roof cells that belonged to this placement (needs original footprint)
+	if oldRecord ~= nil then
+		local rec = oldRecord :: any
+		if rec.PlacementType == "Roof" then
+			local anchorX = typeof(rec.cellX) == "number" and rec.cellX or 1
+			local anchorZ = typeof(rec.cellZ) == "number" and rec.cellZ or 1
+			local minCellX, minCellZ, maxCellX, maxCellZ =
+				footprintBounds(anchorX, anchorZ, rec.WidthCells, rec.DepthCells, rec.facing)
+			minCellX, minCellZ, maxCellX, maxCellZ =
+				clampFootprint(minCellX, minCellZ, maxCellX, maxCellZ, snapshot.Columns, snapshot.Rows)
+			local removedRange: { [number]: boolean } = {}
+			for cellZ = minCellZ, maxCellZ do
+				for cellX = minCellX, maxCellX do
+					removedRange[computeCellIndex(snapshot.Columns, cellX, cellZ)] = true
+				end
+			end
+			local newRoofCells: { [number]: boolean } = {}
+			for cellIndex, _ in pairs(snapshot.RoofCellsByIndex) do
+				if not removedRange[cellIndex] then
+					newRoofCells[cellIndex] = true
+				end
+			end
+			snapshot.RoofCellsByIndex = newRoofCells
+		end
+	end
+
+	-- Remove from coverage (cast to any to allow nil assignment under --!strict)
+	;(snapshot.PlacementCoverageByKey :: any)[key] = nil
+end
+
+-- Adds a single placement record's contributions to an existing snapshot.
+-- Mirrors the per-item processing inside LevelSnapshotBuilder.Build.
+local function addItemToSnapshot(snapshot: LevelDerivedSnapshot, key: string, record: any)
+	local rec = record :: any
+	local placementType = rec.PlacementType
+	if placementType == nil and typeof(rec.id) == "string" then
+		local spec = ItemFinder.FindItemById(rec.id)
+		if spec then
+			placementType = (spec :: any).PlacementType or (spec :: any).Type
+		end
+	end
+	placementType = placementType or "CellObject"
+
+	local columns = snapshot.Columns
+	local rows = snapshot.Rows
+
+	if placementType == "Floor" then
+		local anchorX = typeof(rec.cellX) == "number" and rec.cellX or 1
+		local anchorZ = typeof(rec.cellZ) == "number" and rec.cellZ or 1
+		local minCellX, minCellZ, maxCellX, maxCellZ =
+			footprintBounds(anchorX, anchorZ, rec.WidthCells, rec.DepthCells, rec.facing)
+		minCellX, minCellZ, maxCellX, maxCellZ =
+			clampFootprint(minCellX, minCellZ, maxCellX, maxCellZ, columns, rows)
+		if minCellX <= maxCellX and minCellZ <= maxCellZ then
+			for cellZ = minCellZ, maxCellZ do
+				for cellX = minCellX, maxCellX do
+					local index = computeCellIndex(columns, cellX, cellZ)
+					local descriptor: FloorCellDescriptor = {
+						CellX = cellX,
+						CellZ = cellZ,
+						CellIndex = index,
+						PlacementKey = key,
+						ItemId = rec.id,
+					}
+					if not snapshot.FloorCellsByIndex[index] then
+						snapshot.FloorCellsList[#snapshot.FloorCellsList + 1] = descriptor
+					end
+					snapshot.FloorCellsByIndex[index] = descriptor
+				end
+			end
+		end
+	elseif placementType == "Roof" or placementType == "Ceiling" then
+		local facing = tostring(rec.facing or "North")
+		local anchorX = typeof(rec.cellX) == "number" and rec.cellX or 1
+		local anchorZ = typeof(rec.cellZ) == "number" and rec.cellZ or 1
+		local minCellX, minCellZ, maxCellX, maxCellZ =
+			footprintBounds(anchorX, anchorZ, rec.WidthCells, rec.DepthCells, facing)
+		minCellX, minCellZ, maxCellX, maxCellZ =
+			clampFootprint(minCellX, minCellZ, maxCellX, maxCellZ, columns, rows)
+		if minCellX <= maxCellX and minCellZ <= maxCellZ then
+			snapshot.PlacementCoverageByKey[key] = {
+				PlacementKey = key,
+				PlacementType = placementType,
+				Level = snapshot.Level,
+				Facing = facing,
+				RoomIds = {},
+				HasOutdoorCells = false,
+			}
+			if placementType == "Roof" then
+				for cellZ = minCellZ, maxCellZ do
+					for cellX = minCellX, maxCellX do
+						snapshot.RoofCellsByIndex[computeCellIndex(columns, cellX, cellZ)] = true
+					end
+				end
+			end
+		end
+	elseif placementType == "Wall" then
+		local facing = tostring(rec.facing or "North")
+		local spec = typeof(rec.id) == "string" and ItemFinder.FindItemById(rec.id) or nil
+		local variant = spec and (spec :: any).WallVariant or nil
+		local anchorX = math.floor((rec.cellX or 1) + 0.5)
+		local anchorZ = math.floor((rec.cellZ or 1) + 0.5)
+		local orientation: "Cardinal" | "Diagonal" = if CARDINAL_FACINGS[facing] then "Cardinal" else "Diagonal"
+		local segment: WallSegmentDescriptor = {
+			CellX = anchorX,
+			CellZ = anchorZ,
+			Facing = facing,
+			PlacementKey = key,
+			ItemId = rec.id,
+			Variant = variant,
+			Orientation = orientation,
+			BlocksRooms = false,
+			AdjacentCells = { CellA = nil, CellB = nil },
+		}
+		if orientation == "Cardinal" then
+			local cellA, cellB = resolveCardinalAdjacency(anchorX, anchorZ, facing)
+			segment.AdjacentCells = { CellA = cellA, CellB = cellB }
+			snapshot.CardinalWallSegments[#snapshot.CardinalWallSegments + 1] = segment
+		end
+		snapshot.WallSegments[#snapshot.WallSegments + 1] = segment
+	end
+end
+
 -- ⚠️ CRITICAL: Room detection has been removed from client
 -- Server is the single source of truth for room boundaries via RoomDataSync packet
 -- Do NOT re-add FloodFillCore or room calculation logic here
@@ -328,6 +483,23 @@ function LevelSnapshotBuilder.Build(
 		RoomsList = {}, -- Populated by server data
 		PlacementCoverageByKey = placementCoverageByKey,
 	}
+end
+
+-- Apply a single placement delta incrementally to an existing snapshot.
+-- Avoids a full snapshot rebuild when individual placements change.
+-- oldRecord: the prior PlacedItems entry (for roof cell cleanup); may be nil for new placements.
+-- newRecord: the updated PlacedItems entry; nil when action is "Removed".
+function LevelSnapshotBuilder.ApplyItemDelta(
+	snapshot: LevelDerivedSnapshot,
+	key: string,
+	action: string,
+	oldRecord: any?,
+	newRecord: any?
+)
+	removeKeyFromSnapshot(snapshot, key, oldRecord)
+	if (action == "Placed" or action == "Updated") and newRecord ~= nil then
+		addItemToSnapshot(snapshot, key, newRecord)
+	end
 end
 
 return LevelSnapshotBuilder

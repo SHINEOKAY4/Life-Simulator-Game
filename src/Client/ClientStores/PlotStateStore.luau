@@ -304,7 +304,7 @@ function PlotStateStore.Init()
 		if not StateSnapshot.PlacedItems then
 			StateSnapshot.PlacedItems = {}
 		end
-		local appliedKey, changed = PacketProcessor.ApplyPlacementDelta(
+		local appliedKey, changed, oldRecord = PacketProcessor.ApplyPlacementDelta(
 			StateSnapshot.PlacedItems :: { [string]: any },
 			delta,
 			PlotStateStore.GetDefaultLevel()
@@ -328,7 +328,25 @@ function PlotStateStore.Init()
 				print("[PlotStateStore][Client] PlacementDelta applied :: ", msg)
 			end
 
-			invalidateDerivedLevelSnapshots()
+			-- Apply delta incrementally to the existing snapshot for the affected level.
+			-- This avoids rebuilding the entire derived snapshot on every placement change.
+			if appliedKey then
+				local newRecord = StateSnapshot.PlacedItems and (StateSnapshot.PlacedItems :: any)[appliedKey]
+				local itemLevel = (oldRecord and (oldRecord :: any).Level)
+					or (newRecord and (newRecord :: any).Level)
+					or PlotStateStore.GetDefaultLevel()
+				local existingSnapshot = DerivedLevelSnapshots[itemLevel]
+				if existingSnapshot then
+					LevelSnapshotBuilder.ApplyItemDelta(
+						existingSnapshot,
+						appliedKey,
+						delta.Action,
+						oldRecord,
+						newRecord
+					)
+				end
+			end
+
 			-- Some systems (surface painting, mount placement, cutaway, etc.) depend on
 			-- derived level caches that combine placement data with server room data.
 			-- When placements change before the next RoomDataSync arrives, we still
