@@ -263,16 +263,35 @@ local function serviceLease(runtime: RuntimeState, now: number, deltaTime: numbe
 
 	MailboxManager.SettleOutstanding(runtime.Save)
 
+	-- Single pass: accumulate income and collect expired lease IDs
+	local expiredIds: { string }? = nil
+	local totalIncome = 0
+
 	for tenantId, lease in pairs(leases) do
 		if lease.LeaseEndUnix <= now then
-			concludeLease(runtime, tenantId, "Complete")
+			if not expiredIds then
+				expiredIds = {}
+			end
+			table.insert(expiredIds, tenantId)
 		else
 			LeaseManager.ServiceLease(lease, now, deltaTime, function(amount)
-				local updatedBalance = MailboxManager.AddIncome(runtime.Save, amount)
-				broadcastMailboxBalance(runtime, updatedBalance)
+				totalIncome += amount
 			end, function()
 				ReviewService.RecordTenantReview(runtime.Player, lease, "Periodic")
 			end)
+		end
+	end
+
+	-- Apply accumulated income once instead of per-lease
+	if totalIncome > 0 then
+		local updatedBalance = MailboxManager.AddIncome(runtime.Save, totalIncome)
+		broadcastMailboxBalance(runtime, updatedBalance)
+	end
+
+	-- Conclude expired leases after iteration (avoids table mutation during pairs)
+	if expiredIds then
+		for _, tenantId in ipairs(expiredIds) do
+			concludeLease(runtime, tenantId, "Complete")
 		end
 	end
 end

@@ -87,7 +87,7 @@ Acceptance Checks:
 Regression Checks:
 - Client PlotStateStore remains in sync.
 
-8) [ ] Iter 8 Goal - TenantService Mailbox Prune Efficiency
+8) [x] Iter 8 Goal - TenantService Mailbox Prune Efficiency
 Goal: tighten mailbox pruning loops and avoid double iteration.
 Acceptance Checks:
 - Pruning uses single-pass filter.
@@ -133,3 +133,7 @@ Review Log
 - Iter 7: incremental PlotState snapshot diff in PlacementDelta handler; added removeKeyFromSnapshot +
   addItemToSnapshot helpers and LevelSnapshotBuilder.ApplyItemDelta; PacketProcessor returns oldRecord as
   3rd value; added LevelSnapshotIncrementalSpec (13 structural checks); selene 0 errors on changed files.
+- Iter 8: single-pass mailbox prune in TenantService.serviceLease; accumulates totalIncome and collects
+  expiredIds in one loop instead of per-lease AddIncome+broadcast (O(N) vs O(N²)); concludes expired
+  leases after iteration to avoid table mutation during pairs(); added MailboxPruneSpec (14 checks:
+  structural + income equivalence + partition + end-to-end); selene 0 errors on changed file.
