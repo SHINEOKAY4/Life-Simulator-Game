@@ -41,23 +41,14 @@ local function resolveAction(actionName: string)
 end
 
 local function dispatchAction(actionName: string)
-	local resolved: any = nil
 	return function(player: Player, payload: any): (boolean, string)
-		if resolved == nil then
-			resolved = resolveAction(actionName)
-		end
-		return resolved(player, payload)
+		return resolveAction(actionName)(player, payload)
 	end
 end
 
 local function dispatchActionMethod(actionName: string, methodName: string)
-	local resolved: any = nil
 	return function(player: Player, payload: any): (boolean, string)
-		if resolved == nil then
-			resolved = resolveAction(actionName)
-		end
-		local method = resolved[methodName]
-		return method(player, payload)
+		return resolveAction(actionName)[methodName](player, payload)
 	end
 end
 

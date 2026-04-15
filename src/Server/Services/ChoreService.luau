@@ -1,3 +1,4 @@
+--!strict
 -- Server/Services/ChoreService.luau
 -- Manages interactive chores (messes, repairs) for player engagement.
 
@@ -180,7 +181,7 @@ local function spawnRepairChoreForBridge(player: Player, payload: RepairBridgePa
 	return registerChoreRecord(record, nil)
 end
 
-function ChoreService.SpawnMess(player: Player, payload: SpawnMessPayload?)
+function ChoreService.SpawnMess(player: Player, payload: SpawnMessPayload?): ()
 	if not player then
 		return
 	end
@@ -214,7 +215,7 @@ function ChoreService.SpawnMess(player: Player, payload: SpawnMessPayload?)
 	registerChoreRecord(record, MESS_LIFETIME)
 end
 
-function ChoreService.RemoveChore(id: string, reason: string)
+function ChoreService.RemoveChore(id: string, reason: string): ()
 	local record = ActiveChores[id]
 	if not record then
 		return

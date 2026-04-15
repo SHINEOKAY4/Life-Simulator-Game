@@ -27,13 +27,13 @@ describe("BuildService action dispatch cache", function()
 		assert.is_truthy(string.find(src, "ActionCache[actionName] = resolved", 1, true))
 	end)
 
-	it("dispatchAction memoizes the resolved module", function()
-		local dispatchPos = string.find(src, "dispatchAction", 1, true)
+	it("dispatchAction delegates to resolveAction for module caching", function()
+		local dispatchPos = string.find(src, "local function dispatchAction", 1, true)
 		assert.is_truthy(dispatchPos, "dispatchAction helper must exist")
-		local snippet = string.sub(src, dispatchPos, dispatchPos + 400)
+		local snippet = string.sub(src, dispatchPos, dispatchPos + 300)
 		assert.is_truthy(
-			string.find(snippet, "resolved = resolveAction(actionName)", 1, true),
-			"dispatchAction should resolve the module once"
+			string.find(snippet, "resolveAction(actionName)", 1, true),
+			"dispatchAction should call resolveAction for cached module lookup"
 		)
 	end)
 
