@@ -408,7 +408,7 @@ local function ensureGui()
 	local claim = Instance.new("TextButton")
 	claim.Name = "ClaimButton"
 	claim.AnchorPoint = Vector2.new(0.5, 0)
-	claim.Position = UDim2.new(0.5, 0, 0, 0)
+	claim.Position = UDim2.fromScale(0.5, 0)
 	claim.Size = UDim2.fromOffset(240, 44)
 	claim.Font = Enum.Font.GothamBold
 	claim.TextSize = 18

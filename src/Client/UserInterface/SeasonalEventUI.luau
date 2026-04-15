@@ -112,7 +112,7 @@ local function createChallengeRow(challenge: { [string]: any }, index: number): 
 	local progressFill = Instance.new("Frame")
 	progressFill.BackgroundColor3 = if completed then Color3.fromRGB(122, 220, 142) else Color3.fromRGB(104, 166, 255)
 	progressFill.BorderSizePixel = 0
-	progressFill.Size = UDim2.new(ratio, 0, 1, 0)
+	progressFill.Size = UDim2.fromScale(ratio, 1)
 	progressFill.Parent = progressTrack
 	local fillCorner = Instance.new("UICorner")
 	fillCorner.CornerRadius = UDim.new(0, 6)
@@ -567,7 +567,7 @@ local function ensureGui()
 	local bannerMask = Instance.new("Frame")
 	bannerMask.Name = "BottomMask"
 	bannerMask.AnchorPoint = Vector2.new(0, 1)
-	bannerMask.Position = UDim2.new(0, 0, 1, 0)
+	bannerMask.Position = UDim2.fromScale(0, 1)
 	bannerMask.Size = UDim2.new(1, 0, 0, 14)
 	bannerMask.BackgroundColor3 = banner.BackgroundColor3
 	bannerMask.BorderSizePixel = 0

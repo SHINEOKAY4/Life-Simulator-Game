@@ -52,7 +52,7 @@ local function renderSkills(skills: { any })
 		row.LevelLabel.Text = string.format("Lv.%d", level)
 
 		local fillPct = if xpForNext > 0 then math.clamp(xpInto / xpForNext, 0, 1) else 1
-		row.Fill.Size = UDim2.new(fillPct, 0, 1, 0)
+		row.Fill.Size = UDim2.fromScale(fillPct, 1)
 		row.Fill.BackgroundColor3 = getSkillColor(skillId)
 
 		if xpForNext <= 0 then
@@ -167,7 +167,7 @@ local function buildUi()
 
 		local barFill = Instance.new("Frame")
 		barFill.Name = "Fill"
-		barFill.Size = UDim2.new(0, 0, 1, 0)
+		barFill.Size = UDim2.fromScale(0, 1)
 		barFill.BackgroundColor3 = getSkillColor(skillId)
 		barFill.BorderSizePixel = 0
 		barFill.Parent = barBg

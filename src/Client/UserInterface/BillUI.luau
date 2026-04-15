@@ -162,7 +162,7 @@ local function buildTierSelector(parent: Frame)
 	for _, entry in ipairs(INTERNET_TIERS) do
 		local btn = Instance.new("TextButton")
 		btn.Name = "Tier_" .. entry.Name
-		btn.Size = UDim2.new(0, 72, 0, 28)
+		btn.Size = UDim2.fromOffset(72, 28)
 		btn.BackgroundColor3 = Color3.fromRGB(50, 55, 75)
 		btn.BorderSizePixel = 0
 		btn.Font = Enum.Font.Gotham

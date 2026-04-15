@@ -335,7 +335,7 @@ local function buildGui()
 	headerCorner.Parent = header
 
 	local headerFill = Instance.new("Frame")
-	headerFill.Size = UDim2.new(1, 0, 0.5, 0)
+	headerFill.Size = UDim2.fromScale(1, 0.5)
 	headerFill.Position = UDim2.fromScale(0, 0.5)
 	headerFill.BackgroundColor3 = HEADER_BG
 	headerFill.BorderSizePixel = 0
@@ -453,7 +453,7 @@ local function animateOpen()
 		return
 	end
 	gui.Enabled = true
-	windowFrame.Position = UDim2.new(0.5, 0, 0.55, 0)
+	windowFrame.Position = UDim2.fromScale(0.5, 0.55)
 	windowFrame.GroupTransparency = 0.4
 	TweenService:Create(windowFrame, OPEN_TWEEN, {
 		Position = UDim2.fromScale(0.5, 0.5),
@@ -467,7 +467,7 @@ local function animateClose(onDone: () -> ())
 		return
 	end
 	local tween = TweenService:Create(windowFrame, CLOSE_TWEEN, {
-		Position = UDim2.new(0.5, 0, 0.55, 0),
+		Position = UDim2.fromScale(0.5, 0.55),
 		GroupTransparency = 0.4,
 	})
 	tween.Completed:Connect(function()

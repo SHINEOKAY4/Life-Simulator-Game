@@ -49,7 +49,7 @@ local function buildUI(gui: ScreenGui)
 	-- Backdrop / panel
 	local panel = Instance.new("Frame")
 	panel.Name = "Panel"
-	panel.Size = UDim2.new(0, 340, 0, 480)
+	panel.Size = UDim2.fromOffset(340, 480)
 	panel.Position = UDim2.new(0.5, -170, 0.5, -240)
 	panel.BackgroundColor3 = Color3.fromRGB(28, 30, 40)
 	panel.BorderSizePixel = 0
@@ -86,7 +86,7 @@ local function buildUI(gui: ScreenGui)
 
 	local titleLabel = Instance.new("TextLabel")
 	titleLabel.Size = UDim2.new(1, -50, 1, 0)
-	titleLabel.Position = UDim2.new(0, 14, 0, 0)
+	titleLabel.Position = UDim2.fromOffset(14, 0)
 	titleLabel.BackgroundTransparency = 1
 	titleLabel.Font = Enum.Font.GothamBold
 	titleLabel.TextSize = 16
@@ -97,7 +97,7 @@ local function buildUI(gui: ScreenGui)
 
 	local closeBtn = Instance.new("TextButton")
 	closeBtn.Name = "CloseButton"
-	closeBtn.Size = UDim2.new(0, 32, 0, 32)
+	closeBtn.Size = UDim2.fromOffset(32, 32)
 	closeBtn.Position = UDim2.new(1, -40, 0.5, -16)
 	closeBtn.BackgroundTransparency = 1
 	closeBtn.Font = Enum.Font.GothamBold
@@ -109,7 +109,7 @@ local function buildUI(gui: ScreenGui)
 	-- Subtitle hint
 	local hint = Instance.new("TextLabel")
 	hint.Size = UDim2.new(1, -20, 0, 18)
-	hint.Position = UDim2.new(0, 10, 0, 48)
+	hint.Position = UDim2.fromOffset(10, 48)
 	hint.BackgroundTransparency = 1
 	hint.Font = Enum.Font.Gotham
 	hint.TextSize = 12
@@ -122,7 +122,7 @@ local function buildUI(gui: ScreenGui)
 	local list = Instance.new("ScrollingFrame")
 	list.Name = "ItemList"
 	list.Size = UDim2.new(1, -20, 1, -84)
-	list.Position = UDim2.new(0, 10, 0, 72)
+	list.Position = UDim2.fromOffset(10, 72)
 	list.BackgroundTransparency = 1
 	list.BorderSizePixel = 0
 	list.ScrollBarThickness = 4
@@ -196,7 +196,7 @@ local function buildItemRow(itemId: string, count: number): Frame
 
 	local nameLabel = Instance.new("TextLabel")
 	nameLabel.Size = UDim2.new(1, -110, 0.5, 0)
-	nameLabel.Position = UDim2.new(0, 10, 0, 4)
+	nameLabel.Position = UDim2.fromOffset(10, 4)
 	nameLabel.BackgroundTransparency = 1
 	nameLabel.Font = Enum.Font.GothamBold
 	nameLabel.TextSize = 14
@@ -218,7 +218,7 @@ local function buildItemRow(itemId: string, count: number): Frame
 	countLabel.Parent = row
 
 	local placeBtn = Instance.new("TextButton")
-	placeBtn.Size = UDim2.new(0, 80, 0, 32)
+	placeBtn.Size = UDim2.fromOffset(80, 32)
 	placeBtn.Position = UDim2.new(1, -90, 0.5, -16)
 	placeBtn.BackgroundColor3 = Color3.fromRGB(70, 140, 240)
 	placeBtn.Font = Enum.Font.GothamBold
@@ -261,7 +261,7 @@ local function refreshItemList()
 
 	EmptyLabel.Visible = not hasItems
 	if not hasItems then
-		EmptyLabel.Position = UDim2.new(0, 10, 0, 72)
+		EmptyLabel.Position = UDim2.fromOffset(10, 72)
 		EmptyLabel.Parent = Panel
 	end
 end

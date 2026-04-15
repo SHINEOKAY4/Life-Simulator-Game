@@ -95,7 +95,7 @@ local function buildEmoteCard(emoteInfo: { id: string, name: string, description
 	local nameLabel = Instance.new("TextLabel")
 	nameLabel.Name = "EmoteName"
 	nameLabel.AnchorPoint = Vector2.new(0, 0)
-	nameLabel.Position = UDim2.new(0, 62, 0, 10)
+	nameLabel.Position = UDim2.fromOffset(62, 10)
 	nameLabel.Size = UDim2.new(1, -150, 0, 22)
 	nameLabel.BackgroundTransparency = 1
 	nameLabel.Font = Enum.Font.GothamBold
@@ -110,7 +110,7 @@ local function buildEmoteCard(emoteInfo: { id: string, name: string, description
 	local descLabel = Instance.new("TextLabel")
 	descLabel.Name = "EmoteDesc"
 	descLabel.AnchorPoint = Vector2.new(0, 0)
-	descLabel.Position = UDim2.new(0, 62, 0, 34)
+	descLabel.Position = UDim2.fromOffset(62, 34)
 	descLabel.Size = UDim2.new(1, -150, 0, 28)
 	descLabel.BackgroundTransparency = 1
 	descLabel.Font = Enum.Font.Gotham
@@ -184,7 +184,7 @@ local function populateEmotes(emotes: { { id: string, name: string, description:
 	end
 	-- Update canvas height for scrolling
 	if emoteListFrame then
-		emoteListFrame.CanvasSize = UDim2.new(0, 0, 0, #emotes * 80)
+		emoteListFrame.CanvasSize = UDim2.fromOffset(0, #emotes * 80)
 	end
 end
 
@@ -256,7 +256,7 @@ local function ensureGui()
 
 	-- Square off bottom corners of header
 	local headerSquareBottom = Instance.new("Frame")
-	headerSquareBottom.Size = UDim2.new(1, 0, 0.5, 0)
+	headerSquareBottom.Size = UDim2.fromScale(1, 0.5)
 	headerSquareBottom.Position = UDim2.fromScale(0, 0.5)
 	headerSquareBottom.BackgroundColor3 = HEADER_BG
 	headerSquareBottom.BorderSizePixel = 0

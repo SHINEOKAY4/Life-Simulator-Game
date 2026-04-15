@@ -267,7 +267,7 @@ local function ensureGui()
 
 	-- Square off bottom corners of header
 	local headerSquareBottom = Instance.new("Frame")
-	headerSquareBottom.Size = UDim2.new(1, 0, 0.5, 0)
+	headerSquareBottom.Size = UDim2.fromScale(1, 0.5)
 	headerSquareBottom.Position = UDim2.fromScale(0, 0.5)
 	headerSquareBottom.BackgroundColor3 = HEADER_BG
 	headerSquareBottom.BorderSizePixel = 0
