@@ -97,7 +97,7 @@ Acceptance Checks:
 Regression Checks:
 - Mailbox data still replicates correctly.
 
-9) [ ] Iter 9 Goal - Lint/Format Hotspot Sweep
+9) [x] Iter 9 Goal - Lint/Format Hotspot Sweep
 Goal: resolve any new selene warnings and clean hot files.
 Acceptance Checks:
 - selene src/ returns 0 errors, 0 warnings.
@@ -106,7 +106,7 @@ Acceptance Checks:
 Regression Checks:
 - No runtime warnings from changed files.
 
-10) [ ] Iter 10 Goal - Full Sweep: Tests + Docs + Changelog
+10) [x] Iter 10 Goal - Full Sweep: Tests + Docs + Changelog
 Goal: run complete test suite and selene, update docs and changelog.
 Acceptance Checks:
 - ./run_tests.sh exits 0 with no failures.
